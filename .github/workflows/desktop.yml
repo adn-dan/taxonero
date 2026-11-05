@@ -1,8 +1,11 @@
-# Édition de bureau : un lanceur léger par système et processeur (packaging/bootstrap.py, ~35 Mo : uv, la roue
-# de taxonero, ExifTool), construit à chaque tag vX.Y.Z et joint à la version GitHub. Pas de Docker. Au premier
-# lancement, il installe dans le dossier de l'utilisateur le PyTorch adapté au GPU détecté (NVIDIA, AMD, Intel Arc,
-# Apple Silicon, sinon processeur), comme ComfyUI Desktop ou Invoke. Inactif tant que le dépôt n'est pas publié.
-# Mac Intel non pris en charge : PyTorch s'y est arrêté à la version 2.2.
+# Édition de bureau : un lanceur léger par système et processeur (packaging/bootstrap.py, ~40 Mo : uv, la roue de
+# taxonero, ExifTool), construit à chaque tag vX.Y.Z et joint à la version GitHub. Au premier lancement, il installe
+# dans le dossier de l'utilisateur le PyTorch adapté au GPU détecté (NVIDIA, AMD, Intel Arc, Apple Silicon, sinon
+# processeur), comme ComfyUI Desktop ou Invoke. Mac Intel non pris en charge : PyTorch s'y est arrêté à la version 2.2.
+#
+# Fichiers produits :
+#   Windows : installeur (Inno Setup) et version portable (zip)    macOS : Taxonero.app dans un .dmg
+#   Linux : .deb, .rpm et AppImage (packaging/linux-packages.sh)
 name: desktop
 on:
   push:
@@ -16,37 +19,66 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, name: windows-x64 }
-          - { os: windows-11-arm, name: windows-arm64 }
-          - { os: macos-15, name: macos-arm64 }
-          - { os: ubuntu-24.04, name: linux-x64 }
-          - { os: ubuntu-24.04-arm, name: linux-arm64 }
+          - { os: windows-latest, name: windows-x64, arch: x64 }
+          - { os: windows-11-arm, name: windows-arm64, arch: arm64 }
+          - { os: macos-15, name: macos-arm64, arch: arm64 }
+          - { os: ubuntu-24.04, name: linux-x64, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, name: linux-arm64, arch: aarch64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
+      - name: Version
+        shell: bash
+        run: |
+          # Tag vX.Y.Z : X.Y.Z ; lancement à la main : la version de pyproject.toml.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v=${GITHUB_REF_NAME#v}; else v=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml); fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
       - name: Outils
         run: python -m pip install pyinstaller==6.22.3
       - name: uv, roue, ExifTool
         run: python packaging/prepare.py
       - name: Lanceur
         run: pyinstaller packaging/taxonero.spec --noconfirm --distpath dist --workpath build
-      - name: Archive
-        shell: bash
+
+      - name: Linux (.deb, .rpm, AppImage)
+        if: runner.os == 'Linux'
         run: |
-          cd dist
-          case "${{ runner.os }}" in
-            Windows) 7z a "../taxonero-${{ matrix.name }}.zip" taxonero.exe ;;
-            *)       tar -czf "../taxonero-${{ matrix.name }}.tar.gz" taxonero ;;
-          esac
+          sudo apt-get update -qq && sudo apt-get install -y -qq rpm file
+          sh packaging/linux-packages.sh dist/taxonero "$VERSION" out
+
+      - name: macOS (.dmg)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dmg out
+          cp -R dist/Taxonero.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname Taxonero -srcfolder dmg -ov -format UDZO "out/Taxonero-$VERSION-macos-arm64.dmg"
+
+      - name: Windows (installeur et version portable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAXONERO_ARCH: ${{ matrix.arch }}
+        run: |
+          $env:TAXONERO_VERSION = $env:VERSION
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path dist\taxonero.exe -DestinationPath "out\Taxonero-$env:VERSION-windows-$env:TAXONERO_ARCH-portable.zip"
+          # Inno Setup 6.7.4, version figée, empreinte vérifiée ; installé pour l'utilisateur, sans droits d'administrateur.
+          Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe -OutFile is.exe
+          if ((Get-FileHash is.exe -Algorithm SHA256).Hash -ne "A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C") { throw "Inno Setup : empreinte inattendue" }
+          Start-Process .\is.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=$env:RUNNER_TEMP\inno" -Wait
+          & "$env:RUNNER_TEMP\inno\ISCC.exe" packaging\taxonero.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué" }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: taxonero-${{ matrix.name }}
-          path: taxonero-${{ matrix.name }}.*
+          path: out/*
       - name: Version GitHub
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
-          files: taxonero-${{ matrix.name }}.*
+          files: out/*

@@ -26,3 +26,6 @@ dist/
 
 # Dossier prêt à publier (dépôt git neuf, poussé par Dan)
 publication/
+
+# Paquets de bureau faits à la main (packaging/linux-packages.sh, ISCC)
+out/

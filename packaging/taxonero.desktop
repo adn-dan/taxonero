@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Taxonero
+GenericName=Species identification
+GenericName[fr]=Identification d'espèces
+Comment=Identify the species in your photos
+Comment[fr]=Identifie les espèces dans tes photos
+Exec=taxonero
+Icon=taxonero
+Terminal=false
+Categories=Graphics;Photography;Science;Biology;
+Keywords=species;nature;birds;plants;fungi;immich;photos;
+Keywords[fr]=espèces;nature;oiseaux;plantes;champignons;immich;photos;

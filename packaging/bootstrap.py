@@ -90,30 +90,35 @@ def nvidia_driver() -> float | None:
     return float(f"{m[1]}.{m[2]}") if m else None
 
 
+def _why(fr: str, en: str) -> str:
+    """Raison du choix, dans la langue de la fenêtre d'installation (voir FR, plus bas)."""
+    return fr if FR else en
+
+
 def detect() -> tuple[str, str]:
     """(variante, raison). Ordre : choix imposé, Apple Silicon, NVIDIA, AMD, Intel, processeur."""
     forced = os.environ.get("TAXONERO_GPU", "").strip()
     if forced:
         if forced not in TORCH:
             raise SystemExit(f"TAXONERO_GPU={forced} inconnue : {' | '.join(TORCH)}")
-        return forced, "imposée par TAXONERO_GPU"
+        return forced, _why("imposée par TAXONERO_GPU", "forced by TAXONERO_GPU")
     if sys.platform == "darwin":
-        return ("mps", "Apple Silicon") if platform.machine() == "arm64" else ("cpu", "Mac Intel : processeur")
+        return ("mps", "Apple Silicon") if platform.machine() == "arm64" else ("cpu", _why("Mac Intel : processeur", "Intel Mac: CPU"))
     arm = platform.machine().lower() in ("arm64", "aarch64")
     driver = nvidia_driver()
     if driver and driver >= 580:   # CUDA 13 : x86 et Linux ARM (NVIDIA Grace, DGX Spark)
-        return "cu130", f"NVIDIA, pilote {driver}"
+        return "cu130", _why(f"NVIDIA, pilote {driver}", f"NVIDIA, driver {driver}")
     if driver and not arm:
-        return "cu128", f"NVIDIA, pilote {driver}"
+        return "cu128", _why(f"NVIDIA, pilote {driver}", f"NVIDIA, driver {driver}")
     names = " ".join(gpu_names())
     if not arm and ("AMD" in names or "Radeon" in names):
         if sys.platform == "win32":
-            return "amd-win", "AMD Radeon (version d'aperçu d'AMD)"
+            return "amd-win", _why("AMD Radeon (version d'aperçu d'AMD)", "AMD Radeon (AMD preview build)")
         if Path("/dev/kfd").exists():   # pilote amdgpu avec calcul (ROCm)
             return "rocm", "AMD Radeon (ROCm)"
     if not arm and ("Arc" in names or "(xe)" in names):   # Intel Arc, Core Ultra (pilote xe sous Linux)
         return "xpu", "Intel Arc"
-    return "cpu", "aucun GPU pris en charge détecté"
+    return "cpu", _why("aucun GPU pris en charge détecté", "no supported GPU found")
 
 
 FR = (locale.getlocale()[0] or os.environ.get("LANG", "")).lower().startswith("fr")

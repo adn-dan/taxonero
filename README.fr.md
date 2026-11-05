@@ -168,7 +168,7 @@ Retours bienvenus (issue GitHub, avec ce qu'affiche **Paramètres > Modèles d'I
 | Docker, Linux x86 | Intel Arc / Core Ultra, image `xpu` | non testé ; sur Iris Xe (non pris en charge par PyTorch), repli sur le processeur vérifié |
 | Docker, Linux ARM (Raspberry Pi 5, NAS ARM) | processeur | non testé (image construite par émulation) |
 | Docker Desktop, macOS ou Windows | processeur | non testé |
-| Bureau, Linux x86 | processeur | testé (Fedora) |
+| Bureau, Linux x86 | processeur | testé (Fedora) ; .deb, .rpm et AppImage : installation et premier lancement vérifiés |
 | Bureau, Linux | NVIDIA, AMD, Intel | non testé |
 | Bureau, Windows (x86 et ARM) | processeur, NVIDIA, AMD, Intel | non testé |
 | Bureau, macOS (Apple Silicon) | GPU Apple (Metal) | non testé |
@@ -315,8 +315,21 @@ plusieurs Go (PyTorch CUDA) et dépassé la limite de 2 Go par fichier des versi
 l'installation (autre carte, réparation). Si l'installation pour le GPU échoue, le lanceur se replie sur le
 processeur. Les Mac Intel ne sont pas pris en charge (PyTorch s'y est arrêté en 2024, version 2.2).
 
-Téléchargement : page **Releases** du dépôt GitHub (`taxonero-<système>-<processeur>`). Rien de cela n'a été
-testé hors de Linux (voir « État des tests »). Prérequis selon le GPU :
+Téléchargement : page [**Releases**](https://github.com/adn-dan/taxonero/releases) du dépôt.
+
+| Système | Fichier | Installation |
+|---|---|---|
+| Windows (x64, ARM) | `Taxonero-<version>-windows-<arch>-setup.exe` | installeur : menu Démarrer, désinstallation depuis les paramètres de Windows, sans droits d'administrateur |
+| | `…-portable.zip` | `taxonero.exe`, rien à installer |
+| macOS (Apple Silicon) | `Taxonero-<version>-macos-arm64.dmg` | glisser Taxonero dans Applications |
+| Debian, Ubuntu, Mint | `taxonero_<version>_<arch>.deb` | `sudo apt install ./taxonero_….deb` |
+| Fedora, openSUSE | `taxonero-<version>-1.<arch>.rpm` | `sudo dnf install ./taxonero-….rpm` |
+| tout Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, puis le lancer |
+
+Les paquets Linux ont été vérifiés (installation et premier lancement sur Debian 13, Fedora 44 et Ubuntu 24.04) ;
+l'installeur Windows et l'application macOS sont construits automatiquement mais pas essayés (voir « État des
+tests »). La désinstallation laisse le dossier de données ci-dessous (modèles, PyTorch : plusieurs Go), à supprimer à
+la main. Prérequis selon le GPU :
 
 - **NVIDIA** : le pilote NVIDIA habituel suffit (CUDA est installé avec PyTorch).
 - **AMD sous Linux** : pilote `amdgpu` du noyau, et l'utilisateur dans les groupes `render` et `video`.
@@ -337,8 +350,10 @@ testé hors de Linux (voir « État des tests »). Prérequis selon le GPU :
 
 Depuis les sources : `pip install '.[desktop,cpu]'` puis `taxonero desktop`. Construire le lanceur :
 `python packaging/prepare.py && pyinstaller packaging/taxonero.spec` (fait par `.github/workflows/desktop.yml`
-pour les cinq plateformes). Exécutables non signés : avertissement de macOS (Gatekeeper) et de Windows
-(SmartScreen) au premier lancement.
+pour les cinq plateformes, avec les paquets ci-dessus : `packaging/linux-packages.sh`, `packaging/taxonero.iss`).
+Applications non signées : Windows (SmartScreen) affiche « Windows a protégé votre ordinateur » (Informations
+complémentaires > Exécuter quand même) ; macOS refuse de l'ouvrir la première fois (Réglages Système >
+Confidentialité et sécurité > Ouvrir quand même).
 
 ## Configuration
 

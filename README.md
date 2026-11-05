@@ -166,7 +166,7 @@ Feedback welcome (GitHub issue, with what **Settings > AI models** shows).
 | Docker, Linux x86 | Intel Arc / Core Ultra, `xpu` image | untested; on Iris Xe (not supported by PyTorch), CPU fallback checked |
 | Docker, Linux ARM (Raspberry Pi 5, ARM NAS) | CPU | untested (image built under emulation) |
 | Docker Desktop, macOS or Windows | CPU | untested |
-| Desktop, Linux x86 | CPU | tested (Fedora) |
+| Desktop, Linux x86 | CPU | tested (Fedora); .deb, .rpm and AppImage: install and first launch checked |
 | Desktop, Linux | NVIDIA, AMD, Intel | untested |
 | Desktop, Windows (x86 and ARM) | CPU, NVIDIA, AMD, Intel | untested |
 | Desktop, macOS (Apple Silicon) | Apple GPU (Metal) | untested |
@@ -311,8 +311,20 @@ the GPU, progress shown in a small window), then the AI models are downloaded on
 installation (other card, repair). If the GPU installation fails, the launcher falls back to the CPU. Intel Macs
 are not supported (PyTorch stopped there in 2024, version 2.2).
 
-Download: the **Releases** page of the GitHub repository (`taxonero-<system>-<processor>`). None of this has
-been tested outside Linux (see "Test status"). Requirements depending on the GPU:
+Download: the [**Releases**](https://github.com/adn-dan/taxonero/releases) page of the repository.
+
+| System | File | Install |
+|---|---|---|
+| Windows (x64, ARM) | `Taxonero-<version>-windows-<arch>-setup.exe` | installer: Start menu, uninstall from Windows settings, no admin rights needed |
+| | `…-portable.zip` | `taxonero.exe`, nothing to install |
+| macOS (Apple Silicon) | `Taxonero-<version>-macos-arm64.dmg` | drag Taxonero into Applications |
+| Debian, Ubuntu, Mint | `taxonero_<version>_<arch>.deb` | `sudo apt install ./taxonero_….deb` |
+| Fedora, openSUSE | `taxonero-<version>-1.<arch>.rpm` | `sudo dnf install ./taxonero-….rpm` |
+| any Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, then run it |
+
+The Linux packages were checked (install and first launch on Debian 13, Fedora 44 and Ubuntu 24.04); the Windows
+installer and the macOS app are built automatically but untested (see "Test status"). Uninstalling leaves the data
+folder below (models, PyTorch: several GB); delete it by hand. Requirements depending on the GPU:
 
 - **NVIDIA**: the usual NVIDIA driver is enough (CUDA comes with PyTorch).
 - **AMD on Linux**: the kernel's `amdgpu` driver, and the user in the `render` and `video` groups.
@@ -333,7 +345,9 @@ been tested outside Linux (see "Test status"). Requirements depending on the GPU
 
 From source: `pip install '.[desktop,cpu]'` then `taxonero desktop`. Build the launcher:
 `python packaging/prepare.py && pyinstaller packaging/taxonero.spec` (done by `.github/workflows/desktop.yml` for
-the five platforms). Unsigned executables: macOS (Gatekeeper) and Windows (SmartScreen) warn on first launch.
+the five platforms, with the packages above: `packaging/linux-packages.sh`, `packaging/taxonero.iss`). Unsigned
+applications: Windows (SmartScreen) shows "Windows protected your PC" (More info > Run anyway); macOS refuses to open
+it the first time (System Settings > Privacy & Security > Open Anyway).
 
 ## Configuration
 

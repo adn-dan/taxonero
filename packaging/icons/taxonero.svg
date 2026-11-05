@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Icône de Taxonero : la feuille du logo (Material Design Icons « leaf », Apache 2.0) sur la couleur de l'interface. -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#4250af"/>
+  <g transform="translate(88 88) scale(14)">
+    <path fill="#ffffff" d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/>
+  </g>
+</svg>
