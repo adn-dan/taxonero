@@ -1,0 +1,57 @@
+# Images prêtes à l'emploi sur GHCR (ghcr.io/<propriétaire>/taxonero:<version>-<variante>, et latest-<variante>),
+# construites à chaque tag vX.Y.Z :
+#   cpu (x86 et ARM : Raspberry Pi 5, NAS ARM, serveurs Ampere), cuda12, cuda13 (NVIDIA), rocm (AMD), xpu (Intel).
+# rocm : PyTorch pour AMD pèse 14 Go installé ; la construction peut manquer de place sur les machines de GitHub,
+# son échec n'empêche pas la publication des autres images.
+# Après la toute première publication : rendre le paquet public (GitHub > Packages > taxonero > Package settings).
+name: image
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.gpu == 'rocm' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [cpu, cuda12, cuda13, rocm, xpu]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - name: Place disque (images GPU de plusieurs Go)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell /usr/local/lib/node_modules
+          sudo docker image prune --all --force
+          df -h /
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3 ; construction ARM sur une machine x86
+        if: matrix.gpu == 'cpu'
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/taxonero
+          flavor: suffix=-${{ matrix.gpu }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          build-args: GPU=${{ matrix.gpu }}
+          platforms: ${{ matrix.gpu == 'cpu' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Cache GitHub limité à 10 Go par dépôt : pas pour rocm, qui le remplirait à lui seul.
+          cache-from: ${{ matrix.gpu != 'rocm' && format('type=gha,scope={0}', matrix.gpu) || '' }}
+          cache-to: ${{ matrix.gpu != 'rocm' && format('type=gha,mode=max,scope={0}', matrix.gpu) || '' }}

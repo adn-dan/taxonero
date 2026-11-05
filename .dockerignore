@@ -1,0 +1,16 @@
+# Contexte de build léger : ni la base, ni les modèles téléchargés, ni les photos de test.
+.git
+.venv
+data
+models
+dev/photos
+**/__pycache__
+.pytest_cache
+*.egg-info
+.env
+dev/.env.dev
+build
+dist
+publication
+*.tar.gz
+packaging/build

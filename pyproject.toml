@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taxonero"
+version = "0.1.0"
+description = "Self-hosted AI species identification for your photos: Immich, local folders or photo apps. Never modifies your pictures."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+dependencies = [
+  "httpx>=0.27",
+  "pydantic-settings>=2.4",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pillow>=10",
+  "numpy>=1.26",
+  "pybioclip>=2.1",
+  "transformers>=4.45",   # OWLv2 (détecteur à vocabulaire ouvert)
+  "mapbox-vector-tile>=2.0",  # aires de répartition GBIF
+  "pillow-heif>=1.7",   # photos HEIC (iPhone) de la source « dossier local »
+  # onnxruntime (CPU) ou onnxruntime-gpu : installé selon la cible (voir Dockerfile).
+]
+
+[project.optional-dependencies]
+cpu = ["onnxruntime>=1.18"]
+# Édition de bureau : fenêtre d'application (taxonero desktop) ; sous Linux avec Qt (PyQt6 et son WebEngine).
+desktop = ["pywebview>=6.1", "pywebview[qt]>=6.1; sys_platform == 'linux'"]
+dev = ["pytest>=8", "playwright>=1.48"]   # tests navigateur : puis « playwright install firefox »
+
+[project.scripts]
+taxonero = "taxonero.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+taxonero = ["static/*", "static/**/*", "rtdetr/configs/**/*.yml", "rtdetr/LICENSE", "rtdetr/NOTICE"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

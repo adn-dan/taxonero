@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+dev/.env.dev
+dev/photos/
+dev/photos_domestic/
+data/
+*.sqlite
+.pytest_cache/
+models/
+*.egg-info/
+
+# Notes personnelles
+ToDo
+
+# Édition de bureau : sorties de PyInstaller et ExifTool récupéré
+packaging/build/
+build/
+dist/
+
+# Archives des sources faites à la main
+*.tar.gz
+
+# Dossier prêt à publier (dépôt git neuf, poussé par Dan)
+publication/

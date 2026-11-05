@@ -1,0 +1,11 @@
+# Construire l'image sur cette machine au lieu de télécharger celle de GHCR (modification du code, variante non
+# publiée, machine sans accès à GHCR) :
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# 15 à 30 min la première fois ; la variante suit GPU dans .env.
+services:
+  taxonero:
+    build:
+      context: .
+      args:
+        GPU: ${GPU:-cpu}
+    image: taxonero:${GPU:-cpu}

@@ -1,0 +1,14 @@
+Code du modèle RT-DETRv2, repris de PytorchWildlife 1.3.0
+(PytorchWildlife/models/detection/rtdetr_apache/rtdetrv2_pytorch), lui-même issu de :
+
+  RT-DETR, Copyright (c) 2023 lyuwenyu, licence Apache 2.0 (LICENSE ci-joint)
+  https://github.com/lyuwenyu/RT-DETR
+
+  PytorchWildlife, Copyright (c) Microsoft Corporation, licence MIT
+  https://github.com/microsoft/CameraTraps
+
+Seule modification : import de tensorboard rendu facultatif (src/core/_config.py, entraînement seulement).
+Seul le code du modèle est repris (pas ultralytics, sous AGPL, que PytorchWildlife tire par ailleurs).
+Les poids de MegaDetector v6 (MDV6-apa-rtdetr-e) ne sont pas livrés : ils sont téléchargés au premier
+usage depuis leur dépôt officiel, https://zenodo.org/records/15398270 (licence CC-BY 4.0), voir
+taxonero/megadetector.py.

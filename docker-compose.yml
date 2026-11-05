@@ -1,0 +1,36 @@
+# Déploiement Docker (Linux, Unraid, Synology, Portainer…) : docker compose up -d, avec l'image toute faite de GHCR.
+# Construire l'image soi-même à la place : docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# TrueNAS SCALE : voir deploy/truenas/.
+# Totalement séparé d'Immich : il ne lui parle que par son API, avec une clé restreinte.
+#
+# Matériel de calcul : variable GPU dans .env, remplie par ./detect-gpu.sh (cuda13, cuda12, rocm, xpu ou cpu).
+# Elle choisit à la fois l'image (taxonero:<version>-<GPU>) et l'accès au matériel (hwaccel.yml).
+
+services:
+  taxonero:
+    extends:
+      file: hwaccel.yml
+      service: ${GPU:-cpu}
+    image: ghcr.io/adn-dan/taxonero:${VERSION:-latest}-${GPU:-cpu}
+    container_name: taxonero
+    env_file: .env
+    environment:
+      DASHBOARD_PORT: "8765"      # port dans le conteneur, toujours le même ; DASHBOARD_PORT de .env : port publié
+    # TrueNAS SCALE : les apps tournent souvent en 568:568 ; mettre ici l'uid propriétaire de ./data.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ./data:/data              # base SQLite, cache GBIF, modèles Hugging Face (~5 Go)
+      # - /chemin/vers/mes/photos:/photos   # SOURCE=local : photos d'un dossier au lieu d'Immich
+    ports:
+      # Dashboard (protégé par DASHBOARD_PASSWORD), en HTTP : mot de passe en clair sur le réseau. Hors réseau de
+      # confiance, passer par un proxy TLS et publier sur "127.0.0.1:${DASHBOARD_PORT:-8765}:8765".
+      - "${DASHBOARD_PORT:-8765}:8765"
+    restart: unless-stopped
+    mem_limit: ${MEM_LIMIT:-8g}   # au-delà, seul ce conteneur est arrêté, pas Immich ni le reste du serveur
+    # Pour joindre Immich par son nom (http://immich-server:2283), rejoindre son réseau Docker : décommenter
+    # ces lignes et les deux du bas (nom du réseau : docker network ls, souvent immich_default). Sinon,
+    # régler dans le dashboard l'adresse de la machine et le port publié d'Immich (http://192.168.1.10:2283).
+    # networks: [default, immich]
+
+# networks:
+#   immich: { external: true, name: immich_default }
