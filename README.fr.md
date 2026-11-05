@@ -13,12 +13,15 @@ jamais modifiées.**
 <td width="50%"><a href="docs/screenshots/fr/compare.jpg"><img src="docs/screenshots/fr/compare.jpg" alt="Comparaison avec des photos de référence"></a><br><sub>Comparaison avec des photos de référence</sub></td>
 </tr>
 <tr>
-<td width="50%"><a href="docs/screenshots/fr/photos.jpg"><img src="docs/screenshots/fr/photos.jpg" alt="Photos, avec filtres par état et par groupe"></a><br><sub>Photos, avec filtres par état et par groupe</sub></td>
-<td width="50%"><a href="docs/screenshots/fr/species.jpg"><img src="docs/screenshots/fr/species.jpg" alt="Espèces, par groupe"></a><br><sub>Espèces, par groupe</sub></td>
+<td width="50%"><a href="docs/screenshots/fr/species.jpg"><img src="docs/screenshots/fr/species.jpg" alt="Espèces, vue Grille par groupe"></a><br><sub>Espèces, vue Grille par groupe</sub></td>
+<td width="50%"><a href="docs/screenshots/fr/tree.jpg"><img src="docs/screenshots/fr/tree.jpg" alt="Espèces, vue Arbre : règne > embranchement > classe > ordre > famille > espèce"></a><br><sub>Espèces, vue Arbre : règne > embranchement > classe > ordre > famille > espèce</sub></td>
 </tr>
 <tr>
+<td width="50%"><a href="docs/screenshots/fr/photos.jpg"><img src="docs/screenshots/fr/photos.jpg" alt="Photos, avec filtres par état et par groupe"></a><br><sub>Photos, avec filtres par état et par groupe</sub></td>
 <td width="50%"><a href="docs/screenshots/fr/species-page.jpg"><img src="docs/screenshots/fr/species-page.jpg" alt="Fiche d'une espèce : carte et article"></a><br><sub>Fiche d'une espèce : carte et article</sub></td>
-<td width="50%"><a href="docs/screenshots/fr/stats.jpg"><img src="docs/screenshots/fr/stats.jpg" alt="Statistiques"></a><br><sub>Statistiques</sub></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><a href="docs/screenshots/fr/stats.jpg"><img src="docs/screenshots/fr/stats.jpg" width="50%" alt="Statistiques"></a><br><sub>Statistiques</sub></td>
 </tr>
 </table>
 

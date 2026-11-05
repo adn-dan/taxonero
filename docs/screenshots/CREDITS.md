@@ -44,6 +44,16 @@ cropped by the interface; GPS and date metadata were added to the test copies. N
 | inat_83075710.jpg | *Fringilla coelebs* | (c) Donald Davesne, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/83075710) |
 | inat_98375354.jpg | *Alcedo atthis* | (c) Alexis Lours, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/98375354) |
 
+## tree
+
+| Photo | Species | Author and license | Source |
+|---|---|---|---|
+| inat_141358842.jpg | *Oenanthe isabellina* | (c) Julien Renoult, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/141358842) |
+| inat_246771836.jpg | *Motacilla cinerea* | (c) Sylvain Montagner, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/246771836) |
+| inat_257218768.jpg | *Erithacus rubecula* | (c) gab_1, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/257218768) |
+| inat_383759968.jpg | *Vulpes vulpes* | (c) Alexis Lours, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/383759968) |
+| inat_83075710.jpg | *Fringilla coelebs* | (c) Donald Davesne, some rights reserved (CC BY) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [observation](https://www.inaturalist.org/observations/83075710) |
+
 ## species-page
 
 | Photo | Species | Author and license | Source |

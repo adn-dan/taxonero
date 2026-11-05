@@ -115,7 +115,12 @@ def capture(base: str, browser, lang: str, used: dict, refs: dict) -> None:
     page.wait_for_selector("#v-species .frow")
     page.wait_for_load_state("networkidle")
     shot("species")
-    key = page.evaluate("SP.all.slice().sort((a, b) => b.n_photos - a.n_photos)[0]?.taxon_key ?? SP.all[0].taxon_key")
+    page.click("#v-species [data-mode=tree]")
+    page.wait_for_selector("#v-species .tnode")
+    page.wait_for_load_state("networkidle")
+    shot("tree")
+    page.click("#v-species [data-mode=grid]")   # vue gardée par le navigateur : la remettre comme avant
+    key =page.evaluate("SP.all.slice().sort((a, b) => b.n_photos - a.n_photos)[0]?.taxon_key ?? SP.all[0].taxon_key")
     page.goto(base + f"#species/{key}")
     page.wait_for_selector(".leaflet-container", timeout=20000)
     page.wait_for_load_state("networkidle")

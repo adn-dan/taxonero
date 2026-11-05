@@ -12,12 +12,15 @@ fish, plants, fungi and lichens): an [Immich](https://immich.app) library, a loc
 <td width="50%"><a href="docs/screenshots/en/compare.jpg"><img src="docs/screenshots/en/compare.jpg" alt="Comparison with reference photos"></a><br><sub>Comparison with reference photos</sub></td>
 </tr>
 <tr>
-<td width="50%"><a href="docs/screenshots/en/photos.jpg"><img src="docs/screenshots/en/photos.jpg" alt="Photos, filtered by status and group"></a><br><sub>Photos, filtered by status and group</sub></td>
-<td width="50%"><a href="docs/screenshots/en/species.jpg"><img src="docs/screenshots/en/species.jpg" alt="Species, by group"></a><br><sub>Species, by group</sub></td>
+<td width="50%"><a href="docs/screenshots/en/species.jpg"><img src="docs/screenshots/en/species.jpg" alt="Species, Grid view by group"></a><br><sub>Species, Grid view by group</sub></td>
+<td width="50%"><a href="docs/screenshots/en/tree.jpg"><img src="docs/screenshots/en/tree.jpg" alt="Species, Tree view: kingdom > phylum > class > order > family > species"></a><br><sub>Species, Tree view: kingdom > phylum > class > order > family > species</sub></td>
 </tr>
 <tr>
+<td width="50%"><a href="docs/screenshots/en/photos.jpg"><img src="docs/screenshots/en/photos.jpg" alt="Photos, filtered by status and group"></a><br><sub>Photos, filtered by status and group</sub></td>
 <td width="50%"><a href="docs/screenshots/en/species-page.jpg"><img src="docs/screenshots/en/species-page.jpg" alt="Species page: map and article"></a><br><sub>Species page: map and article</sub></td>
-<td width="50%"><a href="docs/screenshots/en/stats.jpg"><img src="docs/screenshots/en/stats.jpg" alt="Statistics"></a><br><sub>Statistics</sub></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><a href="docs/screenshots/en/stats.jpg"><img src="docs/screenshots/en/stats.jpg" width="50%" alt="Statistics"></a><br><sub>Statistics</sub></td>
 </tr>
 </table>
 
