@@ -5,7 +5,7 @@ const api = async (path, opt = {}) => {
   if (!r.ok) {
     const t = await r.text(); console.warn(t);
     let m = t; try { m = JSON.parse(t).detail ?? t; } catch (e) {}
-    // Erreur du serveur avec un code : traduite (texte français du serveur en repli).
+    // Server error with a code: translated (the server's English text as a fallback).
     throw new Error(m?.code ? tOr(`err.${m.code}`, m.message, m) : typeof m === 'string' ? m : JSON.stringify(m));
   }
   return r.json();
@@ -14,40 +14,40 @@ const fail = e => toast(t('toast.failed', { msg: esc(e.message || e) }));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ic = id => `<svg class="ic"><use href="#i-${id}"/></svg>`;
 const ICON = { animal: '🐾', plant: '🌿', fungus: '🍄', image: '🖼️', manual: '✏️' };
-// Icône d'un sujet : le groupe de son taxon ; le type de boîte seulement s'il n'est pas identifié.
+// Icon of a subject: the group of its taxon; the box type only if it is not identified.
 const subjectIcon = d => d.taxon ? groupOf(d.taxon).icon : ICON[d.box_label] || '';
 
 /* ============================== langue ============================== */
-/* Une seule langue pour l'interface, les noms d'espèces et Wikipédia (préférence de ce navigateur).
-   Textes de l'interface : static/i18n/<langue>.json, le français servant de référence et de repli.
-   Pluriels : clé_one, clé_other (et _zero, _two, _few, _many selon la langue), choisis par Intl.PluralRules.
-   Dates, nombres et pourcentages : Intl, dans la langue choisie. */
+/* A single language for the interface, the species names and Wikipedia (preference of this browser).
+   Interface texts: static/i18n/<language>.json, French being the reference and the fallback.
+   Plurals: key_one, key_other (and _zero, _two, _few, _many depending on the language), chosen by Intl.PluralRules.
+   Dates, numbers and percentages: Intl, in the chosen language. */
 let LANG = 'fr', MSG = {}, MSG_FR = {}, PLURAL = new Intl.PluralRules('fr');
 const PLURAL_FR = new Intl.PluralRules('fr');
 try { LANG = localStorage.getItem('names-lang') || (navigator.language || 'fr').slice(0, 2); } catch (e) {}
 const fmtN = n => Number(n).toLocaleString(LANG, { useGrouping: 'min2', maximumFractionDigits: 1 });
 const fmtPct = (x, d = 0) => Number(x).toLocaleString(LANG, { style: 'percent', maximumFractionDigits: d });
-// Probabilité d'un modèle : sous 0,5 % on écrit « < 1 % » (un « 0 % » ferait croire à une certitude).
+// Probability from a model: below 0.5 % it reads "< 1 %" (a "0 %" would suggest certainty).
 const fmtProb = x => x < 0.005 ? `< ${fmtPct(0.01)}` : fmtPct(x);
 const fmtDate = (d, o = { day: 'numeric', month: 'long', year: 'numeric' }) => new Date(d).toLocaleDateString(LANG, o);
 function msgFor(key, n) {
-  if (typeof n === 'number') {   // forme plurielle si le message en a, sinon forme unique
+  if (typeof n === 'number') {   // plural form if the message has one, otherwise the single form
     const m = MSG[`${key}_${PLURAL.select(n)}`] ?? MSG[`${key}_other`] ?? MSG_FR[`${key}_${PLURAL_FR.select(n)}`] ?? MSG_FR[`${key}_other`];
     if (m != null) return m;
   }
   return MSG[key] ?? MSG_FR[key];
 }
-/* Message traduit. Les valeurs numériques sont mises en forme ; les autres sont insérées telles quelles
-   (à échapper par l'appelant si elles viennent des données). */
+/* Translated message. Numeric values are formatted; the others are inserted as is
+   (to be escaped by the caller if they come from the data). */
 function t(key, p = {}) { return tOr(key, key, p); }
 function tOr(key, fallback, p = {}) {
   const m = msgFor(key, p.n) ?? fallback ?? key;
   return m.replace(/\{(\w+)\}/g, (_, k) => k in p ? (typeof p[k] === 'number' ? fmtN(p[k]) : p[k]) : `{${k}}`);
 }
 const rankName = r => tOr(`rank.${r}`, r || '');
-const tr = (...a) => t(...a);   // même fonction, pour les blocs où `t` désigne un taxon
+const tr = (...a) => t(...a);   // same function, for blocks where `t` stands for a taxon
 const iucnName = k => t(`iucn.${k}`);
-// Raison de non-validation automatique renvoyée par le serveur ({code, valeurs}).
+// Reason for no auto-confirmation returned by the server ({code, values}).
 const whyText = r => typeof r === 'string' ? esc(r)
   : tr(`why.${r.code}`, { conf: fmtPct(r.conf ?? 0), thr: fmtPct(r.thr ?? 0), p: fmtPct(r.p ?? 0),
                           group: r.group ? esc(tOr(`group.${r.group}`, r.group)) : '' });
@@ -58,9 +58,9 @@ async function loadLang(l) {
   LANG = l; PLURAL = new Intl.PluralRules(l);
   document.documentElement.lang = l;
   applyStatic();
-  $('#b-export').href = `/api/export.csv?lang=${encodeURIComponent(l)}`;   // noms communs dans la langue choisie
+  $('#b-export').href = `/api/export.csv?lang=${encodeURIComponent(l)}`;   // common names in the chosen language
 }
-/* Textes du HTML fixe : data-i18n (contenu), data-i18n-title, data-i18n-ph (placeholder). */
+/* Texts of the fixed HTML: data-i18n (content), data-i18n-title, data-i18n-ph (placeholder). */
 function applyStatic() {
   $$('[data-i18n]').forEach(el => { el.innerHTML = t(el.dataset.i18n); });
   $$('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
@@ -68,7 +68,7 @@ function applyStatic() {
   $$('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
 }
 const LANG_NAMES = {};
-const langName = (l, inLang = LANG) => {   // nom d'une langue, dans la langue de l'interface (ou dans la sienne)
+const langName = (l, inLang = LANG) => {   // name of a language, in the interface language (or in its own)
   try { const k = `${inLang}:${l}`; LANG_NAMES[k] ??= new Intl.DisplayNames([inLang], { type: 'language' }).of(l);
         const n = LANG_NAMES[k]; return n && n !== l ? n[0].toLocaleUpperCase(inLang) + n.slice(1) : l; } catch (e) { return l; }
 };
@@ -76,30 +76,30 @@ const hasUI = l => l === 'fr' || (STATE.status?.ui_langs || []).includes(l);
 
 const common = t => t?.vernacular?.[LANG] || t?.vernacular?.en || t?.vernacular?.fr || '';
 const taxName = t => !t ? '?' : (common(t) ? `${esc(common(t))} <i>${esc(t.scientific_name)}</i>` : `<i>${esc(t.scientific_name)}</i>`);
-/* Noms anglais des ordres et familles souvent en « Title Case » (Hawks, Eagles, Kites, And Allies) : remis en
-   casse de phrase. Seulement en anglais (l'allemand met une majuscule aux noms) et si tous les mots en ont une. */
+/* English names of orders and families often in "Title Case" (Hawks, Eagles, Kites, And Allies): set back to
+   sentence case. Only in English (German capitalises nouns) and if all the words have a capital. */
 const tidyCase = s => !s || LANG !== 'en' || !/^(\p{Lu}[^\s]*[\s,-]+)+\p{Lu}\S*$/u.test(s) ? s
   : s[0] + s.slice(1).toLocaleLowerCase('en');
 const higherCommon = name => tidyCase(SP.higher?.[name]?.vernacular?.[LANG] || '');
-/* Nom d'un rang supérieur, comme pour les espèces : nom commun en principal, nom scientifique en secondaire
-   (seul s'il n'y a pas de nom commun). */
+/* Name of a higher rank, as for species: common name as the main one, scientific name as the secondary one
+   (alone if there is no common name). */
 const higherNames = name => { const com = higherCommon(name);
   return com && com.toLowerCase() !== name.toLowerCase() ? { main: com, sci: name } : { main: name, sci: '' }; };
 const crumbLabel = name => { const { main, sci } = higherNames(name); return `${esc(main)}${sci ? ` <small>${esc(sci)}</small>` : ''}`; };
 const shortName = tx => tx ? (common(tx) || tx.scientific_name) : t('det.unknown');
 const hasWiki = t => t?.wikipedia && Object.keys(t.wikipedia).length;
-/* Noms dans les autres langues : repliés (une ligne cliquable), on les déplie au besoin. */
+/* Names in the other languages: folded (one clickable line), unfolded when needed. */
 function otherNames(tx) {
   const items = Object.entries(tx?.vernacular || {}).filter(([l]) => l !== LANG).map(([l, n]) => `<code title="${esc(langName(l))}">${esc(l)}</code><b>${esc(n)}</b>`);
   return items.length ? `<details class="names"><summary>${t('names.other', { n: items.length })}</summary>${items.join(' · ')}</details>` : '';
 }
 
-/* ============================== état & navigation ============================== */
+/* ============================== state & navigation ============================== */
 const STATE = { view: 'photos', status: null };
-const srcTitle = id => id === 'local' ? t('local.title') : t(`src.${id}`);   // nom de la source des photos
+const srcTitle = id => id === 'local' ? t('local.title') : t(`src.${id}`);   // name of the photo source
 async function loadStatus() {
   const s = STATE.status = await api('/api/status');
-  const pending = (await api('/api/photos/counts')).pending || 0;   // photos à relire (comme le filtre)
+  const pending = (await api('/api/photos/counts')).pending || 0;   // photos to review (like the filter)
   $('#nb-pending').hidden = !pending; $('#nb-pending').textContent = pending;
   if (!s.immich_configured) {
     $('#server').innerHTML = `<div><span class="dot bad"></span><b>Immich</b></div><div><a href="#settings">${t('server.not_configured')}</a></div>`;
@@ -116,7 +116,7 @@ async function loadStatus() {
     ${s.missing ? `<div title="${esc(t('server.missing_hint'))}">${t('server.missing', { n: s.missing })}</div>` : ''}
     ${s.warnings.length ? `<div title="${esc(s.warnings.join('\n'))}"><a href="#settings" data-settab="source" data-anchor="immcard">${t('server.warnings', { n: s.warnings.length })}</a></div>` : ''}`;
 }
-/* Changement de langue : interface, noms d'espèces et articles ; la page courante est redessinée. */
+/* Language change: interface, species names and articles; the current page is redrawn. */
 async function setLang(l) {
   try { localStorage.setItem('names-lang', l); } catch (err) {}
   await loadLang(l);
@@ -124,21 +124,33 @@ async function setLang(l) {
   drawBack(); loadStatus(); pollSync(false);
   if (V.open) drawViewer();
 }
-/* Synchronisation : nouvelles photos d'Immich, analyse, tags, mise en local des fiches, aires et articles.
-   Tourne côté serveur ; la barre latérale affiche la progression. */
+/* Synchronisation: new photos from Immich, analysis, tags, local copies of records, range maps and articles.
+   Runs on the server; the sidebar shows the progress. */
 let syncPoll = null;
 function toast(msg) {
   let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
   t.innerHTML = msg; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 6000);
 }
-/* Étape en cours ; pendant l'analyse : barre, photo en cours et temps restant (mesuré sur les photos déjà faites). */
+/* Current step; with a known total (analysis, tag writing, folder scan): bar and remaining time (measured on
+   what is already done); otherwise a counter (photos received from Immich). Tag writing counts in units (read,
+   tags, description: st.scale per photo) and shows photos. */
 function syncProgress(st) {
-  const done = Math.min(st.done, st.total);
-  // Synchronisation : en dry-run rien n'est écrit (simulation) ; source « dossier » : fichiers XMP, pas Immich.
-  const step = st.step === 'sync' ? (STATE.status?.dry_run ? 'sync_dry' : STATE.status?.source !== 'immich' ? 'sync_xmp' : 'sync') : st.step;
-  let h = `<b>${t('sync.running')}</b><br>${esc(step ? tOr(`step.${step}`, step) : '')}${st.total ? ` ${fmtN(done)}/${fmtN(st.total)}` : ''}`;
+  const done = Math.min(st.done, st.total), scale = st.scale || 1, files = STATE.status?.source && STATE.status.source !== 'immich';
+  // Synchronisation: in dry-run nothing is written (simulation); "folder" source: XMP files, not Immich.
+  const step = st.step === 'sync' ? (STATE.status?.dry_run ? 'sync_dry' : files ? 'sync_xmp' : 'sync')
+    : ['scan', 'reconcile'].includes(st.step) && files ? `${st.step}_files` : st.step;
+  const count = st.total ? ` ${fmtN(Math.floor(done / scale))}/${fmtN(Math.round(st.total / scale))}`
+    : st.done ? ` · ${t('count.photos', { n: st.done })}` : '';
+  let h = `<b>${t('sync.running')}</b><br>`;
+  // Analysis in two phases: one bar for the AI part (GPU), one for the geographic check (GBIF), the current one
+  // highlighted; the GPU is released between the two.
+  const ph = st.phases && ['analyze', 'geo'].includes(st.step) ? st.phases : null;
+  if (ph) h += ['analyze', 'geo'].map(k => { const [d, n] = ph[k] || [0, 0], v = Math.min(d, n);
+    return `<div class="phase${st.step === k ? ' on' : ''}">${t(`sync.phase_${k}`)} ${fmtN(v)}/${fmtN(n)}
+      <div class="syncbar"><i style="width:${n ? (100 * v / n).toFixed(1) : 0}%"></i></div></div>`; }).join('');
+  else h += `${esc(step ? tOr(`step.${step}`, step) : '')}${count}`;
   if (!st.total) return h;
-  h += `<div class="syncbar"><i style="width:${(100 * Math.max(done - 1, 0) / st.total).toFixed(1)}%"></i></div>`;
+  if (!ph) h += `<div class="syncbar"><i style="width:${(100 * Math.max(done - 1, 0) / st.total).toFixed(1)}%"></i></div>`;
   if (st.current) h += `<span class="syncfile" title="${esc(st.current)}">${esc(st.current)}</span>`;
   if (done > 3 && st.step_started) {
     const left = (Date.now() / 1000 - st.step_started) / (done - 1) * (st.total - done + 1) / 60;
@@ -151,12 +163,12 @@ function syncProgress(st) {
 async function pollSync(announce) {
   let st;
   try { st = await api('/api/sync/status'); }
-  catch (e) {   // serveur momentanément injoignable (redémarrage) : on réessaie, sinon le suivi s'arrêterait là
+  catch (e) {   // server temporarily unreachable (restart): try again, otherwise the tracking would stop there
     clearTimeout(syncPoll); syncPoll = setTimeout(() => pollSync(announce), 20000); return;
   }
   $('#b-sync').classList.toggle('spin', st.running);
   showPause(st.analysis_paused);
-  const bar = $('#topprog');   // fine barre sous la barre du haut : avancement de l'analyse, sinon animation
+  const bar = $('#topprog');   // thin bar under the top bar: analysis progress, otherwise an animation
   bar.hidden = !st.running; bar.classList.toggle('indet', st.running && !st.total);
   bar.firstChild.style.width = st.running && st.total ? `${(100 * Math.max(Math.min(st.done, st.total) - 1, 0) / st.total).toFixed(1)}%` : '';
   $('#syncline').innerHTML = st.running ? syncProgress(st)
@@ -165,8 +177,8 @@ async function pollSync(announce) {
   if (!st.running && st.error) $('#syncline').insertAdjacentHTML('beforeend', ` <span title="${esc(t('sync.failed', { msg: st.error }))}">⚠</span>`);
   clearTimeout(syncPoll);
   if (st.running) { syncPoll = setTimeout(() => pollSync(true), 1500); return; }
-  syncPoll = setTimeout(() => pollSync(false), 20000);   // repère un cycle lancé par la boucle automatique
-  if (announce && st.error) {   // cycle en échec : les chiffres de last_run seraient ceux du cycle précédent
+  syncPoll = setTimeout(() => pollSync(false), 20000);   // spots a cycle started by the automatic loop
+  if (announce && st.error) {   // failed cycle: the figures of last_run would be those of the previous cycle
     toast(t('sync.failed', { msg: esc(st.error) }));
     loadStatus(); if (!V.open) reloadPage();
   } else if (announce && st.last_run) {
@@ -176,8 +188,8 @@ async function pollSync(announce) {
     loadStatus(); if (!V.open) reloadPage();
   }
 }
-/* Pause et reprise de l'analyse par l'IA (elle occupe toute la machine) : gardée d'un lancement à l'autre. La
-   reprise lance l'analyse aussitôt. */
+/* Pause and resume of the AI analysis (it takes the whole machine): kept from one launch to the next.
+   Resuming starts the analysis right away. */
 function showPause(paused) {
   const b = $('#b-pause'); if (paused == null) return;
   b.hidden = false; b.dataset.paused = paused ? '1' : '';
@@ -197,16 +209,16 @@ $('#b-sync').onclick = async () => {
   if (!r.started) toast(t('sync.already'));
   pollSync(true);
 };
-/* Tuiles cliquables (photos, espèces) : atteintes avec Tab, ouvertes avec Entrée ou Espace. En capture et
-   arrêtée là : sinon la même touche Entrée validerait aussitôt la détection dans la visionneuse qu'elle ouvre. */
+/* Clickable tiles (photos, species): reached with Tab, opened with Enter or Space. In the capture phase and
+   stopped there: otherwise the same Enter key would immediately confirm the detection in the viewer it opens. */
 document.addEventListener('keydown', e => {
   if ((e.key !== 'Enter' && e.key !== ' ') || !e.target.matches?.('[role=button][tabindex]:not(button)')) return;
   if (typeof V !== 'undefined' && V.open) return;
   e.preventDefault(); e.stopImmediatePropagation();
   e.target.click();
 }, true);
-/* Zoom d'un événement molette, proportionnel à la distance : ×1,1 par cran (100 px). Un pavé tactile envoie beaucoup
-   de petits événements, compter chacun comme un cran ferait bondir le zoom. Pincement (ctrl) : très petites distances. */
+/* Zoom from a wheel event, proportional to the distance: ×1.1 per notch (100 px). A touchpad sends many
+   small events, counting each one as a notch would make the zoom jump. Pinch (ctrl): very small distances. */
 function wheelFactor(e) {
   const px = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1) * (e.ctrlKey ? 8 : 1);
   return Math.pow(1.1, -Math.max(-120, Math.min(120, px)) / 100);

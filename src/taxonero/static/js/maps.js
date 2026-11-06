@@ -1,8 +1,8 @@
-/* ============================== panneau Wikipédia ============================== */
+/* ============================== Wikipedia panel ============================== */
 const W = { key: null, src: 'wikipedia', lang: '' };
 async function openWiki(key, src) {
   if (!key) return;
-  if (key !== W.key) W.lang = LANG;   // nouvel article : langue de l'interface (le menu permet d'en changer)
+  if (key !== W.key) W.lang = LANG;   // new article: interface language (the menu allows changing it)
   W.key = key; W.src = src || W.src;
   $('#wiki').classList.add('on');
   $$('#wiki .wbar .chip').forEach(b => b.classList.toggle('on', b.dataset.src === W.src));
@@ -23,12 +23,12 @@ $$('#wiki .wbar .chip').forEach(b => b.onclick = () => openWiki(W.key, b.dataset
 $('#wikilang').onchange = e => { W.lang = e.target.value; openWiki(W.key); };
 $('#wiki-x').onclick = closeWiki;
 
-/* ============================== aires de répartition ============================== */
-// Données locales au format compact (par case : tuile GBIF, colonne, demi-ligne, observations), recalées sur la
-// grille exacte de GBIF (voir ranges.py) puis dessinées par une couche canvas, tuile par tuile : rapide même
-// avec des dizaines de milliers de cases, taille et couleurs fixes quel que soit le zoom. Les grilles de deux
-// tuiles GBIF voisines ne se raccordent pas : chaque case est découpée au bord de sa tuile, comme chez GBIF.
-// Échelle séquentielle une teinte, classes logarithmiques arrondies.
+/* ============================== range maps ============================== */
+// Local data in compact format (per cell: GBIF tile, column, half-row, observations), snapped to the
+// exact GBIF grid (see ranges.py) then drawn by a canvas layer, tile by tile: fast even
+// with tens of thousands of cells, fixed size and colours whatever the zoom. The grids of two
+// neighbouring GBIF tiles do not join: each cell is clipped at the edge of its tile, as on GBIF.
+// Single-hue sequential scale, rounded logarithmic classes.
 const RANGE_COLORS = ['#edf8e9', '#bae4b3', '#74c476', '#31a354', '#006d2c'];
 function niceBreaks(max) {
   const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1e6];
@@ -41,7 +41,7 @@ function niceBreaks(max) {
   return out;
 }
 const classOf = (n, br) => br.filter(b => n >= b).length;
-const rangeData = new Map();   // clé GBIF -> promesse des données (une seule requête par taxon et par session)
+const rangeData = new Map();   // GBIF key -> promise of the data (a single request per taxon and per session)
 function getRange(key) {
   if (!rangeData.has(key)) rangeData.set(key, api(`/api/range/${key}`).then(prepRange).catch(e => { rangeData.delete(key); throw e; }));
   return rangeData.get(key);
@@ -49,7 +49,7 @@ function getRange(key) {
 function prepRange(d) {
   const n = 2 ** d.z, E = d.tile, W = E * n, sx = E / (d.hex + 1), R = sx / 1.5, hy = Math.sqrt(3) * R / 2;
   const max = d.cells.reduce((m, c) => Math.max(m, c[3]), 0), br = niceBreaks(max);
-  // [x, y, observations, classe de couleur, tuile] en Web Mercator normalisé, regroupées par tuile et triées par x.
+  // [x, y, observations, colour class, tile] in normalised Web Mercator, grouped by tile and sorted by x.
   d.cells = d.cells.map(([t, i, h, nb]) => [(Math.floor(t / n) * E + i * sx) / W, ((t % n) * E + d.tiles[t] + h * hy) / W, nb, classOf(nb, br), t]);
   d.cells.sort((a, b) => a[0] - b[0]);
   d.groups = new Map();
@@ -57,18 +57,18 @@ function prepRange(d) {
   d.n = n; d.r = R / W;
   return Object.assign(d, { max, breaks: br });
 }
-// Rectangle de la tuile GBIF t, en Web Mercator normalisé.
+// Rectangle of GBIF tile t, in normalised Web Mercator.
 const tileRect = (d, t) => { const tx = Math.floor(t / d.n), ty = t % d.n; return [tx / d.n, ty / d.n, (tx + 1) / d.n, (ty + 1) / d.n]; };
 function lowerBound(cells, x) { let lo = 0, hi = cells.length; while (lo < hi) { const m = (lo + hi) >> 1; if (cells[m][0] < x) lo = m + 1; else hi = m; } return lo; }
-// Taille à l'écran : la grille locale tant que ses cases font moins de ZOOM_HEX_PX ; au-delà, la tuile GBIF du
-// zoom affiché (cases de ~11 px à tous les zooms), demandée au serveur à la volée. Couleurs : observations dans
-// la case affichée, mêmes classes que la légende (rapportées à la surface, une observation isolée dans une
-// petite case virait au plus foncé). Pas de bordure, à tous les zooms.
+// Size on screen: the local grid as long as its cells are smaller than ZOOM_HEX_PX; beyond, the GBIF tile of the
+// displayed zoom (cells of ~11 px at every zoom), asked from the server on the fly. Colours: observations in
+// the displayed cell, same classes as the legend (relative to the area, a single observation in a
+// small cell turned to the darkest). No border, at every zoom.
 const ZOOM_HEX_PX = 14;
 const hexPath = (ctx, px, py, R) => { ctx.beginPath();
   for (let k = 0; k < 6; k++) { const X = px + R * Math.cos(k * Math.PI / 3), Y = py + R * Math.sin(k * Math.PI / 3); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
   ctx.closePath(); };
-const zoomTiles = new Map();   // « clé/z/x/y » -> promesse des cases de la tuile (une requête par tuile et par session)
+const zoomTiles = new Map();   // "key/z/x/y" -> promise of the cells of the tile (one request per tile and per session)
 function getZoomTile(key, z, x, y) {
   const id = `${key}/${z}/${x}/${y}`;
   if (!zoomTiles.has(id)) zoomTiles.set(id, api(`/api/range/${id}`).catch(e => { zoomTiles.delete(id); throw e; }));
@@ -87,7 +87,7 @@ const HexLayer = L.GridLayer.extend({
       const sx = 4096 / (t.hex + 1), hy = Math.sqrt(3) * sx / 3, k = size.x / 4096, R = sx / 1.5 * k;
       for (const [i, h, nb] of t.cells) {
         hexPath(ctx, i * sx * k, (t.y0 + h * hy) * k, R);
-        ctx.fillStyle = ctx.strokeStyle = RANGE_COLORS[classOf(nb, d.breaks)]; ctx.fill(); ctx.stroke();   // sans bordure, comme la grille locale
+        ctx.fillStyle = ctx.strokeStyle = RANGE_COLORS[classOf(nb, d.breaks)]; ctx.fill(); ctx.stroke();   // no border, like the local grid
       }
     }).catch(() => this.drawLocal(ctx, coords, size))   // GBIF injoignable : grille locale
       .finally(() => done(null, tile));
@@ -105,12 +105,12 @@ const HexLayer = L.GridLayer.extend({
         const [cx, cy, , k] = cells[i];
         if (cy < y0 - pad || cy > y0 + span + pad) continue;
         hexPath(ctx, (cx - x0) * world, (cy - y0) * world, R);
-        ctx.fillStyle = ctx.strokeStyle = RANGE_COLORS[k]; ctx.fill(); ctx.stroke();   // contour = remplissage : pas de joint
+        ctx.fillStyle = ctx.strokeStyle = RANGE_COLORS[k]; ctx.fill(); ctx.stroke();   // outline = fill: no seam
       }
       ctx.restore();
     }
   },
-  // Observations de la case sous un point (infobulle) : tuile du zoom affiché si elle est chargée, sinon grille locale.
+  // Observations of the cell under a point (tooltip): tile of the displayed zoom if loaded, otherwise the local grid.
   countAt(latlng) {
     const z = this._tileZoom, n = 2 ** z, p = L.CRS.EPSG3857.latLngToPoint(latlng, 0);
     const wx = ((((p.x / 256) % 1) + 1) % 1) * n, wy = p.y / 256 * n, t = this.zt.get(`${z}/${Math.floor(wx)}/${Math.floor(wy)}`);
@@ -122,14 +122,14 @@ const HexLayer = L.GridLayer.extend({
     }
     return this.cellAt(latlng)?.[2] ?? null;
   },
-  // Case sous un point (pour l'infobulle) : recherche par x trié puis distance au centre.
+  // Cell under a point (for the tooltip): search by sorted x then distance to the centre.
   cellAt(latlng) {
     const p = L.CRS.EPSG3857.latLngToPoint(latlng, 0), d = this.d;
     const x = (((p.x / 256) % 1) + 1) % 1, y = p.y / 256;
     let best = null, bd = d.r * d.r;
     for (let i = lowerBound(d.cells, x - d.r); i < d.cells.length && d.cells[i][0] <= x + d.r; i++) {
       const c = d.cells[i], dd = (c[0] - x) ** 2 + (c[1] - y) ** 2, [ax, ay, bx, by] = tileRect(d, c[4]);
-      if (dd < bd && x >= ax && x < bx && y >= ay && y < by) { bd = dd; best = c; }   // case de la tuile du point
+      if (dd < bd && x >= ax && x < bx && y >= ay && y < by) { bd = dd; best = c; }   // cell of the tile of the point
     }
     return best;
   },
@@ -150,16 +150,16 @@ function rangeLegend(br, max) {
   const lo = [1, ...br], hi = [...br.map(b => b - 1), max];
   return `<div class="classes">${lo.map((l, i) => `<span><i style="background:${RANGE_COLORS[i]}"></i>${l === hi[i] ? fmtN(l) : `${fmtN(l)}–${fmtN(hi[i])}`}</span>`).join('')}</div>`;
 }
-// Fond OpenStreetMap délavé presque en blanc (classe basemap, app.css) : forêts, parcs et relief ne sont plus
-// verts ni foncés, le vert reste réservé aux hexagones de l'aire de répartition.
-// referrerPolicy : sans en-tête Referer (politique same-origin du dashboard), OSM répond par une tuile « Access blocked ».
+// OpenStreetMap background washed out almost to white (basemap class, app.css): forests, parks and relief are no longer
+// green or dark, green stays reserved for the hexagons of the range map.
+// referrerPolicy: without a Referer header (same-origin policy of the dashboard), OSM answers with an "Access blocked" tile.
 const baseLayer = () => L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap', className: 'basemap', referrerPolicy: 'strict-origin-when-cross-origin' });
-// Écran tactile : un doigt fait défiler la page au lieu de déplacer la carte ; le pincement zoome et déplace.
+// Touch screen: one finger scrolls the page instead of moving the map; pinching zooms and moves.
 const MAP_TOUCH = L.Browser.mobile ? { dragging: false, tap: false } : {};
 const photoIcon = on => ({ radius: on ? 8 : 5, stroke: false, fillColor: on ? '#dc2626' : '#4250af', fillOpacity: on ? 1 : .85 });
 
-/* Mini-carte de la visionneuse : créée une seule fois ; seules l'épingle et l'aire affichée changent.
-   Les couches d'aire déjà construites sont gardées : repasser sur un candidat est instantané. */
+/* Mini map of the viewer: created only once; only the pin and the range shown change.
+   Range layers already built are kept: going back over a candidate is instant. */
 let mini, miniPin, miniShown = null, miniAsset = null, miniReq = 0;
 const miniLayers = new Map();
 function ensureMini() {
@@ -172,7 +172,7 @@ function ensureMini() {
 }
 function drawMini(key, a) {
   ensureMini();
-  if (miniAsset !== a.asset_id) {   // nouvelle photo : épingle et cadrage
+  if (miniAsset !== a.asset_id) {   // new photo: pin and framing
     miniAsset = a.asset_id; miniPin?.remove(); miniPin = null;
     if (a.lat != null) { miniPin = L.circleMarker([a.lat, a.lon], photoIcon(true)).addTo(mini); mini.setView([a.lat, a.lon], Math.max(3, Math.min(mini.getZoom(), 6))); }
   }
@@ -183,7 +183,7 @@ async function setMiniRange(key) {
   const req = ++miniReq;
   let layer = miniLayers.get(key);
   if (!layer && key) { try { layer = await rangeLayer(key, mini, { tooltips: false }); miniLayers.set(key, layer); } catch (e) { layer = null; } }
-  if (req !== miniReq) return;   // un autre survol est arrivé entre-temps
+  if (req !== miniReq) return;   // another hover arrived in the meantime
   miniLayers.forEach(l => mini.hasLayer(l) && l !== layer && mini.removeLayer(l));
   if (layer && !mini.hasLayer(layer)) layer.addTo(mini);
   miniPin?.bringToFront(); miniShown = key;

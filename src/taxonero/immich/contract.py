@@ -1,8 +1,8 @@
-"""Contrat avec l'API Immich.
+"""Contract with the Immich API.
 
-Seuls les endpoints listés ici sont appelés par l'outil. Au démarrage, on compare
-ce contrat à la spec OpenAPI exposée par le serveur : si un endpoint, une méthode,
-un champ ou une permission a disparu, l'outil passe en lecture seule.
+Only the endpoints listed here are called by the tool. At startup, this
+contract is compared with the OpenAPI spec exposed by the server: if an endpoint, a method,
+a field or a permission has disappeared, the tool goes read-only.
 """
 
 from dataclasses import dataclass, field
@@ -10,27 +10,27 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Endpoint:
-    # Méthodes acceptées, par ordre de préférence (ex. "patch|put" : Immich v3
-    # a déprécié ses PUT de mise à jour au profit d'un remplaçant à venir).
+    # Accepted methods, in order of preference (e.g. "patch|put": Immich v3
+    # deprecated its update PUTs in favour of an upcoming replacement).
     method: str
     path: str
     permission: str | None
     writes: bool = False
-    # Champs du corps de requête (schéma JSON) dont on dépend.
+    # Request body fields (JSON schema) the tool depends on.
     body_fields: tuple[str, ...] = field(default=())
-    # Facultatif : son absence (ou la permission non cochée) dégrade une fonction sans bloquer l'outil.
+    # Optional: its absence (or the permission not ticked) degrades a feature without blocking the tool.
     optional: bool = False
 
 
 CONTRACT: tuple[Endpoint, ...] = (
     Endpoint("get", "/server/about", "server.about"),
     Endpoint("get", "/server/version", None),
-    # Permissions de la clé elle-même (sans permission requise) : dire laquelle manque, ou laquelle est en trop.
+    # Permissions of the key itself (no permission required): say which one is missing, or which one is extra.
     Endpoint("get", "/api-keys/me", None, optional=True),
     Endpoint("post", "/search/metadata", "asset.read", body_fields=("page", "size", "type", "updatedAfter", "withExif", "tagIds")),
     Endpoint("get", "/assets/{id}", "asset.read"),
     Endpoint("get", "/assets/{id}/thumbnail", "asset.view"),
-    # Original, pour identifier les petits sujets en pleine résolution (sinon : aperçu ~1440 px).
+    # Original, to identify small subjects in full resolution (otherwise: ~1440 px preview).
     Endpoint("get", "/assets/{id}/original", "asset.download", optional=True),
     Endpoint("patch|put", "/assets/{id}", "asset.update", writes=True, body_fields=("description",)),
     Endpoint("get", "/tags", "tag.read"),
@@ -40,11 +40,11 @@ CONTRACT: tuple[Endpoint, ...] = (
     Endpoint("delete", "/tags/{id}", "tag.delete", writes=True),
 )
 
-# Permissions à cocher sur la clé API dédiée (et rien d'autre), puis celles qui sont facultatives.
+# Permissions to tick on the dedicated API key (and nothing else), then the optional ones.
 REQUIRED_PERMISSIONS: tuple[str, ...] = tuple(sorted({e.permission for e in CONTRACT if e.permission and not e.optional}))
 OPTIONAL_PERMISSIONS: tuple[str, ...] = tuple(sorted({e.permission for e in CONTRACT if e.permission and e.optional}))
 
-# Versions sur lesquelles le cycle complet a été testé (dev/compat-test.sh).
+# Versions on which the full cycle was tested (dev/compat-test.sh).
 TESTED_VERSIONS: tuple[str, ...] = ("3.3.5",)
 
 
@@ -56,7 +56,7 @@ def _resolve(spec: dict, schema: dict) -> dict:
 
 
 def resolve_method(spec: dict, ep: Endpoint) -> str | None:
-    """Première méthode du contrat disponible et non dépréciée, sinon première disponible."""
+    """First contract method available and not deprecated, otherwise the first available."""
     ops = spec.get("paths", {}).get(ep.path, {})
     available = [m for m in ep.method.split("|") if m in ops]
     for m in available:
@@ -66,25 +66,25 @@ def resolve_method(spec: dict, ep: Endpoint) -> str | None:
 
 
 def check_spec(spec: dict) -> tuple[list[str], list[str]]:
-    """Compare le contrat à la spec du serveur. Retourne (erreurs bloquantes, avertissements)."""
+    """Compare the contract with the server spec. Return (blocking errors, warnings)."""
     errors: list[str] = []
     warnings: list[str] = []
     for ep in CONTRACT:
         method = resolve_method(spec, ep)
         if method is None:
-            (warnings if ep.optional else errors).append(f"{ep.method.upper()} {ep.path} : endpoint absent")
+            (warnings if ep.optional else errors).append(f"{ep.method.upper()} {ep.path}: endpoint missing")
             continue
         op = spec["paths"][ep.path][method]
         label = f"{method.upper()} {ep.path}"
         state = op.get("x-immich-state")
         if op.get("deprecated") or state == "Deprecated":
-            warnings.append(f"{label} : déprécié (toujours fonctionnel)")
+            warnings.append(f"{label}: deprecated (still working)")
         elif state and state != "Stable":
-            warnings.append(f"{label} : état {state}")
+            warnings.append(f"{label}: state {state}")
         if ep.permission and op.get("x-immich-permission") not in (None, ep.permission):
-            (warnings if ep.optional else errors).append(f"{label} : permission {op.get('x-immich-permission')} au lieu de {ep.permission}")
+            (warnings if ep.optional else errors).append(f"{label}: permission {op.get('x-immich-permission')} instead of {ep.permission}")
         if ep.body_fields:
             content = op.get("requestBody", {}).get("content", {}).get("application/json", {})
             props = _resolve(spec, content.get("schema", {})).get("properties", {})
-            errors += [f"{label} : champ '{f}' absent du corps" for f in ep.body_fields if f not in props]
+            errors += [f"{label}: field '{f}' missing from the body" for f in ep.body_fields if f not in props]
     return errors, warnings

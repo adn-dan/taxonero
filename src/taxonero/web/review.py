@@ -1,5 +1,5 @@
-"""Routes de la relecture : images, page Photos (filtres, tri, groupes), détections (valider, rejeter, cadre
-dessiné ou recadré), noms des candidats, séries, actions en lot, lieu indiqué à la main."""
+"""Review routes: images, Photos page (filters, sorting, groups), detections (confirm, reject, box
+drawn or reframed), candidate names, series, bulk actions, place entered by hand."""
 
 import io
 import json
@@ -38,29 +38,29 @@ def register(app, c) -> None:
             data = w.client.thumbnail(asset_id, "thumbnail" if size == "thumbnail" else "preview")
         except Exception as e:
             if is_missing(e):
-                fail(404, "photo_deleted", "photo supprimée d'Immich")
+                fail(404, "photo_deleted", "photo deleted from Immich")
             raise
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/api/full/{asset_id}", dependencies=[Depends(auth)])
     def full_image(asset_id: str):
-        """Photo en pleine définition pour le zoom de la visionneuse (l'aperçu ne fait que 1440 px sur le petit
-        côté) : l'original, réencodé en JPEG pour les formats que le navigateur n'affiche pas. Il faut la
-        permission facultative asset.download ; sans elle, ou pour un format illisible, la visionneuse garde l'aperçu."""
+        """Full-resolution photo for the viewer zoom (the preview is only 1440 px on the short
+        side): the original, re-encoded as JPEG for formats the browser does not display. It needs the
+        optional asset.download permission; without it, or for an unreadable format, the viewer keeps the preview."""
         if not db.execute("SELECT 1 FROM asset WHERE asset_id = ?", (asset_id,)).fetchone():
             raise HTTPException(404)
         try:
             data = original(asset_id)
         except Exception as e:
             if is_missing(e):
-                fail(404, "photo_deleted", "photo supprimée d'Immich")
+                fail(404, "photo_deleted", "photo deleted from Immich")
             raise
         if data is None:
-            fail(404, "no_original", "original indisponible (permission asset.download)")
+            fail(404, "no_original", "original unavailable (asset.download permission)")
         try:
             image = open_image(data, 8192)
         except Exception:
-            fail(415, "bad_image", "format de l'original non lisible")
+            fail(415, "bad_image", "unreadable original format")
         buf = io.BytesIO()
         image.save(buf, "JPEG", quality=90)
         return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
@@ -77,10 +77,10 @@ def register(app, c) -> None:
         city: str | None = None
         camera: str | None = None
         day: str | None = None      # AAAA-MM-JJ
-        month: int | None = None    # 1 à 12, toutes années
+        month: int | None = None    # 1 to 12, all years
         year: int | None = None
 
-    # Filtres de la page Photos : condition SQL sur l'asset (alias a).
+    # Photos page filters: SQL condition on the asset (alias a).
     PHOTO_FILTERS = {
         "pending": "EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND d.status = 'pending')",
         "audit": "EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND d.status = 'pending' AND d.audit = 1)",
@@ -90,26 +90,26 @@ def register(app, c) -> None:
         "none": "a.analyzed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id "
                 "AND d.status NOT IN ('rejected', 'deleted'))",
         "failed": f"a.analyzed_at IS NULL AND a.fail_count >= {MAX_FAILURES}",
-        "all": "1",   # toutes les photos, y compris celles pas encore analysées (badge dans la grille)
-        # Au moins une espèce validée : les photos que comptent les statistiques.
+        "all": "1",   # all photos, including those not analysed yet (badge in the grid)
+        # At least one confirmed species: the photos that the statistics count.
         "identified": "EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND d.status = 'confirmed' AND d.taxon_key IS NOT NULL)",
     }
-    # Tri : par date, ou par confiance de la meilleure détection à relire (relecture en lot des plus sûres,
-    # ou des plus douteuses d'abord).
+    # Sorting: by date, or by confidence of the best detection awaiting review (bulk review of the most certain,
+    # or of the most doubtful first).
     PHOTO_SORTS = {
         "date": "a.taken_at DESC",
         "confident": "(SELECT max(d.score) FROM detection d WHERE d.asset_id = a.asset_id AND d.status = 'pending') DESC, a.taken_at DESC",
         "uncertain": "(SELECT min(d.score) FROM detection d WHERE d.asset_id = a.asset_id AND d.status = 'pending') ASC, a.taken_at DESC",
     }
-    # Groupe : classes (Aves, Insecta…) ou règnes (Plantae, Fungi) du premier candidat d'une détection,
-    # séparés par des virgules (les reptiles sont répartis sur plusieurs classes). Sans classe (poissons
-    # osseux dans GBIF), l'embranchement.
+    # Group: classes (Aves, Insecta…) or kingdoms (Plantae, Fungi) of the top candidate of a detection,
+    # comma separated (reptiles are spread over several classes). Without a class (bony
+    # fishes in GBIF), the phylum.
     GROUP_EXPR = ("CASE WHEN json_extract(d.candidates, '$[0].lineage.kingdom') IN ('Plantae', 'Fungi') "
                   "THEN json_extract(d.candidates, '$[0].lineage.kingdom') "
                   "ELSE COALESCE(json_extract(d.candidates, '$[0].lineage.class'), json_extract(d.candidates, '$[0].lineage.phylum')) END")
 
     def scope_where(sc: "PhotoScope") -> tuple[str, tuple]:
-        """Portée de la grille de photos : espèce, rang, lieu, appareil, date (tous facultatifs, cumulables)."""
+        """Scope of the photo grid: species, rank, place, camera, date (all optional, can be combined)."""
         parts: list[str] = []
         args: list = []
         confirmed = "EXISTS (SELECT 1 FROM detection d {} WHERE d.asset_id = a.asset_id AND d.status = 'confirmed' AND {})"
@@ -118,7 +118,7 @@ def register(app, c) -> None:
             args.append(sc.taxon)
         if sc.rank or sc.name:
             if sc.rank not in HIGHER_RANKS or not sc.name:
-                fail(400, "unknown_rank", "rang inconnu")
+                fail(400, "unknown_rank", "unknown rank")
             parts.append(confirmed.format("JOIN taxon t ON t.gbif_key = d.taxon_key", f"json_extract(t.data, '$.lineage.{sc.rank}') = ?"))
             args.append(sc.name)
         for value, sql in ((sc.country, "a.country = ?"), (sc.city, "a.city = ?"),
@@ -133,7 +133,7 @@ def register(app, c) -> None:
     def photo_where(filter: str, group: str, scope: "PhotoScope | None" = None) -> tuple[str, tuple]:
         where = PHOTO_FILTERS.get(filter)
         if where is None:
-            fail(400, "unknown_filter", "filtre inconnu")
+            fail(400, "unknown_filter", "unknown filter")
         where, args = f"a.missing_at IS NULL AND ({where})", ()
         extra, extra_args = scope_where(scope) if scope else ("", ())
         if extra:
@@ -164,8 +164,8 @@ def register(app, c) -> None:
 
     @app.get("/api/photos/months", dependencies=[Depends(auth)])
     def photo_months(filter: str = "pending", group: str = "", scope: PhotoScope = Depends()):
-        """Photos par mois du filtre, des plus récentes aux plus anciennes (même ordre que la liste par date) :
-        frise de navigation de la page Photos. m : « AAAA-MM », null pour les photos sans date (à la fin)."""
+        """Photos per month of the filter, from the most recent to the oldest (same order as the list by date):
+        navigation timeline of the Photos page. m: "YYYY-MM", null for photos without a date (at the end)."""
         where, args = photo_where(filter, group, scope)
         return [{"m": r[0], "n": r[1]} for r in db.execute(
             f"SELECT substr(a.taken_at, 1, 7) AS m, count(*) FROM asset a WHERE {where} GROUP BY m "
@@ -173,7 +173,7 @@ def register(app, c) -> None:
 
     @app.get("/api/photos/groups", dependencies=[Depends(auth)])
     def photo_groups(filter: str = "pending", scope: PhotoScope = Depends()):
-        """Groupes présents dans un filtre, avec leur nombre de photos (puces de la page Photos)."""
+        """Groups present in a filter, with their number of photos (chips of the Photos page)."""
         where, args = photo_where(filter, "", scope)
         rows = db.execute(
             f"SELECT g, count(DISTINCT asset_id) AS n FROM (SELECT d.asset_id, {GROUP_EXPR} AS g "
@@ -190,12 +190,12 @@ def register(app, c) -> None:
         if body and (body.gbif_key or body.name):
             key = ensure_taxon(body.gbif_key, body.name)
             if key is None:
-                fail(400, "taxon_not_found", "taxon introuvable dans GBIF")
+                fail(400, "taxon_not_found", "taxon not found in GBIF")
             rank = (taxon(key) or {}).get("rank", "species")
             return set_status(det_id, "confirmed", key, rank)
         row = db.execute("SELECT taxon_key FROM detection WHERE id = ?", (det_id,)).fetchone()
         if not row or not row["taxon_key"]:
-            fail(400, "no_taxon", "aucun taxon proposé : choisis un candidat")
+            fail(400, "no_taxon", "no taxon proposed: pick a candidate")
         return set_status(det_id, "confirmed")
 
     class StateIn(BaseModel):
@@ -204,7 +204,7 @@ def register(app, c) -> None:
         taxon_key: int | None = None
         taxon_rank: str | None = None
         reviewed_at: float | None = None
-        # Facultatif (annulation d'un recadrage) : cadre et résultats de l'identification d'origine.
+        # Optional (undoing a reframe): box and results of the original identification.
         x: float | None = None
         y: float | None = None
         w: float | None = None
@@ -217,10 +217,10 @@ def register(app, c) -> None:
 
     @app.post("/api/detections/{det_id}/restore", dependencies=[Depends(auth)])
     def restore(det_id: int, st: StateIn):
-        """Annulation : remet exactement l'état précédent (y compris « validée automatiquement »),
-        pour ne pas compter une relecture fantôme dans la calibration."""
+        """Undo: restore exactly the previous state (including "auto-confirmed"),
+        so as not to count a phantom review in the calibration."""
         if st.status not in ("pending", "confirmed", "rejected", "deleted") or st.confirmed_by not in (None, "auto", "user"):
-            fail(400, "bad_state", "état invalide")
+            fail(400, "bad_state", "invalid state")
         if not db.execute("SELECT 1 FROM detection WHERE id = ?", (det_id,)).fetchone():
             raise HTTPException(404)
         db.execute("UPDATE detection SET status = ?, confirmed_by = ?, taxon_key = ?, taxon_rank = ?, reviewed_at = ? WHERE id = ?",
@@ -242,7 +242,7 @@ def register(app, c) -> None:
         return set_status(det_id, "pending")
 
     def identify(asset_id: str, b: "BoxIn"):
-        """Identifie le sujet d'un cadre (recadrage serré, géographie de la photo)."""
+        """Identify the subject of a box (tight crop, geography of the photo)."""
         a = db.execute("SELECT lat, lon FROM asset WHERE asset_id = ?", (asset_id,)).fetchone()
         if not a:
             raise HTTPException(404)
@@ -252,9 +252,9 @@ def register(app, c) -> None:
             image = open_image(w.client.thumbnail(asset_id, "preview"))
         except Exception as e:
             if is_missing(e):
-                fail(404, "photo_deleted", "photo supprimée d'Immich")
+                fail(404, "photo_deleted", "photo deleted from Immich")
             raise
-        if crop_side(image, box, 0.05) < SMALL_CROP_PX:   # petit sujet : recadrage dans l'original
+        if crop_side(image, box, 0.05) < SMALL_CROP_PX:   # small subject: crop from the original
             image = load_original(lambda: original(asset_id), image) or image
         with lock:
             cands = w.analyzer.classifier.classify([crop(image, box, margin=0.05)])[0]
@@ -269,7 +269,7 @@ def register(app, c) -> None:
 
     @app.post("/api/assets/{asset_id}/boxes", dependencies=[Depends(auth)])
     def add_box(asset_id: str, b: BoxIn):
-        """Boîte dessinée à la main : identification du recadrage, détection à relire."""
+        """Box drawn by hand: identification of the crop, detection awaiting review."""
         box, d, cj, out = identify(asset_id, b)
         db.execute(
             "INSERT INTO detection (asset_id, x, y, w, h, det_score, box_label, detector, source, status, taxon_key, "
@@ -282,7 +282,7 @@ def register(app, c) -> None:
 
     @app.post("/api/assets/{asset_id}/reanalyze", dependencies=[Depends(auth)])
     def reanalyze(asset_id: str):
-        """Ré-analyse la photo tout de suite. Comme en lot : les détections relues ou dessinées sont gardées."""
+        """Analyse the photo again right away. As in bulk: reviewed or drawn detections are kept."""
         try:
             with lock:
                 w.reanalyze(asset_id)
@@ -292,20 +292,20 @@ def register(app, c) -> None:
             fail(409, "cycle_running", str(e))
         except (httpx.HTTPError, OSError) as e:
             if is_missing(e):
-                fail(404, "photo_deleted", "photo supprimée d'Immich")
+                fail(404, "photo_deleted", "photo deleted from Immich")
             raise
         return asset_json(asset_id)
 
     @app.put("/api/detections/{det_id}/box", dependencies=[Depends(auth)])
     def reframe(det_id: int, b: BoxIn):
-        """Recadrage d'une détection (automatique ou manuelle) : nouveau cadre, ré-identification.
-        Une espèce déjà validée par l'utilisateur est conservée ; seuls les candidats sont recalculés."""
+        """Reframe a detection (automatic or manual): new box, new identification.
+        A species already confirmed by the user is kept; only the candidates are recomputed."""
         row = db.execute("SELECT asset_id, status, confirmed_by FROM detection WHERE id = ?", (det_id,)).fetchone()
         if not row:
             raise HTTPException(404)
         box, d, cj, out = identify(row["asset_id"], b)
         keep = row["status"] == "confirmed" and row["confirmed_by"] == "user"
-        # frame_support effacé : le nouveau cadre est identifié sur le recadrage seul.
+        # frame_support cleared: the new box is identified on the crop alone.
         db.execute("UPDATE detection SET x = ?, y = ?, w = ?, h = ?, candidates = ?, candidates_out = ?, margin = ?, plausibility = ?, "
                    "frame_support = NULL, smoothed = NULL, presmooth = NULL"
                    + ("" if keep else ", taxon_key = ?, taxon_rank = ?, score = ?, status = 'pending', confirmed_by = NULL")
@@ -317,9 +317,9 @@ def register(app, c) -> None:
 
     @app.delete("/api/detections/{det_id}", dependencies=[Depends(auth)])
     def delete_detection(det_id: int, purge: bool = False):
-        """Supprime une détection (automatique ou manuelle) : ce n'est pas un sujet. Elle reste en base,
-        marquée « supprimée », pour qu'une ré-analyse ne la recrée pas et que l'annulation reste possible.
-        purge : annulation d'une boîte qu'on vient de dessiner, effacée pour de bon."""
+        """Delete a detection (automatic or manual): it is not a subject. It stays in the database,
+        marked "deleted", so that a re-analysis does not create it again and undo stays possible.
+        purge: undoing a box just drawn, erased for good."""
         row = db.execute("SELECT source FROM detection WHERE id = ?", (det_id,)).fetchone()
         if not row:
             raise HTTPException(404)
@@ -339,7 +339,7 @@ def register(app, c) -> None:
                 with lock:
                     ensure_taxon(key, name)
             except Exception as e:
-                log.info("nom du taxon %s non récupéré : %s", key, e)
+                log.info("name of taxon %s not fetched: %s", key, e)
             finally:
                 names_pending.discard(key)
 
@@ -349,8 +349,8 @@ def register(app, c) -> None:
 
     @app.post("/api/names", dependencies=[Depends(auth)])
     def names(refs: list[NameRef]):
-        """Noms communs des candidats. Ceux qui manquent sont récupérés en arrière-plan
-        (GBIF + Wikidata) : redemander quelques secondes plus tard."""
+        """Common names of the candidates. Missing ones are fetched in the background
+        (GBIF + Wikidata): ask again a few seconds later."""
         out, missing = {}, []
         for r in refs:
             t = store.load_taxon(db, r.key)
@@ -363,17 +363,17 @@ def register(app, c) -> None:
             threading.Thread(target=_enrich_names, args=(missing,), daemon=True).start()
         return {"names": out, "pending": len({k for k, _ in missing} | {r.key for r in refs if r.key in names_pending and r.key not in out})}
 
-    # -- séries et relecture en lot --------------------------------------------
+    # -- series and bulk review --------------------------------------------
 
     def series_of(asset_id: str) -> list[str]:
-        """Photos de la même série (rafale) que asset_id, elle comprise, dans l'ordre chronologique (règles de
-        series.py, calculées ici à la demande : à jour même avant le prochain cycle)."""
+        """Photos of the same series (burst) as asset_id, itself included, in chronological order (rules of
+        series.py, computed here on demand: up to date even before the next cycle)."""
         a = db.execute("SELECT asset_id, taken_at, lat, lon, make, model FROM asset WHERE asset_id = ?", (asset_id,)).fetchone()
         t0 = series.seconds(a["taken_at"]) if a and (a["make"] or a["model"]) else None
         if t0 is None:
             return [asset_id] if a else []
-        # Fenêtre large puis chaînage de proche en proche. Un jour de marge : les dates sans fuseau (sources fichiers)
-        # sont en heure locale, ici comparées telles quelles à une borne en UTC.
+        # Wide window then step-by-step chaining. One day of margin: dates without a time zone (file sources)
+        # are in local time, compared here as is with a UTC bound.
         iso = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         rows = [dict(r) for r in db.execute(
             "SELECT asset_id, taken_at, lat, lon FROM asset WHERE missing_at IS NULL AND make IS ? AND model IS ? "
@@ -381,15 +381,15 @@ def register(app, c) -> None:
         for r in rows:
             r["t"] = series.seconds(r["taken_at"])
         rows = sorted((r for r in rows if r["t"] is not None), key=lambda r: r["t"])
-        # Même découpage que series.assign (durée bornée), sur la fenêtre de ±1 jour.
+        # Same split as series.assign (bounded duration), over the ±1 day window.
         chain = next((c for c in series.chains(rows) if any(r["asset_id"] == asset_id for r in c)), None)
-        if chain is None:   # photo masquée (disparue de la source) : seule
+        if chain is None:   # hidden photo (gone from the source): alone
             return [asset_id]
         return [r["asset_id"] for r in chain]
 
     def series_matches(asset_id: str, key: int) -> list[dict]:
-        """Dans la série, les détections à relire où ce taxon est proposé (parmi les 3 premiers candidats) :
-        une par photo, celle où il est le mieux placé. La photo de départ est exclue."""
+        """In the series, the detections awaiting review where this taxon is proposed (among the top 3 candidates):
+        one per photo, the one where it ranks best. The starting photo is excluded."""
         out = []
         for aid in series_of(asset_id):
             if aid == asset_id:
@@ -408,7 +408,7 @@ def register(app, c) -> None:
 
     @app.get("/api/assets/{asset_id}/series", dependencies=[Depends(auth)])
     def get_series(asset_id: str, key: int | None = None):
-        """Série de la photo et, si key est donné, les détections de la série qu'on peut valider avec ce taxon."""
+        """Series of the photo and, if key is given, the detections of the series that can be confirmed with this taxon."""
         ids = series_of(asset_id)
         if not ids:
             raise HTTPException(404)
@@ -419,12 +419,12 @@ def register(app, c) -> None:
 
     @app.post("/api/assets/{asset_id}/series/confirm", dependencies=[Depends(auth)])
     def series_confirm(asset_id: str, body: SeriesIn):
-        """Valide le même taxon sur les autres photos de la série où il est proposé. Renvoie l'état d'avant
-        de chaque détection modifiée, pour l'annulation."""
-        # Clé enregistrée, pas forcément celle demandée : un synonyme est résolu vers le nom accepté.
+        """Confirm the same taxon on the other photos of the series where it is proposed. Return the previous state
+        of each changed detection, for undo."""
+        # Saved key, not necessarily the requested one: a synonym is resolved to the accepted name.
         key = ensure_taxon(body.gbif_key, None)
         if not key:
-            fail(400, "taxon_not_found", "taxon introuvable dans GBIF")
+            fail(400, "taxon_not_found", "taxon not found in GBIF")
         rank = (taxon(key) or {}).get("rank", "species")
         changed = []
         for m in series_matches(asset_id, key):
@@ -433,7 +433,7 @@ def register(app, c) -> None:
         return {"changed": changed}
 
     def selected(body) -> list[str]:
-        """Photos visées par une action en lot : la liste donnée, ou tout le filtre (every) sauf les exclues."""
+        """Photos targeted by a bulk action: the given list, or the whole filter (every) except the excluded ones."""
         if not body.every:
             return body.asset_ids
         where, args = photo_where(body.filter, body.group, body.scope)
@@ -442,8 +442,8 @@ def register(app, c) -> None:
 
     class BulkIn(BaseModel):
         asset_ids: list[str] = []
-        filter: str = "pending"   # filtre affiché : décide des détections rejetées
-        # every : toutes les photos du filtre (« Tout sélectionner »), sauf celles d'exclude, au lieu d'asset_ids.
+        filter: str = "pending"   # filter shown: decides which detections are rejected
+        # every: all photos of the filter ("Select all"), except those in exclude, instead of asset_ids.
         every: bool = False
         group: str = ""
         scope: PhotoScope = PhotoScope()
@@ -455,18 +455,18 @@ def register(app, c) -> None:
 
     @app.post("/api/photos/bulk", dependencies=[Depends(auth)])
     def bulk(body: BulkIn):
-        """Relecture en lot. Renvoie l'état d'avant des détections modifiées (changed) et les détections créées
-        (created), pour l'annulation.
-        - confirm : les détections à relire, avec le taxon proposé (celles sans proposition restent à relire) ;
-        - reject : par photo, ce qui reste à relire ; s'il n'y a rien à relire, ce qui est validé. La règle ne dépend
-          pas du filtre affiché, et une validation faite à la main ne saute pas tant qu'il reste à relire ;
-        - delete : toutes les détections de la photo (« ce n'est pas un sujet ») ;
-        - reset : détections validées ou rejetées remises à relire ;
-        - taxon : ce taxon validé sur la détection à relire de chaque photo ; une photo sans détection reçoit une
-          détection « image entière » ; une photo à plusieurs sujets à relire est laissée (skipped) ;
-        - reanalyze : photos remises dans la file d'analyse (prochain cycle ; détections relues gardées)."""
+        """Bulk review. Return the previous state of the changed detections (changed) and the created detections
+        (created), for undo.
+        - confirm: the detections awaiting review, with the proposed taxon (those without a proposal stay to review);
+        - reject: per photo, what remains to review; if there is nothing to review, what is confirmed. The rule does not
+          depend on the filter shown, and a confirmation done by hand is not dropped while there is something left to review;
+        - delete: all detections of the photo ("this is not a subject");
+        - reset: confirmed or rejected detections put back to review;
+        - taxon: this taxon confirmed on the detection awaiting review of each photo; a photo without a detection gets a
+          "whole image" detection; a photo with several subjects to review is left (skipped);
+        - reanalyze: photos put back in the analysis queue (next cycle; reviewed detections kept)."""
         if body.action not in ("confirm", "reject", "reset", "delete", "taxon", "reanalyze"):
-            fail(400, "unknown_action", "action inconnue")
+            fail(400, "unknown_action", "unknown action")
         ids = selected(body)
         if body.action == "reanalyze":
             for i in range(0, len(ids), 500):
@@ -477,10 +477,10 @@ def register(app, c) -> None:
             return {"changed": [], "created": [], "skipped": 0, "requeued": len(ids)}
         rank = key = None
         if body.action == "taxon":
-            # Clé enregistrée, pas forcément celle demandée : un synonyme est résolu vers le nom accepté.
+            # Saved key, not necessarily the requested one: a synonym is resolved to the accepted name.
             key = ensure_taxon(body.gbif_key, None) if body.gbif_key else None
             if not key:
-                fail(400, "taxon_not_found", "taxon introuvable dans GBIF")
+                fail(400, "taxon_not_found", "taxon not found in GBIF")
             rank = (taxon(key) or {}).get("rank", "species")
         targets = {"confirm": "status = 'pending'", "taxon": "status = 'pending'",
                    "reset": "status IN ('confirmed', 'rejected')",
@@ -497,7 +497,7 @@ def register(app, c) -> None:
                     continue
                 if not rows:
                     if db.execute("SELECT 1 FROM detection WHERE asset_id = ? AND status IN ('pending', 'confirmed')", (aid,)).fetchone():
-                        skipped += 1   # déjà identifiée : on ne lui ajoute pas un second sujet
+                        skipped += 1   # already identified: no second subject is added
                         continue
                     cur = db.execute(
                         "INSERT INTO detection (asset_id, x, y, w, h, det_score, box_label, detector, source, status, confirmed_by, "
@@ -527,19 +527,19 @@ def register(app, c) -> None:
         group: str = ""
         scope: PhotoScope = PhotoScope()
         exclude: list[str] = []
-        lat: float | None = None   # None : effacer le lieu indiqué à la main
+        lat: float | None = None   # None: clear the place entered by hand
         lon: float | None = None
 
     @app.post("/api/assets/location", dependencies=[Depends(auth)])
     def set_location(body: LocationIn):
-        """Lieu indiqué à la main pour des photos sans GPS (un GPS de la source n'est jamais remplacé). Les détections
-        à relire sont reclassées avec ce lieu ; les photos pas encore analysées l'utiliseront. Au-delà de quelques
-        photos, le reclassement continue en tâche de fond (requêtes GBIF pour la nouvelle position)."""
+        """Place entered by hand for photos without GPS (a GPS from the source is never replaced). Detections
+        awaiting review are reclassified with this place; photos not analysed yet will use it. Beyond a few
+        photos, the reclassification goes on in the background (GBIF requests for the new position)."""
         if (body.lat is None) != (body.lon is None):
-            fail(400, "bad_location", "latitude et longitude vont ensemble")
+            fail(400, "bad_location", "latitude and longitude go together")
         clear = body.lat is None
         if not clear and not (-90 <= body.lat <= 90 and -180 <= body.lon <= 180):
-            fail(400, "bad_location", "latitude ou longitude hors limites")
+            fail(400, "bad_location", "latitude or longitude out of range")
         ids, changed, previous = selected(body), [], []
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
@@ -559,23 +559,23 @@ def register(app, c) -> None:
                 "previous": previous}
 
     def reclassify(changed: list[str]) -> tuple[int | None, bool]:
-        """Détections à relire reclassées après un changement de lieu ; en tâche de fond au-delà de 20 photos."""
+        """Detections awaiting review reclassified after a change of place; in the background beyond 20 photos."""
         if len(changed) > 20:
             def run():
                 own = store.connect(s.db_path)
                 try:
                     relocate(own, Taxonomy(own, langs=s.langs, user_agent=s.user_agent, backbone=tx.backbone_path), s, changed)
                 except Exception:
-                    log.exception("reclassement après changement de lieu en échec")
+                    log.exception("reclassification after a change of place failed")
                 finally:
                     own.close()
-            threading.Thread(target=run, daemon=True, name="lieu").start()
+            threading.Thread(target=run, daemon=True, name="place").start()
             return None, True
         try:
             return relocate(db, tx, s, changed), False
-        except Exception:   # lieu déjà enregistré ; réseau en panne : pas de transaction laissée ouverte
+        except Exception:   # place already saved; network down: no transaction left open
             db.rollback()
-            log.exception("reclassement après changement de lieu en échec")
+            log.exception("reclassification after a change of place failed")
             return 0, False
 
     class PreviousLocation(BaseModel):
@@ -586,7 +586,7 @@ def register(app, c) -> None:
 
     @app.post("/api/assets/location-undo", dependencies=[Depends(auth)])
     def undo_location(items: list[PreviousLocation]):
-        """Annulation d'un lieu indiqué à la main : les valeurs d'avant, puis le reclassement."""
+        """Undo a place entered by hand: the previous values, then the reclassification."""
         db.executemany("UPDATE asset SET lat = ?, lon = ?, geo_user = ? WHERE asset_id = ?",
                        [(p.lat, p.lon, p.geo_user, p.asset_id) for p in items])
         db.commit()
@@ -595,7 +595,7 @@ def register(app, c) -> None:
 
     @app.get("/api/search", dependencies=[Depends(auth)])
     def search(q: str = Query("", max_length=100)):
-        """Lieux, appareils et fichiers dont le nom contient q (les taxons sont cherchés dans le navigateur)."""
+        """Places, cameras and files whose name contains q (taxa are searched in the browser)."""
         if len(q.strip()) < 2:
             return {"places": [], "cameras": [], "files": []}
         like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -619,10 +619,10 @@ def register(app, c) -> None:
 
     @app.post("/api/detections/restore-many", dependencies=[Depends(auth)])
     def restore_many(items: list[RestoreIn]):
-        """Annulation d'une relecture en lot : l'état d'avant de chaque détection, en une transaction."""
+        """Undo a bulk review: the previous state of each detection, in one transaction."""
         for st in items:
             if st.status not in ("pending", "confirmed", "rejected", "deleted") or st.confirmed_by not in (None, "auto", "user"):
-                fail(400, "bad_state", "état invalide")
+                fail(400, "bad_state", "invalid state")
         db.executemany("UPDATE detection SET status = ?, confirmed_by = ?, taxon_key = ?, taxon_rank = ?, reviewed_at = ? WHERE id = ?",
                        [(st.status, st.confirmed_by, st.taxon_key, st.taxon_rank, st.reviewed_at, st.id) for st in items])
         db.commit()
@@ -634,7 +634,7 @@ def register(app, c) -> None:
 
     @app.post("/api/photos/bulk-undo", dependencies=[Depends(auth)])
     def bulk_undo(body: UndoIn):
-        """Annulation d'une action en lot : états d'avant remis, détections créées (« image entière ») effacées."""
+        """Undo a bulk action: previous states restored, created detections ("whole image") erased."""
         restore_many(body.changed)
         for i in range(0, len(body.created), 500):
             chunk = body.created[i:i + 500]

@@ -1,19 +1,19 @@
 /* ============================== comparaison en images ============================== */
-/* Le sujet (recadré dans la photo) à gauche, et pour chaque candidat une rangée de photos de référence
-   (iNaturalist, licences Creative Commons). Cliquer une photo de référence l'affiche à côté du sujet.
-   Clavier : 1-5 candidat, flèches gauche et droite photo de référence, haut et bas autre photo de ta série, Entrée
-   choisir l'espèce (toujours pour la détection de départ).
-   Chaque photo se zoome (molette, pincement, clic à la souris, double appui au doigt) et se déplace ; au premier zoom, sa version en
-   pleine définition remplace celle affichée.
-   Utilisée par la visionneuse et la page Identifier. */
+/* The subject (cropped from the photo) on the left, and for each candidate a row of reference photos
+   (iNaturalist, Creative Commons licences). Clicking a reference photo shows it next to the subject.
+   Keyboard: 1-5 candidate, left and right arrows reference photo, up and down another photo of your series, Enter
+   choose the species (always for the starting detection).
+   Each photo can be zoomed (wheel, pinch, mouse click, double tap with a finger) and moved; at the first zoom, its
+   full-resolution version replaces the one shown.
+   Used by the viewer and the Identify page. */
 const CMP = { open: false, req: 0, onPick: null, cands: [], current: null, k: -1, refs: new Map() };
-const REF = new Map();   // gbif_key -> promesse des photos de référence (une requête par taxon et par session)
+const REF = new Map();   // gbif_key -> promise of the reference photos (one request per taxon and per session)
 const refPhotos = c => {
   if (!REF.has(c.gbif_key)) REF.set(c.gbif_key, api(`/api/refphotos/${c.gbif_key}?name=${encodeURIComponent(c.name)}`)
     .catch(() => { REF.delete(c.gbif_key); return null; }));
   return REF.get(c.gbif_key);
 };
-/* Recadrage du sujet (avec une marge) dans une image déjà chargée, en URL de données. */
+/* Crop of the subject (with a margin) in an image already loaded, as a data URL. */
 function subjectCrop(img, box) {
   const W = img.naturalWidth, H = img.naturalHeight;
   if (!W || !H) return '';
@@ -24,7 +24,7 @@ function subjectCrop(img, box) {
   cv.getContext('2d').drawImage(img, x, y, w, h, 0, 0, cv.width, cv.height);
   try { return cv.toDataURL('image/jpeg', 0.9); } catch (e) { return ''; }
 }
-/* Zoom d'une photo dans son cadre ; hires(img) : remplace l'image par sa pleine définition, une fois. */
+/* Zoom of a photo in its frame; hires(img): replaces the image with its full resolution, once. */
 function cmpZoom(frame, hires) {
   const img = frame.querySelector('img'); if (!img) return;
   const pz = Panzoom(img, { minScale: 1, maxScale: 8, contain: 'outside', cursor: '' });
@@ -35,14 +35,14 @@ function cmpZoom(frame, hires) {
   });
   frame.addEventListener('wheel', e => { e.preventDefault();
     pz.zoomToPoint(Math.min(8, Math.max(1, pz.getScale() * wheelFactor(e))), { clientX: e.clientX, clientY: e.clientY }, { animate: false }); }, { passive: false });
-  // Détection à la main : Panzoom annule les événements de la souris, click et dblclick n'arrivent pas.
-  // Souris : un clic zoome ou revient (le second d'un double clic est ignoré). Doigt : double appui.
+  // Detection by hand: Panzoom cancels mouse events, click and dblclick do not arrive.
+  // Mouse: one click zooms or goes back (the second click of a double click is ignored). Finger: double tap.
   const toggle = e => {
     if (pz.getScale() > 1.001) pz.reset({ animate: false });
     else pz.zoomToPoint(3, { clientX: e.clientX, clientY: e.clientY }, { animate: false });
   };
   let last = null, press = null, lastClick = -1000;
-  frame.addEventListener('pointerdown', e => { press = { x: e.clientX, y: e.clientY }; }, true);   // capture : Panzoom l'arrête sur l'image
+  frame.addEventListener('pointerdown', e => { press = { x: e.clientX, y: e.clientY }; }, true);   // capture: Panzoom stops it on the image
   frame.addEventListener('pointerup', e => {
     const still = press && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5;
     press = null;
@@ -57,7 +57,7 @@ function cmpZoom(frame, hires) {
     if (dbl) toggle(e);
   });
 }
-/* Lieu de ta photo : coordonnées, ou lien pour l'indiquer. Un GPS de la photo ne se modifie pas. */
+/* Place of your photo: coordinates, or a link to enter it. A GPS from the photo cannot be changed. */
 function cmpPlace({ place, onLocate }) {
   if (!place) return '';
   const known = place.lat != null, coord = v => v.toLocaleString(LANG, { maximumFractionDigits: 4 });
@@ -65,20 +65,20 @@ function cmpPlace({ place, onLocate }) {
   return `<span class="cmploc">📍 <span title="${esc(text)}">${esc(text)}</span>${onLocate && (!known || place.user)
     ? `<button class="linkbtn" id="cmp-loc">${t(known ? 'loc.change' : 'loc.set')}</button>` : ''}</span>`;
 }
-/* Zoom de ta photo ; au premier zoom, le sujet recadré dans l'original. */
+/* Zoom of your photo; at the first zoom, the subject cropped from the original. */
 function cmpMineZoom(source, box, full) {
   const req = CMP.req;
   cmpZoom($('#cmp-mine'), full && (img => {
     const im = new Image(), ar = source.naturalWidth / source.naturalHeight;
-    im.onload = () => {   // proportions différentes (photo recadrée dans Immich) : le cadre ne tomberait plus juste
+    im.onload = () => {   // different proportions (photo cropped in Immich): the box would no longer fit
       if (req !== CMP.req || !img.isConnected || Math.abs(im.naturalWidth / im.naturalHeight / ar - 1) > 0.02) return;
       const hi = subjectCrop(im, box || { x: 0, y: 0, w: 1, h: 1 });
       if (hi) img.src = hi;
     };
-    im.src = full;   // en cas d'échec (pas de permission, RAW illisible) : on garde l'aperçu
+    im.src = full;   // on failure (no permission, unreadable RAW): the preview is kept
   }));
 }
-/* Série de ta photo : les autres clichés du même sujet, pour le voir sous d'autres angles. */
+/* Series of your photo: the other shots of the same subject, to see it from other angles. */
 async function cmpLoadSeries(id, img, box, full, req) {
   const r = await api(`/api/assets/${id}/series`).catch(() => null);
   if (req !== CMP.req || !r || r.assets.length < 2) return;
@@ -90,8 +90,8 @@ async function cmpLoadSeries(id, img, box, full, req) {
   cmpSeriesCount();
 }
 function cmpSeriesCount() { $('#cmp-sn').textContent = `${CMP.series.i + 1}/${CMP.series.ids.length}`; }
-/* Le même sujet dans une autre photo : la détection qui propose le mieux l'un des candidats comparés, à défaut la
-   première, et la photo entière s'il n'y en a pas. */
+/* The same subject in another photo: the detection that best proposes one of the compared candidates, failing that the
+   first one, and the whole photo if there is none. */
 function cmpSubjectIn(asset) {
   const keys = new Set(CMP.cands.map(c => c.gbif_key));
   const score = d => keys.has(d.taxon_key) ? 2 : Math.max(0, ...(d.candidates || []).filter(c => keys.has(c.gbif_key)).map(c => c.p || 0));
@@ -123,14 +123,14 @@ async function cmpSeriesGo(step) {
   cmpMineZoom(view.img, view.box, view.full);
 }
 /* opts : { img, box, candidates: [{gbif_key, name, p}], onPick(c) | null, focus: gbif_key, full: URL de l'original,
-   place: {lat, lon, user} (user : indiqué à la main), onLocate() : indiquer ou changer le lieu,
-   asset: id de la photo, pour parcourir sa série } */
+   place: {lat, lon, user} (user: entered by hand), onLocate(): enter or change the place,
+   asset: id of the photo, to browse its series } */
 function openCompare(opts) {
   const req = ++CMP.req, cands = opts.candidates.filter(c => c.gbif_key).slice(0, 5);
   Object.assign(CMP, { open: true, onPick: opts.onPick || null, cands, current: opts.focus ?? cands[0]?.gbif_key, k: -1, refs: new Map() });
   let el = $('#compare');
   if (!el) { el = document.createElement('div'); el.id = 'compare'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.tabIndex = -1; document.body.append(el);
-    // Clic à la souris : le bouton rend le focus, Entrée continue donc de choisir l'espèce.
+    // Mouse click: the button gives the focus back, so Enter still chooses the species.
     el.addEventListener('click', e => { if (e.detail) e.target.closest?.('button,a')?.blur(); }); }
   CMP.series = null;
   const crop = subjectCrop(opts.img, opts.box || { x: 0, y: 0, w: 1, h: 1 });
@@ -168,7 +168,7 @@ function openCompare(opts) {
 }
 function cmpMarkRow() { $$('#compare .cmprow').forEach(r => r.classList.toggle('cur', +r.dataset.key === CMP.current)); }
 function cmpPick(c) { if (!c || !CMP.onPick) return; const pick = CMP.onPick; closeCompare(); pick(c); }
-/* Candidat choisi au clavier : sa première photo, ou le cadre vide s'il n'en a pas (ou pas encore). */
+/* Candidate chosen with the keyboard: its first photo, or the empty frame if it has none (or not yet). */
 function cmpSelect(c) {
   CMP.current = c.gbif_key; CMP.k = -1; cmpMarkRow();
   $(`#compare .cmprow[data-key="${c.gbif_key}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -180,7 +180,7 @@ function cmpSelect(c) {
 function cmpKey(e) {
   if (e.key === 'Escape') { closeCompare(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (['Enter', ' '].includes(e.key) && e.target.closest?.('button,a')) return;   // le bouton qui a le focus s'active
+  if (['Enter', ' '].includes(e.key) && e.target.closest?.('button,a')) return;   // the focused button gets activated
   const c = CMP.cands.find(x => x.gbif_key === CMP.current);
   if (/^[1-5]$/.test(e.key)) { if (CMP.cands[+e.key - 1]) cmpSelect(CMP.cands[+e.key - 1]); }
   else if (e.key === 'Enter') cmpPick(c);

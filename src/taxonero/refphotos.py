@@ -1,7 +1,7 @@
-"""Photos de référence d'un taxon pour comparer : celles qu'iNaturalist met en avant sur la fiche du taxon (choisies
-par sa communauté, en général une douzaine : mâle, femelle, juvénile, détails). Seules les photos sous licence
-Creative Commons sont gardées, avec leur auteur et leur licence ; elles restent hébergées par iNaturalist (le
-navigateur les charge de là-bas), rien n'est copié. Réponses mises en cache 30 jours (http_cache)."""
+"""Reference photos of a taxon for comparison: those iNaturalist highlights on the taxon page (chosen
+by its community, usually a dozen: male, female, juvenile, details). Only photos under a
+Creative Commons licence are kept, with their author and licence; they stay hosted by iNaturalist (the
+browser loads them from there), nothing is copied. Responses cached for 30 days (http_cache)."""
 
 from .taxonomy import Taxonomy
 
@@ -10,9 +10,9 @@ MAX_PHOTOS = 12
 
 
 def inat_taxon(tx: Taxonomy, names: list[str], synonyms=None) -> dict | None:
-    """Taxon iNaturalist du même nom scientifique (essayés dans l'ordre : nom accepté, nom donné par le modèle), ou
-    dont ce nom est un synonyme (matched_term) : iNaturalist et GBIF ne classent pas toujours pareil (Ardea modesta
-    y est Ardea alba modesta, Felis manul y est Otocolobus manul). synonyms() : autres noms, demandés en dernier recours."""
+    """iNaturalist taxon with the same scientific name (tried in order: accepted name, name given by the model), or
+    of which this name is a synonym (matched_term): iNaturalist and GBIF do not always classify alike (Ardea modesta
+    is Ardea alba modesta there, Felis manul is Otocolobus manul). synonyms(): other names, asked as a last resort."""
     def tries():
         yield from names
         if synonyms:
@@ -35,10 +35,10 @@ def photos(tx: Taxonomy, names: list[str], synonyms=None) -> dict:
     out = []
     for tp in full.get("taxon_photos") or [{"photo": t.get("default_photo") or {}}]:
         p = tp.get("photo") or {}
-        if not p.get("license_code") or not p.get("medium_url"):   # « tous droits réservés » : pas affichée
+        if not p.get("license_code") or not p.get("medium_url"):   # "all rights reserved": not shown
             continue
         out.append({"thumb": p["medium_url"], "large": p["medium_url"].replace("/medium.", "/large."),
-                    "full": p["medium_url"].replace("/medium.", "/original."),   # chargée seulement au zoom
+                    "full": p["medium_url"].replace("/medium.", "/original."),   # loaded only when zooming
                     "attribution": p.get("attribution", ""), "license": p["license_code"].upper(),
                     "url": f"https://www.inaturalist.org/photos/{p['id']}" if p.get("id") else None})
         if len(out) >= MAX_PHOTOS:

@@ -1,9 +1,9 @@
-"""Journal de la page Paramètres (GET /api/logs).
+"""Log of the Settings page (GET /api/logs).
 
-Les lignes d'information restent en mémoire et s'effacent les unes les autres. Les avertissements et les erreurs ont
-leur propre réserve, que les autres lignes ne chassent pas, recopiée dans data/ pour survivre aux redémarrages. Le
-journal complet reste sur la sortie standard (docker logs). Les secrets connus (clé API, mot de passe) sont masqués
-dès l'enregistrement de la ligne.
+Information lines stay in memory and push each other out. Warnings and errors have
+their own reserve, which other lines do not push out, copied to data/ to survive restarts. The
+full log stays on standard output (docker logs). Known secrets (API key, password) are masked
+as soon as the line is recorded.
 """
 
 import json
@@ -17,10 +17,10 @@ from pathlib import Path
 from .config import Settings
 
 CAPACITY = 2000    # lignes d'information
-KEEP = 2000        # avertissements et erreurs
-MAX_CHARS = 8000   # une ligne : trace d'erreur comprise
+KEEP = 2000        # warnings and errors
+MAX_CHARS = 8000   # one line, error trace included
 MASK = "***"
-MIN_SECRET = 4     # plus court, le masquage abîmerait le texte sans rien protéger
+MIN_SECRET = 4     # shorter, masking would damage the text without protecting anything
 FILENAME = "journal-erreurs.jsonl"
 
 
@@ -32,13 +32,13 @@ class LogBuffer(logging.Handler):
         self.path: Path | None = None
         self.entries: deque[dict] = deque(maxlen=capacity)
         self.kept: deque[dict] = deque(maxlen=keep)
-        self.appended = 0   # lignes ajoutées au fichier depuis qu'il a été réduit
+        self.appended = 0   # lines appended to the file since it was shrunk
         self.entries_lock = threading.Lock()
-        # Numéros croissants d'un lancement à l'autre : la page ouverte reprend sans rien manquer après un redémarrage.
+        # Increasing numbers from one launch to the next: the open page resumes without missing anything after a restart.
         self.last_id = int(time.time() * 1000)
 
     def bind(self, s: Settings) -> None:
-        """Réglages (secrets à masquer) et dossier de données ; relit ce qui y a été conservé."""
+        """Settings (secrets to mask) and data folder; reads back what was kept there."""
         self.settings = s
         path = Path(s.data_dir) / FILENAME
         if path == self.path:
@@ -50,10 +50,10 @@ class LogBuffer(logging.Handler):
                 lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             except OSError:
                 return
-            for line in lines:   # la réserve ne garde que les dernières
+            for line in lines:   # the reserve keeps only the latest ones
                 try:
                     self.kept.append(json.loads(line))
-                except ValueError:   # dernière ligne coupée par un arrêt brutal
+                except ValueError:   # last line cut by an abrupt stop
                     continue
             if self.kept:
                 self.last_id = max(self.last_id, self.kept[-1]["id"])
@@ -66,7 +66,7 @@ class LogBuffer(logging.Handler):
         return text
 
     def _save(self, entry: dict) -> None:
-        """Ajout au fichier ; réduit à ce qui est gardé quand il a doublé. Fichier lisible par son seul propriétaire."""
+        """Append to the file; shrunk to what is kept when it has doubled. File readable by its owner only."""
         if not self.path:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +96,7 @@ class LogBuffer(logging.Handler):
                     self.kept.append(entry)
                     try:
                         self._save(entry)
-                    except OSError:   # disque plein, droits : la ligne reste en mémoire et sur la sortie standard
+                    except OSError:   # disk full, permissions: the line stays in memory and on standard output
                         pass
                 else:
                     self.entries.append(entry)
@@ -104,8 +104,8 @@ class LogBuffer(logging.Handler):
             self.handleError(record)
 
     def clear(self) -> None:
-        """Bouton « Effacer » : tout le journal, fichier compris. La numérotation continue (la page ouverte
-        reprend après la dernière ligne effacée)."""
+        """"Clear" button: the whole log, file included. Numbering goes on (the open page
+        resumes after the last cleared line)."""
         with self.entries_lock:
             self.entries.clear()
             self.kept.clear()
@@ -125,7 +125,7 @@ BUFFER = LogBuffer()
 
 
 def install(s: Settings) -> None:
-    """À appeler avant le démarrage du worker, pour garder aussi les premières lignes. Rappelable sans risque."""
+    """To call before the worker starts, to keep the first lines too. Safe to call again."""
     BUFFER.bind(s)
     root = logging.getLogger()
     if BUFFER not in root.handlers:

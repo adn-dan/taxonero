@@ -1,14 +1,14 @@
-"""Édition de bureau : taxonero desktop.
+"""Desktop edition: taxonero desktop.
 
-Le même programme que l'édition serveur, lancé sur l'ordinateur de l'utilisateur :
-- données dans le dossier utilisateur du système (config.user_data_dir), modèles compris ;
-- dashboard sur 127.0.0.1 seulement, sans identifiant ni mot de passe : un jeton aléatoire par lancement, passé
-  dans l'adresse ouverte par l'application puis gardé dans un cookie (voir web.desktop_session) ;
-- tout dans une fenêtre d'application (pywebview : WebView2 sous Windows, WebKit sous macOS, Qt sous Linux ;
-  pip install '.[desktop]'), jamais dans le navigateur ; sans elle, un message d'erreur ;
-- source des photos (Immich ou dossier) et écriture des résultats réglées dans le dashboard.
+The same program as the server edition, run on the user's computer:
+- data in the system user folder (config.user_data_dir), models included;
+- dashboard on 127.0.0.1 only, without login or password: one random token per launch, passed
+  in the address opened by the application then kept in a cookie (see web.desktop_session);
+- everything in an application window (pywebview: WebView2 on Windows, WebKit on macOS, Qt on Linux;
+  pip install '.[desktop]'), never in the browser; without it, an error message;
+- photo source (Immich or folder) and result writing set in the dashboard.
 
-Ouvre aussi la voie aux connecteurs qui n'ont de sens que sur l'ordinateur (sources.SOURCES, editions=("desktop",)).
+Also opens the way to connectors that only make sense on the computer (sources.SOURCES, editions=("desktop",)).
 """
 
 import logging
@@ -34,11 +34,11 @@ def _free_port(preferred: int) -> int:
                 return sock.getsockname()[1]
             except OSError:
                 continue
-    raise RuntimeError("aucun port local libre")
+    raise RuntimeError("no free local port")
 
 
 class _Api:
-    """Boîtes de dialogue natives de la fenêtre, offertes à la page par le serveur (/api/desktop/pick)."""
+    """Native dialogs of the window, offered to the page by the server (/api/desktop/pick)."""
 
     def __init__(self):
         self.window = None
@@ -50,7 +50,7 @@ class _Api:
         return chosen[0] if chosen else None
 
     def pick_file(self, suffix: str, start: str = "") -> str | None:
-        """Bibliothèque d'un logiciel photo (library.db de darktable, catalogue .lrcat)."""
+        """Library of a photo application (darktable library.db, .lrcat catalog)."""
         import webview
         kind = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
         folder = str(Path(start).parent) if start else ""
@@ -59,17 +59,17 @@ class _Api:
 
 
 def prepare(s: Settings) -> Settings:
-    """Réglages propres au bureau, avant tout chargement de modèle (HF_HOME doit être posé avant l'import des
-    bibliothèques de Hugging Face)."""
+    """Desktop-specific settings, before any model loading (HF_HOME must be set before importing the
+    Hugging Face libraries)."""
     s.edition = "desktop"
     s.dashboard_host = "127.0.0.1"
     if "data_dir" not in s.model_fields_set:
         s.data_dir = user_data_dir()
     s.data_dir.mkdir(parents=True, exist_ok=True)
-    if s.data_dir == user_data_dir():   # un dossier choisi par l'utilisateur garde ses droits
+    if s.data_dir == user_data_dir():   # a folder chosen by the user keeps its permissions
         s.data_dir.chmod(0o700)
     os.environ.setdefault("HF_HOME", str(s.data_dir / "hf"))
-    if "detector_path" not in s.model_fields_set:   # pas d'ONNX livré : MegaDetector dans PyTorch (megadetector.py)
+    if "detector_path" not in s.model_fields_set:   # no ONNX shipped: MegaDetector in PyTorch (megadetector.py)
         s.detector_path = s.data_dir / "models" / s.detector_path.name
     return s
 
@@ -88,12 +88,12 @@ def run(s: Settings) -> None:
     port = _free_port(s.dashboard_port)
     api = _Api()
     server = uvicorn.Server(uvicorn.Config(create_app(s, w, token, picker=api), host="127.0.0.1", port=port, log_level="warning",
-                                           log_config=None))   # erreurs du serveur web dans le journal commun
+                                           log_config=None))   # web server errors in the common log
     threading.Thread(target=server.run, daemon=True, name="dashboard").start()
     while not server.started:
         time.sleep(0.05)
     url = f"http://127.0.0.1:{port}/?t={token}"
-    log.info("taxonero (bureau) : données dans %s", s.data_dir)
+    log.info("taxonero (desktop): data in %s", s.data_dir)
     if not _window(url, Path(s.data_dir) / "fenetre", api):
         server.should_exit = True
         raise SystemExit(1)
@@ -101,33 +101,33 @@ def run(s: Settings) -> None:
 
 
 def _window(url: str, storage: Path, api: "_Api") -> bool:
-    """Fenêtre native ; False si elle ne peut pas s'ouvrir sur ce système. Stockage de la page (langue, filtres,
-    onglets) gardé dans storage : par défaut, pywebview ouvre une session privée, oubliée à la fermeture."""
+    """Native window; False if it cannot open on this system. Page storage (language, filters,
+    tabs) kept in storage: by default, pywebview opens a private session, forgotten on close."""
     try:
         import webview
-        # Pas de js_api : pywebview le crée avec new Function, refusé par la CSP. Les boîtes de dialogue passent par
-        # le serveur (/api/desktop/pick).
+        # No js_api: pywebview creates it with new Function, refused by the CSP. Dialogs go through
+        # the server (/api/desktop/pick).
         api.window = webview.create_window("Taxonero", url, width=1440, height=920, min_size=(900, 600))
-        # Linux : Qt (installé avec l'application) plutôt que GTK, dont les liaisons Python ne s'installent pas
-        # par pip sans outils de compilation.
+        # Linux: Qt (installed with the application) rather than GTK, whose Python bindings cannot be installed
+        # with pip without build tools.
         if sys.platform.startswith("linux"):
             _fix_qt_permissions(storage)
-        webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False, storage_path=str(storage))   # rend la main à la fermeture
+        webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False, storage_path=str(storage))   # returns on close
         return True
-    except Exception as e:   # ImportError, ou WebViewException (aucun moteur d'affichage)
-        log.error("fenêtre de l'application impossible à ouvrir", exc_info=e)
-        _error(f"La fenêtre de Taxonero ne peut pas s'ouvrir sur ce système ({type(e).__name__} : {e}).\n\n"
-               "Relancer avec --reinstall pour réparer l'installation.")
+    except Exception as e:   # ImportError, or WebViewException (no rendering engine)
+        log.error("the application window cannot be opened", exc_info=e)
+        _error(f"The Taxonero window cannot open on this system ({type(e).__name__}: {e}).\n\n"
+               "Run again with --reinstall to repair the installation.")
         return False
 
 
 def _fix_qt_permissions(storage: Path) -> None:
-    """pywebview 6.2 (Qt) répond aux demandes de permission de la page (presse-papiers, notifications…) par un
-    entier là où PyQt6 attend l'énumération : l'exception dans ce rappel Qt arrête l'application. Même décision
-    (micro et caméra acceptés, le reste refusé), avec les bonnes valeurs."""
+    """pywebview 6.2 (Qt) answers the page's permission requests (clipboard, notifications…) with an
+    integer where PyQt6 expects the enumeration: the exception in this Qt callback stops the application. Same decision
+    (microphone and camera accepted, the rest refused), with the right values."""
     try:
         from webview.platforms import qt
-    except Exception:   # Qt absent : webview.start le signalera
+    except Exception:   # Qt missing: webview.start will report it
         return
     page = qt.QWebPage
     media = {getattr(page.Feature, f, None) for f in ("MediaAudioCapture", "MediaVideoCapture", "MediaAudioVideoCapture")}
@@ -137,12 +137,12 @@ def _fix_qt_permissions(storage: Path) -> None:
         self.setFeaturePermission(url, feature, policy)
 
     qt.BrowserView.WebPage.onFeaturePermissionRequested = on_permission
-    # Le module lit le dossier de stockage à son import, avant que webview.start le règle : à redonner ici.
+    # The module reads the storage folder when imported, before webview.start sets it: to be given again here.
     qt._profile_storage_path = str(storage)
 
 
 def _error(message: str) -> None:
-    """Message d'erreur dans une boîte de dialogue (Tk, bibliothèque standard), sinon sur la sortie d'erreur."""
+    """Error message in a dialog (Tk, standard library), otherwise on standard error."""
     try:
         import tkinter
         from tkinter import messagebox

@@ -1,17 +1,17 @@
-"""Lanceur de l'édition de bureau (exécutable léger, bibliothèque standard seulement).
+"""Launcher of the desktop edition (light executable, standard library only).
 
-Convention des applications de bureau qui reposent sur PyTorch (ComfyUI Desktop, Invoke, Stability Matrix) : un
-seul petit exécutable par système, qui installe au premier lancement le PyTorch adapté au GPU de la machine, avec
-uv (Astral), dans le dossier de l'utilisateur. Un exécutable par GPU serait énorme (PyTorch CUDA : 2 à 3 Go) et
-dépasserait la limite de 2 Go par fichier des versions GitHub.
+Convention of desktop applications built on PyTorch (ComfyUI Desktop, Invoke, Stability Matrix): a
+single small executable per system, which installs at first launch the PyTorch matching the machine's GPU, with
+uv (Astral), in the user folder. One executable per GPU would be huge (CUDA PyTorch: 2 to 3 GB) and
+would exceed the 2 GB per-file limit of GitHub releases.
 
-L'exécutable contient : uv, la roue de taxonero, constraints.txt et ExifTool. Au premier lancement (ou après une
-mise à jour) : Python 3.12 (géré par uv), PyTorch pour le GPU détecté, taxonero, puis les modèles d'IA (~5 Go,
-une seule fois) ; ensuite il lance « taxonero desktop » dans cet environnement. L'installation s'affiche dans une petite fenêtre (Tk) ; sans
-affichage graphique, dans la console.
+The executable contains: uv, the taxonero wheel, constraints.txt and ExifTool. At first launch (or after an
+update): Python 3.12 (managed by uv), PyTorch for the detected GPU, taxonero, then the AI models (~5 GB,
+only once); then it runs "taxonero desktop" in this environment. The installation is shown in a small window (Tk); without
+a graphical display, in the console.
 
-    TAXONERO_GPU=cpu|cu130|cu128|rocm|xpu|mps|amd-win   impose une variante (sinon détection automatique)
-    taxonero --reinstall                                   refait l'installation (autre GPU, réparation)
+    TAXONERO_GPU=cpu|cu130|cu128|rocm|xpu|mps|amd-win   forces a variant (otherwise automatic detection)
+    taxonero --reinstall                                   installs again (other GPU, repair)
 """
 
 import hashlib
@@ -27,10 +27,10 @@ import threading
 from pathlib import Path
 
 PYTHON = "3.12"
-STEPS = 4   # Python, PyTorch, Taxonero, modèles d'IA
+STEPS = 4   # Python, PyTorch, Taxonero, AI models
 PYTORCH = "https://download.pytorch.org/whl/"
 AMD_WIN = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/"
-# Variante -> (index de paquets, paquets PyTorch). Mêmes versions que l'image Docker.
+# Variant -> (package index, PyTorch packages). Same versions as the Docker image.
 TORCH = {
     "cu130": (PYTORCH + "cu130", ["torch==2.14.1", "torchvision==0.29.1"]),     # NVIDIA, pilote >= 580
     "cu128": (PYTORCH + "cu128", ["torch==2.11.0", "torchvision==0.26.0"]),     # NVIDIA, pilote >= 525
@@ -38,7 +38,7 @@ TORCH = {
     "xpu": (PYTORCH + "xpu", ["torch==2.14.1", "torchvision==0.29.1"]),         # Intel Arc, Core Ultra
     "cpu": (PYTORCH + "cpu", ["torch==2.14.1", "torchvision==0.29.1"]),
     "mps": (None, ["torch==2.14.1", "torchvision==0.29.1"]),                    # Apple Silicon (PyPI, Metal)
-    # AMD sous Windows : version d'aperçu publiée par AMD (Python 3.12, pilote 26.1.1, Radeon RX 7000/9000).
+    # AMD on Windows: preview build published by AMD (Python 3.12, driver 26.1.1, Radeon RX 7000/9000).
     "amd-win": (None, [AMD_WIN + f for f in (
         "rocm_sdk_core-7.2.0.dev0-py3-none-win_amd64.whl", "rocm_sdk_devel-7.2.0.dev0-py3-none-win_amd64.whl",
         "rocm_sdk_libraries_custom-7.2.0.dev0-py3-none-win_amd64.whl", "rocm-7.2.0.dev0.tar.gz",
@@ -49,12 +49,12 @@ NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "w
 
 
 def bundle() -> Path:
-    """Fichiers livrés avec l'exécutable (ou packaging/build en développement)."""
+    """Files shipped with the executable (or packaging/build in development)."""
     return Path(getattr(sys, "_MEIPASS", Path(__file__).parent / "build"))
 
 
 def data_dir() -> Path:
-    """Même règle que config.user_data_dir (ce lanceur n'importe pas taxonero)."""
+    """Same rule as config.user_data_dir (this launcher does not import taxonero)."""
     if os.environ.get("DATA_DIR"):
         return Path(os.environ["DATA_DIR"])
     if sys.platform == "win32":
@@ -72,13 +72,13 @@ def _run(cmd: list[str]) -> str:
 
 
 def gpu_names() -> list[str]:
-    """Noms des cartes graphiques (Windows : WMI ; Linux : fabricant PCI des cartes DRM)."""
+    """Names of the graphics cards (Windows: WMI; Linux: PCI vendor of the DRM cards)."""
     if sys.platform == "win32":
         out = _run(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"])
         return [x.strip() for x in out.splitlines() if x.strip()]
     names = []
     for card in Path("/sys/class/drm").glob("card[0-9]*/device"):
-        if not re.fullmatch(r"card\d+", card.parent.name):   # card1-eDP-1… : connecteurs d'écran, pas des cartes
+        if not re.fullmatch(r"card\d+", card.parent.name):   # card1-eDP-1…: display connectors, not cards
             continue
         vendor = (card / "vendor").read_text().strip() if (card / "vendor").exists() else ""
         driver = (card / "driver").resolve().name if (card / "driver").exists() else ""
@@ -93,22 +93,22 @@ def nvidia_driver() -> float | None:
 
 
 def _why(fr: str, en: str) -> str:
-    """Raison du choix, dans la langue de la fenêtre d'installation (voir FR, plus bas)."""
+    """Reason for the choice, in the language of the installation window (see FR, below)."""
     return fr if FR else en
 
 
 def detect() -> tuple[str, str]:
-    """(variante, raison). Ordre : choix imposé, Apple Silicon, NVIDIA, AMD, Intel, processeur."""
+    """(variant, reason). Order: forced choice, Apple Silicon, NVIDIA, AMD, Intel, CPU."""
     forced = os.environ.get("TAXONERO_GPU", "").strip()
     if forced:
         if forced not in TORCH:
-            raise SystemExit(f"TAXONERO_GPU={forced} inconnue : {' | '.join(TORCH)}")
+            raise SystemExit(f"TAXONERO_GPU={forced} unknown: {' | '.join(TORCH)}")
         return forced, _why("imposée par TAXONERO_GPU", "forced by TAXONERO_GPU")
     if sys.platform == "darwin":
         return ("mps", "Apple Silicon") if platform.machine() == "arm64" else ("cpu", _why("Mac Intel : processeur", "Intel Mac: CPU"))
     arm = platform.machine().lower() in ("arm64", "aarch64")
     driver = nvidia_driver()
-    if driver and driver >= 580:   # CUDA 13 : x86 et Linux ARM (NVIDIA Grace, DGX Spark)
+    if driver and driver >= 580:   # CUDA 13: x86 and Linux ARM (NVIDIA Grace, DGX Spark)
         return "cu130", _why(f"NVIDIA, pilote {driver}", f"NVIDIA, driver {driver}")
     if driver and not arm:
         return "cu128", _why(f"NVIDIA, pilote {driver}", f"NVIDIA, driver {driver}")
@@ -116,7 +116,7 @@ def detect() -> tuple[str, str]:
     if not arm and ("AMD" in names or "Radeon" in names):
         if sys.platform == "win32":
             return "amd-win", _why("AMD Radeon (version d'aperçu d'AMD)", "AMD Radeon (AMD preview build)")
-        if Path("/dev/kfd").exists():   # pilote amdgpu avec calcul (ROCm)
+        if Path("/dev/kfd").exists():   # amdgpu driver with compute (ROCm)
             return "rocm", "AMD Radeon (ROCm)"
     if not arm and ("Arc" in names or "(xe)" in names):   # Intel Arc, Core Ultra (pilote xe sous Linux)
         return "xpu", "Intel Arc"
@@ -124,7 +124,7 @@ def detect() -> tuple[str, str]:
 
 
 FR = (locale.getlocale()[0] or os.environ.get("LANG", "")).lower().startswith("fr")
-TEXT = {   # fenêtre d'installation : français ou anglais selon le système
+TEXT = {   # installation window: French or English depending on the system
     "title": ("Installation de Taxonero", "Installing Taxonero"),
     "intro": ("Première installation ou mise à jour : {why}. Quelques minutes, une seule fois.",
               "First installation or update: {why}. A few minutes, only once."),
@@ -144,7 +144,7 @@ tr = lambda k, **kw: TEXT[k][0 if FR else 1].format(**kw)
 
 
 def install(home: Path, variant: str, wheel: Path, ui) -> None:
-    """Installe l'environnement ; ui.step(i, n, texte) et ui.line(texte) suivent la progression."""
+    """Install the environment; ui.step(i, n, text) and ui.line(text) follow the progress."""
     uv = str(bundle() / "uv" / ("uv.exe" if sys.platform == "win32" else "uv"))
     env = {**os.environ, "UV_PYTHON_INSTALL_DIR": str(home / "python"), "UV_CACHE_DIR": str(home / "uv-cache"),
            "NO_COLOR": "1"}
@@ -163,8 +163,8 @@ def install(home: Path, variant: str, wheel: Path, ui) -> None:
 
 
 def fetch_models(home: Path, ui) -> None:
-    """Modèles téléchargés pendant l'installation plutôt qu'au premier usage (rien s'ils sont déjà là). Un échec
-    (hors ligne) n'empêche pas de lancer l'application : ils seront téléchargés à la première analyse."""
+    """Models downloaded during the installation rather than at first use (nothing if they are already there). A failure
+    (offline) does not prevent launching the application: they will be downloaded at the first analysis."""
     ui.step(STEPS, STEPS, tr("models"))
     py = str(home / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python"))
     try:
@@ -175,7 +175,7 @@ def fetch_models(home: Path, ui) -> None:
 
 
 def stream(cmd: list[str], env: dict, ui) -> None:
-    """Lance cmd et affiche sa sortie ligne à ligne ; CalledProcessError si elle échoue."""
+    """Run cmd and show its output line by line; CalledProcessError if it fails."""
     p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", **NO_WINDOW)
     for line in p.stdout:
@@ -186,13 +186,25 @@ def stream(cmd: list[str], env: dict, ui) -> None:
 
 
 def keep_exiftool(home: Path) -> Path | None:
-    """ExifTool recopié hors du lanceur : sous Windows, le lanceur (un seul fichier) s'extrait dans un dossier
-    temporaire que PyInstaller efface dès qu'il se ferme, avant même que l'application s'en serve."""
+    """ExifTool copied out of the launcher: on Windows, the launcher (a single file) extracts itself into a temporary
+    folder that PyInstaller deletes as soon as it closes, before the application even uses it."""
     src, dest = bundle() / "exiftool", home / "exiftool"
     if not src.exists():
         return None
-    shutil.rmtree(dest, ignore_errors=True)
-    shutil.copytree(src, dest)
+    tmp, old = home / "exiftool.new", home / "exiftool.old"
+    # Copied aside, then swapped by renaming: renaming a folder whose files are open fails without touching
+    # anything (Windows: application left open), whereas a deletion would stop half-way.
+    for d in (tmp, old):
+        shutil.rmtree(d, ignore_errors=True)
+    try:
+        shutil.copytree(src, tmp)
+        if dest.exists():
+            dest.rename(old)
+        tmp.rename(dest)
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return dest if dest.exists() else None
+    shutil.rmtree(old, ignore_errors=True)
     return dest
 
 
@@ -209,8 +221,8 @@ class ConsoleUI:
 
 
 class WindowUI:
-    """Petite fenêtre Tk : étape en cours, barre de progression, dernières lignes d'uv. L'installation tourne dans
-    un fil ; Tk reste dans le fil principal, les messages passent par after()."""
+    """Small Tk window: current step, progress bar, last lines from uv. The installation runs in
+    a thread; Tk stays in the main thread, messages go through after()."""
 
     def __init__(self):
         import tkinter as tk
@@ -234,7 +246,7 @@ class WindowUI:
         self.root.protocol("WM_DELETE_WINDOW", self._quit)
 
     def _quit(self):
-        os._exit(1)   # fermée pendant l'installation : uv s'arrête avec le processus
+        os._exit(1)   # closed during the installation: uv stops with the process
 
     def _later(self, fn):
         self.root.after(0, fn)
@@ -249,7 +261,7 @@ class WindowUI:
         def f():
             self.log.config(state="normal")
             self.log.insert("end", text + "\n")
-            self.log.delete("1.0", "end-200l")   # 200 dernières lignes
+            self.log.delete("1.0", "end-200l")   # last 200 lines
             self.log.see("end")
             self.log.config(state="disabled")
         self._later(f)
@@ -279,7 +291,7 @@ class WindowUI:
 def make_ui():
     try:
         return WindowUI()
-    except Exception:   # pas de Tk (Linux sans python3-tk) ou pas d'affichage : console
+    except Exception:   # no Tk (Linux without python3-tk) or no display: console
         return ConsoleUI()
 
 
@@ -290,7 +302,7 @@ def main() -> None:
     marker = home / "installed.json"
     state = json.loads(marker.read_text()) if marker.exists() else {}
     variant, why = detect()
-    stamp = f"{wheel.name}:{hashlib.sha256(wheel.read_bytes()).hexdigest()[:16]}"   # même version, autre contenu : réinstallé
+    stamp = f"{wheel.name}:{hashlib.sha256(wheel.read_bytes()).hexdigest()[:16]}"   # same version, other content: installed again
     if "--reinstall" in sys.argv or state.get("wheel") != stamp or (os.environ.get("TAXONERO_GPU") and state.get("variant") != variant):
         ui = make_ui()
 
@@ -311,13 +323,13 @@ def main() -> None:
     py = home / "venv" / ("Scripts/pythonw.exe" if sys.platform == "win32" else "bin/python")
     env = {**os.environ}
     exiftool = home / "exiftool"
-    if not exiftool.exists():   # installé par une version d'avant
+    if not exiftool.exists():   # installed by an earlier version
         keep_exiftool(home)
     if exiftool.exists():
         env["TAXONERO_EXIFTOOL"] = str(exiftool)
     args = [str(py), "-m", "taxonero", "desktop"]
     if sys.platform == "win32":
-        subprocess.Popen(args, env=env, **NO_WINDOW)   # Windows : pas d'exec, l'application continue seule
+        subprocess.Popen(args, env=env, **NO_WINDOW)   # Windows: no exec, the application goes on alone
     else:
         os.execve(args[0], args, env)
 

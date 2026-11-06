@@ -1,8 +1,8 @@
-"""Récupère ExifTool pour l'exécutable de bureau, dans packaging/build/exiftool :
-- Windows : version autonome officielle (exiftool.exe + exiftool_files, Perl compris) ;
-- macOS et Linux : le script Perl et sa bibliothèque (Perl est présent sur ces systèmes).
+"""Fetch ExifTool for the desktop executable, into packaging/build/exiftool:
+- Windows: official standalone version (exiftool.exe + exiftool_files, Perl included);
+- macOS and Linux: the Perl script and its library (Perl is present on these systems).
 
-    python packaging/fetch_exiftool.py [version]      (défaut : la version courante, exiftool.org/ver.txt)
+    python packaging/fetch_exiftool.py [version]      (default: the current version, exiftool.org/ver.txt)
 """
 
 import hashlib
@@ -22,16 +22,16 @@ def current() -> str:
 
 VERSION = sys.argv[1] if len(sys.argv) > 1 else current()
 OUT = Path(__file__).parent / "build" / "exiftool"
-# exiftool.org ne garde que la dernière version ; SourceForge les garde toutes.
+# exiftool.org only keeps the latest version; SourceForge keeps all of them.
 MIRRORS = ["https://exiftool.org/{f}", "https://sourceforge.net/projects/exiftool/files/{f}/download"]
 
 
 def expected_sha256(name: str) -> str:
-    """Empreinte publiée par exiftool.org (checksums.txt, version courante seulement)."""
+    """Checksum published by exiftool.org (checksums.txt, current version only)."""
     with urllib.request.urlopen(urllib.request.Request("https://exiftool.org/checksums.txt", headers={"User-Agent": "taxonero"}), timeout=60) as r:
         m = re.search(rf"SHA2-256\({re.escape(name)}\)= *([0-9a-f]{{64}})", r.read().decode())
     if not m:
-        raise SystemExit(f"{name} absent de exiftool.org/checksums.txt : seule la version courante est vérifiable")
+        raise SystemExit(f"{name} missing from exiftool.org/checksums.txt: only the current version can be verified")
     return m[1]
 
 
@@ -46,7 +46,7 @@ def fetch(name: str) -> bytes:
             return data
         except Exception as e:
             print(f"{m.format(f=name)} : {e}")
-    raise SystemExit(f"ExifTool {VERSION} introuvable")
+    raise SystemExit(f"ExifTool {VERSION} not found")
 
 
 def main() -> None:

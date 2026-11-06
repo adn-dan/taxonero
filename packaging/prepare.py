@@ -1,7 +1,7 @@
-"""Prépare packaging/build pour l'exécutable de bureau (lanceur léger, voir bootstrap.py) :
-- wheel/ : la roue de taxonero ; constraints.txt ;
-- uv/ : uv (Astral), version figée, pour ce système et ce processeur ;
-- exiftool/ : ExifTool (fetch_exiftool.py).
+"""Prepare packaging/build for the desktop executable (light launcher, see bootstrap.py):
+- wheel/: the taxonero wheel; constraints.txt;
+- uv/: uv (Astral), pinned version, for this system and processor;
+- exiftool/: ExifTool (fetch_exiftool.py).
 
     python packaging/prepare.py && pyinstaller packaging/taxonero.spec --noconfirm
 """
@@ -18,7 +18,7 @@ import zipfile
 from pathlib import Path
 
 UV_VERSION = "0.13.0"
-# Fichiers .sha256 de la version, publiés par Astral : à mettre à jour avec UV_VERSION.
+# .sha256 files of the version, published by Astral: to update with UV_VERSION.
 UV_SHA256 = {
     "x86_64-pc-windows-msvc": "088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba656c",
     "aarch64-pc-windows-msvc": "cb54028b59aa87f11cf6dec293ce000420043a49a8aea522e822a671321f8932",

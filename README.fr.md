@@ -37,6 +37,10 @@ jamais modifiées.**
 - Tout ce que le dashboard affiche (fiches, noms, aires de répartition, articles) est mis en local par la
   synchronisation : la relecture n'attend pas le réseau. Bouton « Synchroniser » = nouvelles photos
   d'Immich, analyse, tags et mise à jour des données locales, avec progression.
+- Analyse en deux temps, chacun avec sa barre : la partie IA (détection, identification) passe d'abord sur
+  toute la file, puis le GPU est libéré pendant la vérification géographique auprès de GBIF. La présence
+  autour d'un point coûte une requête GBIF par zone de 1° pour toutes les espèces à la fois (gardée
+  180 jours), et non une par candidat.
 - Dashboard au style d'Immich (mêmes couleurs, police, barre latérale) : page Photos avec filtres
   (à relire, validées auto, validées par moi, rejetées, sans détection) et visionneuse plein écran
   pilotable au clavier, rectangles cliquables qui ouvrent l'article Wikipédia ou
@@ -451,7 +455,8 @@ base et priment sur l'environnement. Les réglages sensibles (`DRY_RUN`, clé AP
   puis convertie en `data/gbif-backbone.sqlite` (~1,5 Go, une dizaine de minutes ; prévoir ~2,5 Go libres
   pendant la conversion). Ensuite, la correspondance des noms et les fiches (rang, lignée) ne passent plus
   par le réseau : sur le banc d'essai à cache vide, 34 requêtes par photo au lieu de 55, deux fois plus
-  rapide. Restent en ligne : la présence autour du point et les fossiles (occurrences), les noms communs et
+  rapide. Restent en ligne : la présence autour du point (une requête par zone de 1° pour toutes les
+  espèces), les fossiles (une liste mondiale des espèces à fossiles, une fois par an), les noms communs et
   l'UICN (une fois par taxon), les cartes. L'état s'affiche dans **Paramètres > Modèles d'IA**. Si l'API passe
   à une nouvelle version de la taxonomie, la copie est refaite au démarrage suivant.
 - `NAMES_LANG` (tags, description) et `NAMES_LANGS` (noms affichés dans le dashboard).

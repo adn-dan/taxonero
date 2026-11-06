@@ -1,9 +1,9 @@
-/* ============================== page Statistiques ============================== */
-/* Graphiques en SVG natif. Règles (skill dataviz) : barres <= 24 px, 4 px arrondis côté valeur,
-   2 px d'intervalle entre segments, lignes 2 px, points >= 8 px sans anneau (contour au survol),
-   texte toujours en couleur d'encre, légende dès deux séries, infobulle sur chaque marque. */
-/* data-tip : HTML de l'infobulle, échappé une seconde fois pour l'attribut (le navigateur le décode, puis
-   innerHTML l'interprète) : les noms venus des données y sont donc échappés deux fois. */
+/* ============================== Statistics page ============================== */
+/* Charts in native SVG. Rules (dataviz skill): bars <= 24 px, 4 px rounded on the value side,
+   2 px gap between segments, 2 px lines, points >= 8 px without a ring (outline on hover),
+   text always in ink colour, legend from two series, tooltip on every mark. */
+/* data-tip: HTML of the tooltip, escaped a second time for the attribute (the browser decodes it, then
+   innerHTML interprets it): names coming from the data are therefore escaped twice. */
 function tipOn(el) {
   el.querySelectorAll('[data-tip]').forEach(m => {
     m.onmousemove = e => { const t = $('#tip'); t.innerHTML = m.dataset.tip; t.style.display = 'block';
@@ -11,25 +11,25 @@ function tipOn(el) {
     m.onmouseleave = () => { $('#tip').style.display = 'none'; };
   });
 }
-// Maximum « rond » et pair pour que la graduation du milieu reste un entier (on compte des espèces, des photos).
+// "Round" and even maximum so that the middle tick stays an integer (we count species, photos).
 const niceMax = v => { const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, v)))); const m = [1, 2, 3, 4, 5, 6, 8, 10].map(k => k * p).find(k => k >= v) || v; return Math.max(2, m % 2 ? m + 1 : m); };
 
 function accumulationSVG(obs, taxa, W = 540) {
-  // Première observation de chaque taxon -> courbe en escalier du nombre d'espèces cumulé.
+  // First observation of each taxon -> step curve of the cumulative number of species.
   const first = new Map();
   obs.filter(o => o.taken_at).forEach(o => { if (!first.has(o.taxon_key)) first.set(o.taxon_key, o.taken_at); });
   const pts = [...first.entries()].map(([k, d]) => ({ k, d: new Date(d) })).sort((a, b) => a.d - b.d);
   if (pts.length < 2) return `<div class="sub">${t('stats.not_enough')}</div>`;
-  const H = 220, ml = 34, mr = 14, mt = 16, mb = 26;   // largeur réelle du bloc, texte à taille fixe
+  const H = 220, ml = 34, mr = 14, mt = 16, mb = 26;   // actual width of the block, fixed-size text
   const t0 = +pts[0].d, t1 = +pts[pts.length - 1].d || t0 + 1, ymax = niceMax(pts.length);
   const x = d => ml + (W - ml - mr) * ((+d - t0) / Math.max(1, t1 - t0)), y = n => H - mb - (H - mt - mb) * (n / ymax);
   let path = `M${x(pts[0].d)},${y(0)}`;
   pts.forEach((p, i) => { path += `L${x(p.d)},${y(i)}L${x(p.d)},${y(i + 1)}`; });
   const years = []; for (let yr = new Date(t0).getFullYear() + 1; yr <= new Date(t1).getFullYear(); yr++) years.push(yr);
-  const step = Math.max(1, Math.ceil(years.length / Math.max(2, Math.floor((W - ml - mr) / 60))));   // ~60 px par année affichée
+  const step = Math.max(1, Math.ceil(years.length / Math.max(2, Math.floor((W - ml - mr) / 60))));   // ~60 px per year shown
   const grid = [0, ymax / 2, ymax].map(v => `<line x1="${ml}" x2="${W - mr}" y1="${y(v)}" y2="${y(v)}" class="gl"/><text x="${ml - 6}" y="${y(v) + 4}" class="ax" text-anchor="end">${v}</text>`).join('');
   const xt = years.filter((_, i) => i % step === 0).map(yr => { const xx = x(new Date(`${yr}-01-01`)); return `<line x1="${xx}" x2="${xx}" y1="${H - mb}" y2="${H - mb + 4}" class="gl"/><text x="${xx}" y="${H - 8}" class="ax" text-anchor="middle">${yr}</text>`; }).join('');
-  // Chaque point prend la couleur du groupe de l'espèce.
+  // Each point takes the colour of the group of the species.
   const dots = pts.map((p, i) => { const tx = taxa[p.k], g = groupOf(tx);
     return `<circle cx="${x(p.d)}" cy="${y(i + 1)}" r="4.5" class="dotm" style="fill:${g.c}" data-href="species/${p.k}" data-tip="${esc(`<b>${esc(shortName(tx))}</b><br>${g.icon} ${esc(g.name)}<br>${fmtDate(p.d, {})} · ${esc(t('stats.nth_species', { i: i + 1 }))}`)}"/>`; }).join('');
   const last = pts.length;
@@ -41,7 +41,7 @@ function accumulationSVG(obs, taxa, W = 540) {
 }
 
 function seasonSVG(obs, taxa, W = 540) {
-  // Observations par mois de l'année (toutes années), empilées par groupe.
+  // Observations per month of the year (all years), stacked by group.
   const months = Array.from({ length: 12 }, () => ({}));
   obs.filter(o => o.taken_at).forEach(o => { const m = new Date(o.taken_at).getUTCMonth(), g = groupOf(taxa[o.taxon_key]).id; months[m][g] = (months[m][g] || 0) + 1; });
   const tot = months.map(m => Object.values(m).reduce((a, b) => a + b, 0)), ymax = niceMax(Math.max(1, ...tot));
@@ -51,7 +51,7 @@ function seasonSVG(obs, taxa, W = 540) {
   let h = [0, ymax / 2, ymax].map(v => `<line x1="${ml}" x2="${W - mr}" y1="${H - mb - y(v)}" y2="${H - mb - y(v)}" class="gl"/><text x="${ml - 6}" y="${H - mb - y(v) + 4}" class="ax" text-anchor="end">${v}</text>`).join('');
   months.forEach((m, i) => {
     let base = H - mb; const cx = ml + slot * i + (slot - bw) / 2;
-    const segs = GROUPS.filter(g => m[g.id]);   // groupes déjà créés par groupOf ci-dessus
+    const segs = GROUPS.filter(g => m[g.id]);   // groups already created by groupOf above
     segs.forEach((g, j) => {
       const hh = y(m[g.id]), top = j === segs.length - 1;
       const yy = base - hh + (j ? 0 : 0);
@@ -69,7 +69,7 @@ function seasonSVG(obs, taxa, W = 540) {
 }
 
 function hbars(rows, unit = '') {
-  // Barres horizontales : libellé et valeur en encre, marque colorée à côté.
+  // Horizontal bars: label and value in ink, coloured mark next to them.
   const m = Math.max(1, ...rows.map(r => r.v));
   return rows.map(r => `<div class="hbar" ${r.tip ? `data-tip="${esc(r.tip)}"` : ''}${r.href ? ` data-href="${esc(r.href)}" role="link" tabindex="0"` : ''}><span class="k">${r.k}</span>
     <span class="t"><i style="width:${r.v / m * 100}%${r.c ? `;background:${r.c}` : ''}"></i></span><span class="v">${r.v}${unit}</span></div>`).join('') || '<span class="sub">—</span>';
@@ -89,7 +89,7 @@ async function loadStats() {
   const year = new Date().getFullYear();
   const firstSeen = new Map(); obs.forEach(o => { if (o.taken_at && !firstSeen.has(o.taxon_key)) firstSeen.set(o.taxon_key, o.taken_at); });
   const newThisYear = [...firstSeen.values()].filter(d => new Date(d).getFullYear() === year).length;
-  // Espèces les plus photographiées
+  // Most photographed species
   const perSp = new Map(); obs.forEach(o => perSp.set(o.taxon_key, (perSp.get(o.taxon_key) || 0) + 1));
   const top = [...perSp.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
     .map(([k, v]) => ({ k: esc(shortName(taxa[k])), v, c: groupOf(taxa[k]).c, href: `species/${k}` }));
@@ -134,7 +134,7 @@ async function loadStats() {
       <section class="card"><h3>${t('stats.gear')}</h3><table>${[...gear.entries()].sort((a, b) => b[1].p.size - a[1].p.size).map(([k, g]) =>
         `<tr data-href="species?camera=${encodeURIComponent(k)}" role="link" tabindex="0"><td>${esc(k || t('stats.unknown_camera'))}<br><small>${esc([...g.lens].join(', ') || '')}</small></td><td>${t('count.photos', { n: g.p.size })}<br><small>${t('count.species', { n: g.s.size })}</small></td></tr>`).join('')}</table></section>
     </div>`;
-  // Graphiques SVG redessinés à la largeur réelle de leur bloc (et à chaque redimensionnement).
+  // SVG charts redrawn at the actual width of their block (and at every resize).
   const charts = [['#ch-acc', w => accumulationSVG(obs, taxa, w)], ['#ch-season', w => seasonSVG(obs, taxa, w)]];
   const drawCharts = () => { charts.forEach(([sel, fn]) => { const el = $(sel); if (el) { el.innerHTML = fn(Math.max(280, el.clientWidth)); tipOn(el); } }); };
   drawCharts();
@@ -142,7 +142,7 @@ async function loadStats() {
   let rt; statsRO = new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(drawCharts, 120); });
   charts.forEach(([sel]) => $(sel) && statsRO.observe($(sel)));
   tipOn(root);
-  // Clic (ou Entrée) sur un élément d'un graphique : page des espèces ou des photos, filtrée en conséquence.
+  // Click (or Enter) on an element of a chart: species or photos page, filtered accordingly.
   root.onclick = e => { const el = e.target.closest('[data-href]'); if (el) { $('#tip').style.display = 'none'; location.hash = el.dataset.href; } };
   root.onkeydown = e => { if (e.key === 'Enter') e.target.closest?.('[data-href]')?.click(); };
   if (statsMap) { statsMap.remove(); statsMap = null; }

@@ -1,24 +1,24 @@
-/* ============================== page Espèces ============================== */
-/* Groupes du vivant. Les huit premiers ont chacun leur couleur, dans l'ordre de la palette catégorielle
-   validée (validate_palette.js : clair et sombre, couples voisins dans les barres empilées). Au-delà de huit
-   couleurs, on ne les distingue plus : les groupes plus rares gardent leur nom et leur icône, avec une couleur
-   neutre commune. Pas de groupe « Autres » : un taxon hors de cette liste prend le nom de sa classe, ou de son
-   embranchement. */
+/* ============================== Species page ============================== */
+/* Groups of life. The first eight each have their colour, in the order of the validated categorical
+   palette (validate_palette.js: light and dark, neighbouring pairs in stacked bars). Beyond eight
+   colours, they can no longer be told apart: the rarer groups keep their name and icon, with a shared
+   neutral colour. No "Others" group: a taxon outside this list takes the name of its class, or of its
+   phylum. */
 const inL = (key, names) => L => names.includes(L[key]);
-const GROUPS = [   // noms : group.<id> dans les catalogues de langue
+const GROUPS = [   // names: group.<id> in the language catalogues
   { id: 'aves', icon: '🐦', test: inL('class', ['Aves']) },
   { id: 'mammalia', icon: '🦊', test: inL('class', ['Mammalia']) },
   { id: 'insecta', icon: '🦋', test: inL('class', ['Insecta']) },
   { id: 'reptilia', icon: '🦎', test: inL('class', ['Reptilia', 'Squamata', 'Testudines', 'Crocodylia']) },
   { id: 'amphibia', icon: '🐸', test: inL('class', ['Amphibia']) },
   { id: 'plantae', icon: '🌿', test: inL('kingdom', ['Plantae']) },
-  // GBIF ne donne pas de classe aux poissons osseux (Chordata, puis directement l'ordre) ; tous les autres
-  // vertébrés en ont une. Un chordé sans classe est donc un poisson.
+  // GBIF gives no class to bony fishes (Chordata, then directly the order); all the other
+  // vertebrates have one. A chordate without a class is therefore a fish.
   { id: 'pisces', icon: '🐟', test: L => ['Actinopterygii', 'Chondrichthyes', 'Elasmobranchii', 'Holocephali',
       'Sarcopterygii', 'Dipneusti', 'Actinistia', 'Myxini', 'Petromyzonti', 'Cephalaspidomorphi'].includes(L.class)
       || (L.phylum === 'Chordata' && (!L.class || L.class === 'Chordata')) },
   { id: 'fungi', icon: '🍄', test: inL('kingdom', ['Fungi']) },
-  // Couleur neutre commune (classes listées : le filtre de la page Photos ne connaît que la classe).
+  // Shared neutral colour (classes listed: the filter of the Photos page only knows the class).
   { id: 'arachnida', icon: '🕷️', test: inL('class', ['Arachnida']) },
   { id: 'crustacea', icon: '🦀', test: L => L.subphylum === 'Crustacea' || ['Malacostraca', 'Branchiopoda',
       'Maxillopoda', 'Hexanauplia', 'Thecostraca', 'Copepoda', 'Ostracoda', 'Ichthyostraca', 'Remipedia', 'Cephalocarida'].includes(L.class) },
@@ -38,10 +38,10 @@ const GROUPS = [   // noms : group.<id> dans les catalogues de langue
 GROUPS.forEach(g => {
   g.cv = `--g-${['aves', 'mammalia', 'insecta', 'reptilia', 'amphibia', 'plantae', 'pisces', 'fungi'].includes(g.id) ? g.id : 'other'}`;
   g.c = `var(${g.cv})`;
-  Object.defineProperty(g, 'name', { get: () => t(`group.${g.id}`) });   // dans la langue courante
+  Object.defineProperty(g, 'name', { get: () => t(`group.${g.id}`) });   // in the current language
 });
-/* Groupe d'un taxon. Hors liste : un groupe créé à la volée, nommé d'après la classe (ou l'embranchement, ou le
-   règne), ajouté à GROUPS pour apparaître dans les filtres et légendes. */
+/* Group of a taxon. Outside the list: a group created on the fly, named after the class (or the phylum, or the
+   kingdom), added to GROUPS to appear in the filters and legends. */
 function groupOf(t) {
   const L = t?.lineage || {};
   const known = GROUPS.find(g => !g.dynamic && g.test(L));
@@ -56,17 +56,17 @@ function groupOf(t) {
   }
   return g;
 }
-/* Classe tous les taxons d'une liste (crée les groupes à la volée) puis renvoie GROUPS : à appeler avant
-   d'itérer sur GROUPS pour un rendu. */
+/* Classify all the taxa of a list (creates the groups on the fly) then return GROUPS: to call before
+   iterating over GROUPS for a rendering. */
 const groupsFor = ts => { ts.forEach(t => groupOf(t)); return GROUPS; };
-/* Légende : une pastille par couleur. Les groupes à couleur neutre partagent la leur, avec leurs noms. */
+/* Legend: one chip per colour. Groups with the neutral colour share theirs, with their names. */
 function groupLegend(groups) {
   const colored = groups.filter(g => g.cv !== '--g-other'), neutral = groups.filter(g => g.cv === '--g-other');
   return colored.map(g => `<span><i class="sw" style="background:${g.c}"></i>${esc(g.name)}</span>`).join('')
     + (neutral.length ? `<span><i class="sw" style="background:var(--g-other)"></i>${neutral.map(g => esc(g.name)).join(' · ')}</span>` : '');
 }
-/* Pastilles de groupes : les groupes créés à la volée (classes peu représentées, au nom latin), s'ils sont plusieurs,
-   sous une seule pastille « Autres » qui les déplie. Dépliée d'office si l'un d'eux est le filtre actif. */
+/* Group chips: the groups created on the fly (rarely seen classes, with a Latin name), if there are several,
+   under a single "Others" chip that unfolds them. Unfolded right away if one of them is the active filter. */
 const GX = { open: false };
 function groupChips(groups, active, chip, count) {
   const known = groups.filter(g => !g.dynamic), dyn = groups.filter(g => g.dynamic);
@@ -85,13 +85,13 @@ const THREATENED = ['VULNERABLE', 'ENDANGERED', 'CRITICALLY_ENDANGERED'];
 const IUCN_CATS = ['CRITICALLY_ENDANGERED', 'ENDANGERED', 'VULNERABLE', 'NEAR_THREATENED', 'LEAST_CONCERN', 'DATA_DEFICIENT', 'NOT_EVALUATED'];
 const IUCN_COLOR = { CRITICALLY_ENDANGERED: '#c0392b', ENDANGERED: '#e67e22', VULNERABLE: '#d4ac0d', NEAR_THREATENED: '#7f8c8d',
   LEAST_CONCERN: '#27ae60', DATA_DEFICIENT: '#95a5a6', NOT_EVALUATED: '#bdc3c7' };
-// Filtres Liste rouge : « Menacées » regroupe VU, EN et CR (définition UICN), puis chaque catégorie.
+// Red List filters: "Threatened" groups VU, EN and CR (IUCN definition), then each category.
 const IUCN_FILTERS = [{ id: 'threatened', test: c => THREATENED.includes(c) },
   ...IUCN_CATS.map(k => ({ id: k, test: c => (c || 'NOT_EVALUATED') === k, color: IUCN_COLOR[k] }))];
 const iucnFilterName = id => id === 'threatened' ? t('iucn.threatened') : iucnName(id);
 const iucnOK = (s, f) => !f || IUCN_FILTERS.find(x => x.id === f).test(s.taxon?.iucn);
 const groupOK = (s, g) => !g || groupOf(s.taxon)?.id === g;
-/* Rangée de pastilles groupe + Liste rouge. `st` porte { group, iucn } ; `all` sert aux comptages. */
+/* Row of group + Red List chips. `st` holds { group, iucn }; `all` is used for the counts. */
 function filterRows(st, all, prefix) {
   const gCount = g => all.filter(s => groupOf(s.taxon) === g && iucnOK(s, st.iucn)).length;
   const iCount = f => all.filter(s => f.test(s.taxon?.iucn) && groupOK(s, st.group)).length;
@@ -130,7 +130,7 @@ function matches(s) {
                ...Object.values(t.lineage || {}).flatMap(n => Object.values(SP.higher[n]?.vernacular || {}))];
   return hay.some(x => String(x || '').toLowerCase().includes(q));
 }
-// Filtres de contexte (mois, pays, appareil) : ce qu'ils gardent des photos, à reporter sur la grille et les fiches.
+// Context filters (month, country, camera): what they keep of the photos, to carry over to the grid and the records.
 const spContext = () => { const q = new URLSearchParams();
   if (SP.month) q.set('month', SP.month); if (SP.country) q.set('country', SP.country); if (SP.camera != null) q.set('camera', SP.camera);
   return q; };
@@ -138,11 +138,11 @@ function renderSpecies() {
   const root = $('#species');
   if (!SP.all.length) { root.innerHTML = `<div class="empty">${t('species.empty')}</div>`; return; }
   const shown = SP.all.filter(matches), ctx = spContext(), hasCtx = [...ctx.keys()].length > 0, photos = shown.reduce((a, s) => a + s.n, 0);
-  // Avec un filtre de contexte, s.n compterait aussi les photos hors filtre : le nombre juste est sur la page Photos.
+  // With a context filter, s.n would also count the photos outside the filter: the right number is on the Photos page.
   ctx.set('filter', 'identified');
   if (SP.group) ctx.set('group', SP.group);
   const photoCount = hasCtx ? `<a href="#photos?${ctx}">${t('photos.see')}</a>` : t('count.photos', { n: photos });
-  // Résumé + un seul jeu de filtres (groupe, Liste rouge).
+  // Summary + a single set of filters (group, Red List).
   let h = `<div class="filters"><span class="count">${t('count.species', { n: shown.length })} · ${photoCount}</span>
     ${SP.mode === 'tree' ? `<button class="chip" data-treeinfo title="${esc(t('tree.info_title'))}">ⓘ ${t('tree.info_title')}</button><button class="chip" data-fold="1">${t('species.expand_all')}</button><button class="chip" data-fold="0">${t('species.collapse_all')}</button>` : ''}
     <span class="seg">${['grid', 'tree'].map(m => `<button class="${SP.mode === m ? 'on' : ''}" data-mode="${m}">${t(`species.view_${m}`)}</button>`).join('')}</span>
@@ -151,7 +151,7 @@ function renderSpecies() {
     <div class="card" style="padding:12px 16px 4px;margin-bottom:16px">${filterRows(SP, SP.all, 's')}</div>
     ${SP.mode === 'tree' ? treeInfoHTML() : ''}
     ${shown.length ? '' : `<div class="empty">${t('species.no_match')}</div>`}`;
-  // Grille : par groupe. Arbre : toutes les branches, du règne à l'espèce (Animaux, Plantes, Champignons…).
+  // Grid: by group. Tree: all the branches, from kingdom to species (Animals, Plants, Fungi…).
   h += SP.mode === 'tree' ? renderKingdoms(shown)
     : groupsFor(shown.map(s => s.taxon)).map(g => renderGroup(g, shown.filter(s => groupOf(s.taxon) === g))).join('');
   root.innerHTML = h;
@@ -165,7 +165,7 @@ function renderSpecies() {
   root.querySelectorAll('[data-fold]').forEach(b => b.onclick = () => root.querySelectorAll('.tnode').forEach(d => d.open = b.dataset.fold === '1'));
   root.querySelectorAll('[data-unset]').forEach(b => b.onclick = () => { const k = b.dataset.unset; SP[k] = k === 'q' ? '' : null; setQuery({ [k]: null }); renderSpecies(); });
 }
-/* Filtres venus des statistiques (mois, pays, appareil, année) et de la recherche, chacun retirable. */
+/* Filters coming from the statistics (month, country, camera, year) and from the search, each removable. */
 function extraFilters() {
   const chips = [
     SP.q && ['q', t('species.search', { q: esc(SP.q) })],
@@ -181,10 +181,10 @@ $('#species').onclick = async e => {
   const wk = e.target.closest('[data-wiki]');
   if (wk) { e.preventDefault(); openWiki(+wk.dataset.wiki, 'wikipedia'); return; }
   const c = e.target.closest('.sptile, .tleaf'); if (!c) return;
-  const ctx = spContext().toString();   // la fiche garde le mois, le pays ou l'appareil d'où l'on vient
+  const ctx = spContext().toString();   // the record keeps the month, the country or the camera you came from
   location.hash = `species/${c.dataset.key}${ctx ? `?${ctx}` : ''}`;
 };
-// Recadrage « object-fit: cover » centré sur le rectangle du sujet plutôt que sur le centre de la photo.
+// "object-fit: cover" crop centred on the subject box rather than on the centre of the photo.
 const focus = box => box && box[2] * box[3] < 0.95 ? `object-position:${((box[0] + box[2] / 2) * 100).toFixed(1)}% ${((box[1] + box[3] / 2) * 100).toFixed(1)}%` : '';
 const spOrder = arr => SP.sort === 'name' ? [...arr].sort((a, b) => shortName(a.taxon).localeCompare(shortName(b.taxon), LANG)) : [...arr].sort((a, b) => b.n - a.n);
 function spTile(s) {
@@ -198,18 +198,18 @@ function spLeaf(s) {
   return `<div class="tleaf" data-key="${s.taxon_key}" role="button" tabindex="0" aria-label="${esc(shortName(tx))}"><img loading="lazy" src="/api/thumb/${s.cover}?size=thumbnail" style="${focus(s.cover_box)}" alt="">
     <div><b>${esc(shortName(tx))}</b>${common(tx) ? `<i>${esc(tx.scientific_name)}</i>` : ''}<small>${tr('count.photos', { n: s.n })}${tx.iucn ? ` <span class="iucn ${tx.iucn}">${esc(iucnName(tx.iucn).toLocaleLowerCase(LANG))}</span>` : ''}</small></div></div>`;
 }
-/* Explication de l'arbre (bouton ⓘ) : rangs taxonomiques, source, niveaux absents ; lien vers l'article
-   Wikipédia « Rang taxonomique » (Q427626) dans la langue de l'interface. */
+/* Explanation of the tree (ⓘ button): taxonomic ranks, source, missing levels; link to the Wikipedia article
+   "Taxonomic rank" (Q427626) in the interface language. */
 function treeInfoHTML() {
   return `<section class="card treeinfo" id="treeinfo" hidden>${t('tree.info_body')}
     <a href="https://www.wikidata.org/wiki/Special:GoToLinkedPage/${LANG}wiki/Q427626" target="_blank" rel="noopener">${t('tree.info_link')} ↗</a></section>`;
 }
-/* Contenu d'une pastille de rang : miniature de l'espèce la plus photographiée, nom et rang, nom commun,
-   nombre d'espèces, lien Wikipédia. */
+/* Content of a rank chip: thumbnail of the most photographed species, name and rank, common name,
+   number of species, Wikipedia link. */
 function treePill(name, rank, list) {
   const top = [...list].sort((a, b) => b.n - a.n)[0];
   const img = `<img loading="lazy" src="/api/thumb/${top.cover}?size=thumbnail" style="${focus(top.cover_box)}" alt="">`;
-  // Rang absent chez GBIF (poissons osseux sans classe…) : niveau gardé, pour que les rangs restent alignés.
+  // Rank missing from GBIF (bony fishes without a class…): level kept, so that the ranks stay aligned.
   if (name === '—') return `${img}<span class="tn"><span><b class="unranked">${esc(t('tree.unranked', { rank: rankName(rank).toLocaleLowerCase(LANG) }))}</b></span>
     <span class="tmeta"><span class="cnt">${t('count.species_short', { n: list.length })}</span></span></span>`;
   const hi = SP.higher[name] || {}, { main, sci } = higherNames(name);
@@ -217,16 +217,16 @@ function treePill(name, rank, list) {
     <span class="tn"><span><a class="tfam" href="#${rank}/${encodeURIComponent(name)}" title="${esc(t('fam.open'))}"><b>${esc(main)}</b></a><span class="rank">${esc(rankName(rank))}</span></span>${sci ? `<span class="com sci2">${esc(sci)}</span>` : ''}
     <span class="tmeta"><span class="cnt">${t('count.species_short', { n: list.length })}</span>${hi.has_wiki ? ` · <a class="tw" href="#" data-wiki="${hi.gbif_key}">${t('wiki.wikipedia')}</a>` : ''}</span></span>`;
 }
-/* Groupe commun à toutes les espèces de list (pour colorer une branche), sinon null. */
+/* Group shared by all the species of list (to colour a branch), otherwise null. */
 function uniformGroup(list) { const g = groupOf(list[0].taxon); return list.every(s => groupOf(s.taxon) === g) ? g : null; }
 const groupVars = c => `--gc:${c};--gc-soft:color-mix(in srgb, ${c} 40%, var(--line))`;
 function treeNode(name, rank, list, inner) {
-  const g = uniformGroup(list);   // branche d'un seul groupe (Aves, Plantae…) : sa couleur ; sinon celle du parent
+  const g = uniformGroup(list);   // branch of a single group (Aves, Plantae…): its colour; otherwise the parent's
   return `<details class="tnode" open${g ? ` style="${groupVars(g.c)}"` : ''}><summary>${treePill(name, rank, list)}<span class="caret"></span></summary>
     <div class="tkids">${inner}</div></details>`;
 }
-/* En-tête d'un groupe : lien vers la page du taxon le plus large qui contient exactement ses espèces (Oiseaux ->
-   classe Aves, Champignons -> règne Fungi) ; aucun lien si le groupe en couvre plusieurs (poissons : plusieurs classes). */
+/* Header of a group: link to the page of the broadest taxon that contains exactly its species (Birds ->
+   class Aves, Fungi -> kingdom Fungi); no link if the group covers several (fishes: several classes). */
 function groupTaxonLink(g, list) {
   for (const rank of ['kingdom', 'phylum', 'class']) {
     const name = list[0].taxon?.lineage?.[rank];
@@ -236,10 +236,10 @@ function groupTaxonLink(g, list) {
   }
   return esc(g.name);
 }
-/* Arbre des espèces de list, un niveau par rang de ranks (ex. ['order', 'family']), les espèces en feuilles.
-   Une seule construction, trois présentations : leaf (vue Arbre, petites fiches), big (pages des rangs, grandes
-   vignettes) et h (pages des rangs sur écran large : chaque rang à droite de son parent, moins de défilement).
-   Rang absent de la taxonomie GBIF : niveau « — » gardé, pour que les rangs restent alignés. */
+/* Tree of the species of list, one level per rank of ranks (e.g. ['order', 'family']), the species as leaves.
+   A single construction, three presentations: leaf (Tree view, small cards), big (rank pages, large
+   thumbnails) and h (rank pages on a wide screen: each rank on the right of its parent, less scrolling).
+   Rank missing from the GBIF taxonomy: "—" level kept, so that the ranks stay aligned. */
 const TREE_STYLES = {
   leaf: { leaves: list => `<div class="tleaves">${spOrder(list).map(spLeaf).join('')}</div>`, node: treeNode },
   big: { leaves: list => `<div class="spgrid2">${spOrder(list).map(spTile).join('')}</div>`, node: treeNode },
@@ -254,7 +254,7 @@ function treeLevels(list, ranks, style = 'leaf') {
   return [...by.entries()].sort((a, b) => SP.sort === 'name' ? a[0].localeCompare(b[0]) : b[1].length - a[1].length || a[0].localeCompare(b[0]))
     .map(([name, sub]) => st.node(name, ranks[0], sub, treeLevels(sub, ranks.slice(1), style))).join('');
 }
-/* Vue Arbre : une carte par règne, puis embranchement, classe, ordre, famille et espèces. */
+/* Tree view: one card per kingdom, then phylum, class, order, family and species. */
 const KINGDOM_ICON = { Animalia: '🐾', Plantae: '🌿', Fungi: '🍄', Chromista: '🦠', Protozoa: '🦠', Bacteria: '🧫', Archaea: '🧫' };
 function renderKingdoms(list) {
   const by = new Map();

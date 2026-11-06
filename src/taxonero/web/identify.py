@@ -1,5 +1,5 @@
-"""Routes de la page Identifier (image envoyée, rien n'est gardé) et de l'analyse (synchronisation, reprise des
-photos en échec)."""
+"""Routes of the Identify page (uploaded image, nothing is kept) and of the analysis (synchronisation, retry of
+failed photos)."""
 
 import json
 
@@ -21,11 +21,11 @@ def register(app, c) -> None:
 
     def identify_image(data: bytes, place: tuple[float, float] | None = None) -> dict:
         try:
-            image = open_image(data, MAX_SIDE)   # une photo de 50 Mpx n'est jamais décodée en entier
+            image = open_image(data, MAX_SIDE)   # a 50 Mpx photo is never decoded in full
         except Exception:
             fail(400, "bad_image", "image illisible (formats : JPEG, PNG, WebP, TIFF)")
         lat, lon = exif_latlon(data)
-        if lat is None and place:   # un GPS de la photo n'est jamais remplacé
+        if lat is None and place:   # a GPS from the photo is never replaced
             lat, lon = place
         with lock:
             results = analyzer().analyze(image, lat, lon)
@@ -40,7 +40,7 @@ def register(app, c) -> None:
             out.append({"x": a.box.x, "y": a.box.y, "w": a.box.w, "h": a.box.h, "box_label": a.box.label,
                         "taxon_key": d.gbif_key, "taxon_rank": d.rank, "score": d.confidence, "plausibility": d.plausibility,
                         "domestic": a.domestic, "candidates": cands, "taxon": taxon(d.gbif_key)})
-        # Photos déjà dans la collection pour le taxon retenu et les candidats : lien vers la fiche espèce.
+        # Photos already in the collection for the kept taxon and the candidates: link to the species page.
         keys = {k for o in out for k in [o["taxon_key"], *(c.get("gbif_key") for c in o["candidates"])] if k}
         mine = {r["taxon_key"]: r["n"] for r in db.execute(
             "SELECT d.taxon_key, count(DISTINCT d.asset_id) AS n FROM detection d JOIN asset a ON a.asset_id = d.asset_id "
@@ -50,16 +50,16 @@ def register(app, c) -> None:
 
     @app.post("/api/identify", dependencies=[Depends(auth)])
     async def identify_upload(request: Request, lat: float | None = None, lon: float | None = None):
-        """Identifie l'image envoyée dans le corps de la requête. Elle reste en mémoire le temps de l'analyse :
-        rien n'est écrit (ni base, ni fichier, ni Immich). Coordonnées GPS de l'EXIF utilisées si présentes, sinon
-        lat et lon s'ils sont indiqués."""
+        """Identify the image sent in the request body. It stays in memory for the duration of the analysis:
+        nothing is written (no database, no file, no Immich). GPS coordinates from the EXIF used if present, otherwise
+        lat and lon if given."""
         if (lat is None) != (lon is None) or (lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180)):
-            fail(400, "bad_location", "latitude ou longitude hors limites")
-        too_big = lambda: fail(413, "image_too_big", "image trop lourde", max=IDENTIFY_MAX_BYTES // 2 ** 20)
+            fail(400, "bad_location", "latitude or longitude out of range")
+        too_big = lambda: fail(413, "image_too_big", "image too large", max=IDENTIFY_MAX_BYTES // 2 ** 20)
         size = request.headers.get("content-length", "")
         if size.isdigit() and int(size) > IDENTIFY_MAX_BYTES:
             too_big()
-        # Lu par morceaux, plafonné : un envoi sans Content-Length (ou mensonger) n'est pas gardé en mémoire en entier.
+        # Read in chunks, capped: an upload without Content-Length (or a lying one) is not kept in memory in full.
         buf = bytearray()
         async for chunk in request.stream():
             buf += chunk
@@ -67,17 +67,17 @@ def register(app, c) -> None:
                 too_big()
         data = bytes(buf)
         if not data:
-            fail(400, "empty_image", "aucune image")
+            fail(400, "empty_image", "no image")
         return await run_in_threadpool(identify_image, data, (lat, lon) if lat is not None else None)
 
     @app.post("/api/requeue-failed", dependencies=[Depends(auth)])
     def requeue_failed():
-        """Relance l'analyse des photos abandonnées après plusieurs échecs."""
+        """Restart the analysis of the photos given up after several failures."""
         return {"requeued": requeue(db, "failed")}
 
     @app.post("/api/sync", dependencies=[Depends(auth)])
     def sync_start():
-        """Bouton « Synchroniser » : nouvelles photos d'Immich, analyse, tags, données locales."""
+        """"Sync" button: new photos from Immich, analysis, tags, local data."""
         return {"started": w.start_manual(), "progress": w.progress}
 
     class PauseIn(BaseModel):
@@ -85,7 +85,7 @@ def register(app, c) -> None:
 
     @app.post("/api/analysis/pause", dependencies=[Depends(auth)])
     def analysis_pause(body: PauseIn):
-        """Bouton pause/reprise de l'analyse (Worker.pause_analysis), gardé d'un lancement à l'autre."""
+        """Analysis pause/resume button (Worker.pause_analysis), kept from one launch to the next."""
         store.set_state(db, "analysis_paused", "1" if body.paused else "0")
         w.pause_analysis(body.paused)
         return {"paused": w.analysis_paused}

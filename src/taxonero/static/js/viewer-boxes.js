@@ -1,20 +1,20 @@
-/* Visionneuse : rectangles (Annotorious) et zoom (Panzoom).
-   - Annotorious dessine, sélectionne, déplace et redimensionne les rectangles, dans le repère en pixels de
-     l'image affichée (vignette, aperçu ou original : les détections, normalisées 0..1, y sont converties à
-     chaque chargement).
-   - Panzoom zoome le calque #pz (photo, rectangles, étiquettes) : molette vers le curseur, pincement, clic à la
-     souris (zoom ×3 ou retour), double appui au doigt, touches Z, + et -. Zoomé, un glisser déplace la photo ; il
-     est laissé à Annotorious en mode dessin (B), et sur les poignées du rectangle sélectionné.
-   - Clic sur un autre rectangle que le sélectionné : il devient le sujet affiché, sans zoom.
-   - Tracer une boîte demande le mode dessin (B ou icône), à la souris comme au doigt.
-   Les étiquettes (nom du taxon) sont un calque HTML au-dessus, de taille constante à l'écran. */
+/* Viewer: boxes (Annotorious) and zoom (Panzoom).
+   - Annotorious draws, selects, moves and resizes the boxes, in the pixel frame of
+     the displayed image (thumbnail, preview or original: the detections, normalised 0..1, are converted to it at
+     every load).
+   - Panzoom zooms the #pz layer (photo, boxes, labels): wheel towards the cursor, pinch, mouse
+     click (×3 zoom or back), double tap with a finger, Z, + and - keys. Zoomed, a drag moves the photo; it
+     is left to Annotorious in draw mode (B), and on the handles of the selected box.
+   - Click on a box other than the selected one: it becomes the displayed subject, without zoom.
+   - Drawing a box needs draw mode (B or icon), with the mouse as with a finger.
+   The labels (name of the taxon) are an HTML layer on top, of constant size on screen. */
 const HANDLES = '.a9s-handle, .a9s-shape-handle, .a9s-edge-handle, .a9s-corner-handle, .a9s-touch-handle';
 const anno = Annotorious.createImageAnnotator($('#photo'), {
   drawingEnabled: false, drawingMode: 'drag', disableUndoRedoKeys: true, theme: 'dark',
 });
 const pz = Panzoom($('#pz'), { minScale: 1, maxScale: 8, contain: 'outside', excludeClass: 'pz-skip', cursor: '' });
 
-let drawing = false;   // mode dessin (B ou icône) : une seule boîte, puis retour au mode normal
+let drawing = false;   // draw mode (B or icon): a single box, then back to normal mode
 const zoomed = () => pz.getScale() > 1.001;
 function syncDraw() {
   const on = drawing;
@@ -27,7 +27,7 @@ function stopDraw() {
   $('#frame').classList.remove('drawing'); $('#drawhint').classList.remove('on'); syncDraw();
 }
 
-/* -- rectangles ------------------------------------------------------------ */
+/* -- boxes ------------------------------------------------------------ */
 const natural = () => { const img = $('#photo'); return [img.naturalWidth, img.naturalHeight]; };
 function toAnno(d) {
   const [W, H] = natural(), x = d.x * W, y = d.y * H, w = d.w * W, h = d.h * H;
@@ -43,15 +43,15 @@ const css = name => getComputedStyle(document.documentElement).getPropertyValue(
 function boxStyle(a) {
   const k = cur()?.detections.findIndex(d => String(d.id) === a.id), d = cur()?.detections[k];
   const color = d?.status === 'confirmed' ? css('--box-ok') : d?.status === 'rejected' ? 'rgba(255,255,255,.55)' : css('--box');
-  // Épaisseur divisée par le zoom : sous une transformation CSS, Firefox agrandit aussi les traits (vector-effect
-  // non-scaling-stroke ne la compense pas).
+  // Thickness divided by the zoom: under a CSS transform, Firefox also enlarges the strokes (vector-effect
+  // non-scaling-stroke does not compensate for it).
   const width = k === V.sel ? 3 : d && d.w * d.h > 0.98 ? 1 : 2;
   return { stroke: color, strokeWidth: width / pz.getScale(), fill: color, fillOpacity: 0 };
 }
 function drawBoxes() {
-  // Image pas encore affichée (taille 0 à l'ouverture) : Annotorious calculerait NaN ; redessiné à son chargement.
+  // Image not displayed yet (size 0 at opening): Annotorious would compute NaN; redrawn when it loads.
   const a = cur(); if (!a || V.opening || !natural()[0] || !$('#photo').clientWidth) return;
-  anno.setStyle(a2 => boxStyle(a2));   // nouvelle fonction : redessin avec la sélection à jour
+  anno.setStyle(a2 => boxStyle(a2));   // new function: redraw with the up-to-date selection
   anno.setAnnotations(a.detections.map(toAnno), true);
   const d = curDet();
   if (d) anno.setSelected(String(d.id)); else anno.cancelSelected();
@@ -65,16 +65,16 @@ function drawLabels() {
     return `<span class="vlbl ${d.status}${k === V.sel ? ' sel' : ''}${inside ? ' in' : ''}" style="${pos}">${subjectIcon(d)} ${esc(shortName(d.taxon))}${d.status === 'confirmed' ? ' ✓' : ''}</span>`;
   }).join('');
 }
-// Après la mise en page : Annotorious relit la taille de l'image à l'image suivante (sinon échelle NaN un instant).
+// After layout: Annotorious reads the image size again at the next frame (otherwise a NaN scale for a moment).
 $('#photo').addEventListener('load', () => { if (V.open) requestAnimationFrame(() => requestAnimationFrame(() => { if (V.open) drawBoxes(); })); });
 
-// Clic sur un rectangle : il devient le sujet affiché dans le panneau.
+// Click on a box: it becomes the subject shown in the panel.
 anno.on('selectionChanged', sel => {
   const k = sel[0] ? cur()?.detections.findIndex(d => String(d.id) === sel[0].id) : -1;
   if (k >= 0 && k !== V.sel) { V.sel = k; anno.setStyle(a => boxStyle(a)); drawLabels(); drawInfo(); }
 });
 
-// Nouvelle boîte tracée : identifiée par le serveur, puis sélectionnée.
+// New box drawn: identified by the server, then selected.
 anno.on('createAnnotation', async created => {
   const box = fromGeometry(created.target.selector.geometry);
   stopDraw();
@@ -86,34 +86,34 @@ anno.on('createAnnotation', async created => {
     const a = await api(`/api/assets/${cur().asset_id}/boxes`, { method: 'POST', body: JSON.stringify(box) });
     V.list[V.i] = { ...cur(), ...a }; V.touched.add(V.i);
     const made = a.detections.find(x => !before.has(x.id));
-    if (made) pushUndo({ asset: cur().asset_id, det: made.id, created: true });   // U supprime la boîte créée
+    if (made) pushUndo({ asset: cur().asset_id, det: made.id, created: true });   // U deletes the created box
     V.sel = Math.max(0, a.detections.findIndex(x => x === made));
   } catch (e) { fail(e); }
   drawViewer();
 });
 
-/* Rectangle déplacé ou redimensionné : à la fin du geste, nouvelle identification du recadrage. */
+/* Box moved or resized: at the end of the gesture, new identification of the crop. */
 let editing = null, press = null;
 $('#frame').addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
   if (e.pointerType === 'mouse') press = { x: e.clientX, y: e.clientY, sel: V.sel, target: e.target };
   else if (doubleTap(e)) { e.stopPropagation(); e.preventDefault(); return; }
-  // Hors du rectangle sélectionné, Annotorious consacrerait ce glisser à le désélectionner : on le fait avant,
-  // pour que le glisser trace une boîte.
+  // Outside the selected box, Annotorious would use this drag to deselect it: do it beforehand,
+  // so that the drag draws a box.
   if (anno.isDrawingEnabled() && !e.target.closest(HANDLES)) anno.cancelSelected();
   if (!e.target.closest(HANDLES) || drawing) return;
   const d = curDet(); if (!d) return;
   editing = { id: d.id, before: { x: d.x, y: d.y, w: d.w, h: d.h } };
-  $('#frame').classList.add('pz-skip');   // Panzoom ne déplace pas la photo pendant ce geste
+  $('#frame').classList.add('pz-skip');   // Panzoom does not move the photo during this gesture
 }, true);
 window.addEventListener('pointerup', ev => {
   const e = editing, p = press; editing = press = null;
-  if (e) setTimeout(() => commitEdit(e));   // après Annotorious, qui finit de mettre le rectangle à jour
+  if (e) setTimeout(() => commitEdit(e));   // after Annotorious, which finishes updating the box
   syncDraw();
   if (p && !drawing && Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 5) clickPhoto(ev, p);
 });
-/* Clic à la souris : autre rectangle -> il devient le sujet ; sinon zoom ×3 à cet endroit, ou retour à la photo
-   entière. Le second clic d'un double clic est ignoré : il annulerait aussitôt le zoom. */
+/* Mouse click: another box -> it becomes the subject; otherwise ×3 zoom at that spot, or back to the whole
+   photo. The second click of a double click is ignored: it would immediately cancel the zoom. */
 let lastClick = 0;
 function clickPhoto(e, p) {
   if (!V.open || p.target.closest('.a9s-corner-handle, .a9s-edge-handle')) return;
@@ -125,14 +125,14 @@ function clickPhoto(e, p) {
     .filter(h => h.in).sort((a, b) => a.area - b.area);
   if (hits[0] && hits[0].k !== p.sel) { V.sel = hits[0].k; drawBoxes(); drawInfo(); return; }
   if (zoomed()) resetZoom(); else zoomAt(e.clientX, e.clientY, 3);
-  // Annotorious désélectionne sur un clic hors du rectangle : le sujet affiché reste sélectionné.
+  // Annotorious deselects on a click outside the box: the displayed subject stays selected.
   setTimeout(() => { const d = curDet(); if (d) anno.setSelected(String(d.id)); });
 }
 async function commitEdit({ id, before }) {
   const a = anno.getAnnotationById(String(id)), d = cur()?.detections.find(x => x.id === id);
   if (!a || !d) return;
   const b = fromGeometry(a.target.selector.geometry);
-  if (Math.abs(b.x - before.x) + Math.abs(b.y - before.y) + Math.abs(b.w - before.w) + Math.abs(b.h - before.h) < 0.01) return;   // simple clic
+  if (Math.abs(b.x - before.x) + Math.abs(b.y - before.y) + Math.abs(b.w - before.w) + Math.abs(b.h - before.h) < 0.01) return;   // simple click
   pushUndo({ asset: cur().asset_id, det: d.id, prev: snapshot(d) });
   $('#vi-body').innerHTML = `<div class="empty">${t('det.reidentify')}</div>`;
   try {
@@ -143,7 +143,7 @@ async function commitEdit({ id, before }) {
 }
 
 /* -- zoom ------------------------------------------------------------------ */
-/* Dès le premier zoom, l'original (pleine définition) remplace l'aperçu, si la clé y donne accès. */
+/* From the first zoom, the original (full resolution) replaces the preview, if the key gives access to it. */
 const Z = { hi: null };
 $('#pz').addEventListener('panzoomchange', e => {
   const z = e.detail.scale;
@@ -156,13 +156,13 @@ $('#pz').addEventListener('panzoomchange', e => {
 const zoomAt = (cx, cy, z) => pz.zoomToPoint(Math.min(8, Math.max(1, z)), { clientX: cx, clientY: cy }, { animate: false });
 const resetZoom = () => pz.reset({ animate: false });
 const zoomCenter = k => { const r = $('#frame').getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, pz.getScale() * k); };
-/* Z : zoom sur le sujet sélectionné (centré, il remplit la vue), ou retour à la photo entière. */
+/* Z: zoom on the selected subject (centred, it fills the view), or back to the whole photo. */
 function zoomToSubject() {
   const d = curDet();
   if (zoomed() || !d) { zoomed() ? resetZoom() : zoomCenter(3); return; }
   const f = $('#pz'), w = f.offsetWidth, h = f.offsetHeight;
   pz.zoom(Math.min(8, Math.max(1.5, 0.85 / Math.max(d.w, d.h))), { animate: false });
-  // Transformation de Panzoom : scale(s) translate(x, y), origine au centre ; déplacement en pixels non zoomés.
+  // Panzoom transform: scale(s) translate(x, y), origin at the centre; offset in unzoomed pixels.
   setTimeout(() => pz.pan(w / 2 - (d.x + d.w / 2) * w, h / 2 - (d.y + d.h / 2) * h, { animate: false }));
 }
 function loadFull() {
@@ -171,15 +171,15 @@ function loadFull() {
   const im = new Image();
   im.onload = () => {
     const img = $('#photo');
-    // Proportions différentes de l'aperçu (photo recadrée dans Immich) : les rectangles ne tomberaient plus juste.
+    // Proportions different from the preview (photo cropped in Immich): the boxes would no longer fit.
     if (img.dataset.id !== a.asset_id || Math.abs(im.naturalWidth / im.naturalHeight / V.ar - 1) > 0.02) return;
     img.dataset.full = a.asset_id; img.src = im.src;
   };
-  im.src = `/api/full/${a.asset_id}`;   // en cas d'échec (pas de permission, RAW illisible) : on garde l'aperçu
+  im.src = `/api/full/${a.asset_id}`;   // on failure (no permission, unreadable RAW): the preview is kept
 }
 $('.stage').addEventListener('wheel', e => { if (V.open) { e.preventDefault(); zoomAt(e.clientX, e.clientY, pz.getScale() * wheelFactor(e)); } }, { passive: false });
-/* Double appui au doigt : zoom ×3 à cet endroit, ou retour. Pas d'événement dblclick : il n'arrive pas
-   quand l'appui est intercepté (tracé, déplacement). Renvoie true si l'appui est le second d'un double. */
+/* Double tap with a finger: ×3 zoom at that spot, or back. No dblclick event: it does not arrive
+   when the tap is intercepted (drawing, moving). Return true if the tap is the second of a double. */
 let lastTap = null;
 function doubleTap(e) {
   const now = Date.now(), prev = lastTap;

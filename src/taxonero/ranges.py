@@ -1,10 +1,10 @@
-"""Aires de répartition : comptages d'observations GBIF sur une grille hexagonale fixe, stockés en local.
+"""Range maps: counts of GBIF observations on a fixed hexagonal grid, stored locally.
 
-Les tuiles image de GBIF recalculent hexagones et couleurs à chaque niveau de zoom. On lit donc une
-seule fois les tuiles vectorielles d'un niveau fixe, on recale chaque case sur la grille exacte de GBIF
-(les sommets des tuiles vectorielles sont arrondis : sans recalage, les cases ne s'emboîtent pas au zoom),
-et on stocke un format compact d'entiers. Le dashboard recalcule les positions (Web Mercator normalisé,
-0..1 de gauche à droite et de haut en bas) et dessine sur un canvas, par tuile.
+GBIF image tiles recompute hexagons and colours at every zoom level. So the vector tiles of a fixed level
+are read only once, each cell is snapped to the exact GBIF grid
+(vector tile vertices are rounded: without snapping, the cells do not fit together when zooming),
+and a compact integer format is stored. The dashboard recomputes the positions (normalised Web Mercator,
+0..1 from left to right and from top to bottom) and draws on a canvas, per tile.
 """
 
 import json
@@ -16,14 +16,14 @@ import mapbox_vector_tile
 from . import store
 from .taxonomy import Taxonomy
 
-ZOOM = 2               # 16 tuiles pour le monde entier
-TILE = 4096            # étendue des tuiles vectorielles GBIF (unités entières : sommets arrondis)
-# Hexagones par tuile : ~25 km en Europe pour une espèce ou un genre ; ~50 km pour les rangs supérieurs, dont les
-# aires couvrent le monde (le règne Animalia dépasse déjà 200 000 cases à 50 km).
+ZOOM = 2               # 16 tiles for the whole world
+TILE = 4096            # extent of the GBIF vector tiles (integer units: rounded vertices)
+# Hexagons per tile: ~25 km in Europe for a species or a genus; ~50 km for higher ranks, whose
+# ranges cover the world (the Animalia kingdom already exceeds 200,000 cells at 50 km).
 HEX_FINE, HEX_COARSE = 400, 200
 FINE_RANKS = ("species", "subspecies", "variety", "form", "genus")
-FIELD = ("HUMAN_OBSERVATION", "OBSERVATION", "MACHINE_OBSERVATION")  # pas de zoo, herbier, musée
-# Zoom fort : tuile GBIF du zoom affiché, demandée à la volée (cache local TILE_TTL) ; ~11 px par case à l'écran.
+FIELD = ("HUMAN_OBSERVATION", "OBSERVATION", "MACHINE_OBSERVATION")  # no zoo, herbarium, museum
+# High zoom: GBIF tile of the displayed zoom, requested on the fly (local cache TILE_TTL); ~11 px per cell on screen.
 HEX_ZOOM = 30
 TILE_TTL = 30 * 86400
 TTL = 30 * 86400
@@ -35,7 +35,7 @@ def _ensure_table(db) -> None:
 
 
 def cached(db, gbif_key: int, max_age: float = TTL) -> dict | None:
-    """Aire déjà en local (et assez récente), sinon None. Aucun accès réseau."""
+    """Range map already local (and recent enough), otherwise None. No network access."""
     _ensure_table(db)
     row = db.execute("SELECT data, fetched FROM taxon_range WHERE gbif_key = ?", (gbif_key,)).fetchone()
     if row and time.time() - row[1] < max_age:
@@ -46,36 +46,36 @@ def cached(db, gbif_key: int, max_age: float = TTL) -> dict | None:
 
 
 def grid(hex_per_tile: int) -> tuple[float, float]:
-    """Géométrie exacte de la grille GBIF, mesurée sur ses tuiles (écart restant < 0,5 unité, l'arrondi des
-    sommets) : hexagones réguliers à sommet plat, colonnes au pas de TILE / (hexPerTile + 1) à partir de 0
-    dans chaque tuile, lignes au pas de √3 R, colonnes impaires décalées d'une demi-ligne. Seule l'origine
-    verticale change d'une tuile à l'autre : les grilles de deux tuiles voisines ne se raccordent pas, chaque
-    case est donc dessinée découpée au bord de sa tuile (comme sur les cartes de GBIF).
-    Renvoie (pas des colonnes, demi-pas des lignes), en unités de tuile."""
+    """Exact geometry of the GBIF grid, measured on its tiles (remaining gap < 0.5 unit, the rounding of the
+    vertices): regular flat-top hexagons, columns at a step of TILE / (hexPerTile + 1) starting from 0
+    in each tile, rows at a step of √3 R, odd columns shifted by half a row. Only the vertical origin
+    changes from one tile to the next: the grids of two neighbouring tiles do not join, each
+    cell is therefore drawn clipped at the edge of its tile (as on GBIF maps).
+    Return (column step, row half-step), in tile units."""
     sx = TILE / (hex_per_tile + 1)
     return sx, math.sqrt(3) * sx / 1.5 / 2
 
 
 def snap(centers: list[tuple[float, float]], hex_per_tile: int) -> tuple[float, list[tuple[int, int]]]:
-    """Centres mesurés (unités de tuile) -> origine verticale de la tuile et (colonne, demi-ligne) exactes."""
+    """Measured centres (tile units) -> vertical origin of the tile and exact (column, half-row)."""
     sx, hy = grid(hex_per_tile)
     cols = [round(x / sx) for x, _ in centers]
-    # Origine verticale : phase moyenne des centres modulo un pas de ligne (2 demi-pas), moyenne circulaire
-    # pour ne pas couper le nuage en deux quand l'origine tombe près d'une demi-ligne.
+    # Vertical origin: mean phase of the centres modulo one row step (2 half-steps), circular mean
+    # so as not to split the cloud in two when the origin falls near a half-row.
     period = 2 * hy
     angles = [2 * math.pi * ((y - (i % 2) * hy) % period) / period for (_, y), i in zip(centers, cols)]
     phase = math.atan2(sum(map(math.sin, angles)), sum(map(math.cos, angles))) % (2 * math.pi)
     y0 = phase / (2 * math.pi) * period
 
     def half(y, i, y0):
-        """Demi-ligne la plus proche, de même parité que la colonne."""
+        """Nearest half-row, with the same parity as the column."""
         return 2 * round(((y - y0) / hy - i % 2) / 2) + i % 2
     return y0, [(i, half(y, i, y0)) for (_, y), i in zip(centers, cols)]
 
 
 def fetch(tx: Taxonomy, gbif_key: int) -> dict:
-    """Télécharge l'aire depuis GBIF (16 tuiles), la recale sur la grille exacte et l'enregistre au format
-    compact : par tuile son origine verticale, par case [tuile, colonne, demi-ligne, observations]."""
+    """Download the range map from GBIF (16 tiles), snap it to the exact grid and save it in the compact
+    format: per tile its vertical origin, per cell [tile, column, half-row, observations]."""
     rank = (store.load_taxon(tx.db, gbif_key) or {}).get("rank")
     hpt = HEX_FINE if rank in FINE_RANKS else HEX_COARSE
     n = 2 ** ZOOM
@@ -109,8 +109,8 @@ def fetch(tx: Taxonomy, gbif_key: int) -> dict:
 
 
 def zoom_tile(tx: Taxonomy, gbif_key: int, z: int, x: int, y: int) -> dict:
-    """Cases d'une tuile GBIF au zoom affiché (taille constante à l'écran), recalées sur la grille exacte :
-    {hex, y0, cells: [[colonne, demi-ligne, observations]]}. Gardée TILE_TTL en local."""
+    """Cells of a GBIF tile at the displayed zoom (constant size on screen), snapped to the exact grid:
+    {hex, y0, cells: [[column, half-row, observations]]}. Kept TILE_TTL locally."""
     db = tx.db
     db.execute("CREATE TABLE IF NOT EXISTS range_tile (gbif_key INTEGER, z INTEGER, x INTEGER, y INTEGER, data TEXT NOT NULL, "
                "fetched REAL NOT NULL, PRIMARY KEY (gbif_key, z, x, y))")
@@ -120,7 +120,7 @@ def zoom_tile(tx: Taxonomy, gbif_key: int, z: int, x: int, y: int) -> dict:
         return json.loads(row[0])
     params = [("srs", "EPSG:3857"), ("taxonKey", gbif_key), ("bin", "hex"), ("hexPerTile", HEX_ZOOM)]
     params += [("basisOfRecord", b) for b in FIELD]
-    # Pas le plafond de débit des API GBIF : le service de cartes est fait pour servir des tuiles à la volée.
+    # Not the rate cap of the GBIF APIs: the map service is made to serve tiles on the fly.
     r = tx.http.get(f"https://api.gbif.org/v2/map/occurrence/density/{z}/{x}/{y}.mvt", params=params)
     out = {"hex": HEX_ZOOM, "y0": 0.0, "cells": []}
     if r.status_code != 204:
@@ -141,13 +141,13 @@ def zoom_tile(tx: Taxonomy, gbif_key: int, z: int, x: int, y: int) -> dict:
 
 
 def get(tx: Taxonomy, gbif_key: int) -> dict:
-    """Aire locale si disponible, sinon téléchargée maintenant."""
+    """Local range map if available, otherwise downloaded now."""
     return cached(tx.db, gbif_key) or fetch(tx, gbif_key)
 
 
 def migrate_legacy(db) -> int:
-    """Supprime les aires des anciens formats gardées dans le cache HTTP (GeoJSON) : elles sont retéléchargées
-    au nouveau format par la synchronisation. Renvoie le nombre d'entrées supprimées."""
+    """Delete the range maps of old formats kept in the HTTP cache (GeoJSON): they are downloaded again
+    in the new format by the synchronisation. Return the number of entries deleted."""
     _ensure_table(db)
     n = db.execute("DELETE FROM http_cache WHERE url LIKE 'range:%'").rowcount
     db.commit()

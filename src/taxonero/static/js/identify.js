@@ -1,8 +1,8 @@
 /* ============================== page Identifier ============================== */
-/* Une image déposée ici est identifiée puis oubliée : envoyée au serveur le temps de l'analyse (rien n'y est
-   enregistré), affichée depuis la mémoire du navigateur et effacée dès qu'on quitte la page. */
+/* An image dropped here is identified then forgotten: sent to the server for the duration of the analysis (nothing is
+   saved there), displayed from the browser memory and erased as soon as the page is left. */
 const ID = { url: null, req: 0 };
-const IDP = { id: 'id', key: null, wsrc: 'wikipedia', wlang: '', map: null };   // carte + article du taxon choisi
+const IDP = { id: 'id', key: null, wsrc: 'wikipedia', wlang: '', map: null };   // map + article of the chosen taxon
 function loadIdentify() {
   $('#identify').innerHTML = `<section class="card idzone" id="idzone">${ic('camera')}<p>${t('id.intro')}</p>
     <label class="btn primary"><span class="first">${t('id.choose')}</span><span class="next">${t('id.another')}</span><input type="file" id="idfile" accept="image/*" hidden></label>
@@ -14,7 +14,7 @@ function loadIdentify() {
   zone.ondrop = e => { e.preventDefault(); zone.classList.remove('over');
     const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/')); if (f) identifyFile(f); };
 }
-document.addEventListener('paste', e => {   // Ctrl+V d'une image copiée
+document.addEventListener('paste', e => {   // Ctrl+V of a copied image
   if (STATE.view !== 'identify') return;
   const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/'));
   if (f) { e.preventDefault(); identifyFile(f); }
@@ -26,7 +26,7 @@ function clearIdentify() {
   ID.url = null; ID.req++;
   const r = $('#idresult'); if (r) r.innerHTML = '';
 }
-/* place : lieu indiqué à la main, pour une image sans GPS ; il sert à cette identification et n'est pas enregistré. */
+/* place: place entered by hand, for an image without GPS; it serves this identification and is not saved. */
 async function identifyFile(file, place = null) {
   clearIdentify();
   Object.assign(ID, { file, place });
@@ -34,8 +34,8 @@ async function identifyFile(file, place = null) {
   $('#idzone')?.classList.add('compact');
   $('#idresult').innerHTML = `<section class="card idphoto waiting"><div class="empty idwait"><span id="idwmsg">${t('det.identifying')}</span><span class="sub" id="idwtime"></span></div>
     <div class="idframe"><img src="${ID.url}" alt=""></div></section>`;
-  // Modèles pas encore en mémoire (premier usage depuis le démarrage) : on le dit, l'attente est plus longue.
-  // Pas encore téléchargés (tout premier usage) : plusieurs Go, on le dit aussi.
+  // Models not in memory yet (first use since startup): say so, the wait is longer.
+  // Not downloaded yet (very first use): several GB, say so as well.
   api('/api/sync/status').then(st => { if (req === ID.req && !st.models_loaded && $('#idwmsg')) $('#idwmsg').textContent = t(st.models_on_disk ? 'id.loading_models' : 'id.downloading_models'); }).catch(() => {});
   const t0 = Date.now(), tick = setInterval(() => {
     const el = $('#idwtime'); if (req !== ID.req || !el) return clearInterval(tick);
@@ -47,7 +47,7 @@ async function identifyFile(file, place = null) {
   finally { clearInterval(tick); }
   if (req === ID.req) renderIdentify(r);
 }
-/* Lieu indiqué pour une image sans GPS : identification relancée avec ce lieu. */
+/* Place given for an image without GPS: identification run again with this place. */
 async function locateIdentified() {
   const p = await pickLocation({ current: ID.place });
   if (p) { closeCompare(); identifyFile(ID.file, p); }
@@ -79,17 +79,17 @@ function renderIdentify(r) {
       place: { lat: r.lat, lon: r.lon, user: !!ID.place },
       onLocate: locateIdentified }); });
   $('#id-loc') && ($('#id-loc').onclick = locateIdentified);
-  // Par défaut : le taxon retenu pour le premier sujet identifié. Il peut être un genre ou une famille
-  // (candidats trop proches), absent alors de la liste des candidats.
+  // By default: the taxon kept for the first identified subject. It can be a genus or a family
+  // (candidates too close), then absent from the list of candidates.
   const first = dets.find(d => d.taxon_key && d.taxon_rank !== 'none');
   if (first) selectIdTaxon(first.taxon_key, first.taxon?.scientific_name || '', r);
 }
-/* Carte et article sous le résultat, pour le taxon choisi (fiche récupérée au besoin). */
+/* Map and article under the result, for the chosen taxon (record fetched if needed). */
 async function selectIdTaxon(key, name, r) {
   if (!key || key === IDP.key) return;
   const req = ID.req;
   $$('#idresult .cand').forEach(x => x.classList.toggle('sel', +x.dataset.key === key));
-  IDP.key = key; IDP.wlang = LANG;   // article dans la langue de l'interface (le menu permet d'en changer)
+  IDP.key = key; IDP.wlang = LANG;   // article in the interface language (the menu allows changing it)
   let tx;
   try { tx = await api(`/api/taxon/${key}?name=${encodeURIComponent(name)}`); } catch (e) { tx = null; }
   if (req !== ID.req || IDP.key !== key) return;
@@ -100,7 +100,7 @@ async function selectIdTaxon(key, name, r) {
   drawRangeMap(IDP, r.lat != null ? [{ lat: r.lat, lon: r.lon, img: ID.url }] : []);
   loadPanelWiki(IDP);
 }
-/* Noms communs d'une liste de candidats, dans un bloc donné (récupérés en arrière-plan s'ils manquent). */
+/* Common names of a list of candidates, in a given block (fetched in the background if missing). */
 async function fillNames(cands, root, tries = 0) {
   const refs = cands.filter(c => c.gbif_key && !NAMES.has(c.gbif_key)).map(c => ({ key: c.gbif_key, name: c.name }));
   if (!refs.length) return;

@@ -1,5 +1,5 @@
-/* Page Paramètres : réglages enregistrés dans la base, modèles et matériel utilisés. */
-const SET_ROWS = [   // libellés : set.<clé>, set.<clé>.sub, set.<clé>.<option>, set.group.<groupe>
+/* Settings page: settings saved in the database, models and hardware used. */
+const SET_ROWS = [   // labels: set.<key>, set.<key>.sub, set.<key>.<option>, set.group.<group>
   { group: 'detection' },
   { k: 'detection', type: 'seg', opts: ['auto', 'manual'] },
   { k: 'detect_groups', type: 'multi', opts: ['animal', 'plant', 'fungus', 'microbe'], when: v => v.detection !== 'manual' },
@@ -27,7 +27,7 @@ const SET_ROWS = [   // libellés : set.<clé>, set.<clé>.sub, set.<clé>.<opti
   { k: 'interval_minutes', type: 'int', min: 1, max: 1440, unit: 'min' },
 ];
 let SETS = null, MODELS = null, IMM = null, SRC = null;
-/* Onglets de la page : groupe de SET_ROWS -> onglet ; l'onglet ouvert est retenu par le navigateur. */
+/* Tabs of the page: SET_ROWS group -> tab; the open tab is remembered by the browser. */
 const TABS = ['source', 'analysis', 'validation', 'models', 'general', 'logs'];
 const TAB_LABEL = { source: 'src.title', analysis: 'set.tab.analysis', validation: 'set.group.auto', models: 'models.title', general: 'set.tab.general', logs: 'logs.title' };
 const SET_TAB = { detection: 'analysis', compute: 'analysis', identification: 'analysis', auto: 'validation', immich: 'source' };
@@ -39,9 +39,9 @@ function showSetTab(k, focus) {
   $$('#settings [role=tabpanel]').forEach(p => p.hidden = p.id !== `setpanel-${k}`);
   if (k === 'logs') pollLogs();
 }
-/* Onglet Journal : lignes gardées en mémoire par le serveur. Relevé toutes les 5 s tant que l'onglet est affiché. */
+/* Log tab: lines kept in memory by the server. Polled every 5 s while the tab is shown. */
 const LOG_LEVELS = { all: () => true, warn: l => l !== 'INFO', err: l => l === 'ERROR' || l === 'CRITICAL' };
-let LOGS = [], logLevel = 'all', logTimer = null, logCapacity = 3000, logFloor = 0;   // logFloor : dernière ligne effacée
+let LOGS = [], logLevel = 'all', logTimer = null, logCapacity = 3000, logFloor = 0;   // logFloor: last cleared line
 const logShown = () => LOGS.filter(e => LOG_LEVELS[logLevel](e.level));
 function logLine(e) {
   const d = new Date(e.t * 1000), p = n => String(n).padStart(2, '0');
@@ -49,7 +49,7 @@ function logLine(e) {
 }
 function renderLogs() {
   const box = $('#logbox'); if (!box) return;
-  const bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;   // on ne déplace pas qui remonte lire
+  const bottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;   // do not move someone scrolling back up to read
   const rows = logShown();
   box.innerHTML = rows.length ? rows.map(e => `<div class="logline${e.level === 'INFO' ? '' : ` lv-${e.level.toLowerCase()}`}">${esc(logLine(e))}</div>`).join('')
     : `<div class="sub">${t('logs.empty')}</div>`;
@@ -58,13 +58,13 @@ function renderLogs() {
 function pollLogs() {
   clearTimeout(logTimer);
   const box = $('#logbox');
-  if (!box || !box.offsetParent) return;   // onglet ou page quittés : plus de relevé
+  if (!box || !box.offsetParent) return;   // tab or page left: no more polling
   const after = LOGS.at(-1)?.id || logFloor;
   api(`/api/logs?after=${after}`).then(r => {
     logCapacity = r.capacity;
-    r.entries = r.entries.filter(e => e.id > logFloor);   // relevé parti avant un « Effacer »
+    r.entries = r.entries.filter(e => e.id > logFloor);   // poll sent before a "Clear"
     if (r.entries.length) { LOGS = LOGS.concat(r.entries);
-      let over = LOGS.length - logCapacity;   // page restée ouverte : les lignes d'information partent les premières
+      let over = LOGS.length - logCapacity;   // page left open: information lines go first
       if (over > 0) LOGS = LOGS.filter(e => !(e.level === 'INFO' && over-- > 0));
       renderLogs(); }
     else if (!LOGS.length) renderLogs();
@@ -92,14 +92,14 @@ function bindLogs() {
 }
 async function copyText(text, done) {
   try { await navigator.clipboard.writeText(text); }
-  catch (err) {   // presse-papiers indisponible hors HTTPS : copie par une zone de texte temporaire
+  catch (err) {   // clipboard unavailable outside HTTPS: copy through a temporary text area
     const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
     document.execCommand('copy'); ta.remove();
   }
   toast(done);
 }
-/* Lien vers un onglet précis : le changement d'adresse ne fait rien si la page Paramètres est déjà ouverte. */
-let setAnchor = null;   // élément à montrer une fois la page dessinée (lien « N avertissements »)
+/* Link to a given tab: changing the address does nothing if the Settings page is already open. */
+let setAnchor = null;   // element to show once the page is drawn ("N warnings" link)
 function openSetTab(k, anchor) {
   setTab = k; setAnchor = anchor || null;
   try { localStorage.setItem('settings-tab', k); } catch {}
@@ -111,7 +111,7 @@ function showSetAnchor() {
   el.scrollIntoView({ block: 'center' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
   return true;
 }
-/* Retrait de ce que l'outil a écrit dans Immich : ce qui sera touché, puis confirmation écrite. */
+/* Removal of what the tool wrote to Immich: what will be touched, then a typed confirmation. */
 let RETRACT = null, undoTimer = null;
 function undoCard() {
   const u = RETRACT; if (!u || u.source !== 'immich') return '';
@@ -161,8 +161,8 @@ async function loadSettings() {
     api('/api/sources').catch(() => null)]);
   renderSettings();
 }
-/* Connexion à Immich : URL et clé API, testées avant d'être enregistrées. La clé n'est jamais renvoyée par
-   le serveur (seulement ses derniers caractères). Les valeurs définies dans .env ne se modifient pas ici. */
+/* Immich connection: URL and API key, tested before being saved. The key is never sent back by
+   the server (only its last characters). Values set in .env cannot be changed here. */
 function immichState(st) {
   if (!st || st.code === 'missing') return `<div class="immst">${t('imm.state.missing')}</div>`;
   const v = esc(st.version || '?');
@@ -171,7 +171,7 @@ function immichState(st) {
     : `<div class="immst bad">✗ ${tOr(`imm.state.${st.code}`, tOr(`err.${st.code}`, st.code))}</div>`;
   if (st.missing?.length) h += `<div class="sub">${t('imm.missing', { perms: st.missing.map(p => `<code>${esc(p)}</code>`).join(' ') })}</div>`;
   if (st.extra?.length) h += `<div class="warnline">⚠️ ${t('imm.extra', { perms: st.extra.map(p => `<code>${esc(p)}</code>`).join(' ') })}</div>`;
-  const other = (st.errors || []).filter(e => !/permission/.test(e)).concat((st.warnings || []).filter(w => !/clé API/.test(w)));
+  const other = (st.errors || []).filter(e => !/permission/.test(e)).concat((st.warnings || []).filter(w => !/API key/.test(w)));
   if (other.length) h += other.map(e => `<div class="warnline">⚠️ ${esc(e)}</div>`).join('');
   return h;
 }
@@ -181,14 +181,14 @@ function permChips(m, st) {
     return `<code class="perm${have ? (on ? ' on' : opt ? '' : ' off') : ''}">${have ? (on ? '✓ ' : opt ? '' : '✗ ') : ''}${esc(p)}</code>`; };
   return m.required.map(p => chip(p, false)).join(' ');
 }
-/* Source des photos (Immich, un dossier ou un logiciel photo) et, sur le bureau, écriture des résultats. Fixée par
-   l'environnement (SOURCE, PHOTOS_DIR, CATALOG_PATH) : affichée sans pouvoir la changer. Un dossier ou une
-   bibliothèque s'indique avant de changer de source (bouton « Utiliser »). */
+/* Photo source (Immich, a folder or a photo application) and, on the desktop, result writing. Set by
+   the environment (SOURCE, PHOTOS_DIR, CATALOG_PATH): shown without being changeable. A folder or a
+   library is given before changing source ("Use" button). */
 const srcPick = m => m.options.find(o => o.id === (SRC.pick || m.current)) || m.options[0];
 function sourceCard(m) {
   if (!m) return '';
   const o = srcPick(m), lock = m.locked ? ' disabled' : '';
-  const browse = STATE.status?.can_pick;   // bureau : boîte de dialogue native, par le serveur
+  const browse = STATE.status?.can_pick;   // desktop: native dialog, through the server
   const opts = m.options.filter(x => x.available || x.id === m.current);
   return `<section class="card" id="srccard"><h2>${t('src.title')}</h2><div class="sub" style="font-size:13px">${t('src.sub')}</div>
     ${STATE.status?.models_on_disk === false ? `<div class="sub" style="font-size:13px;margin-top:6px">${t('src.models_note')}</div>` : ''}
@@ -211,7 +211,7 @@ function bindSource() {
   };
   $('#src-kind').onchange = e => {
     const o = SRC.options.find(x => x.id === e.target.value);
-    if (o.kind !== 'server') { SRC.pick = o.id; renderSettings(); return; }   // dossier ou bibliothèque d'abord
+    if (o.kind !== 'server') { SRC.pick = o.id; renderSettings(); return; }   // folder or library first
     SRC.pick = null; if (o.id !== SRC.current) put({ source: o.id });
   };
   $('#src-use') && ($('#src-use').onclick = () => put({ source: srcPick(SRC).id, path: $('#src-dir').value.trim() }));
@@ -223,8 +223,8 @@ function bindSource() {
   });
   $('#src-write') && ($('#src-write').onchange = e => put({ dry_run: !e.target.checked }));
 }
-/* Source « fichiers » (dossier ou logiciel photo) : pas de connexion à régler ; état du dossier ou de la
-   bibliothèque, et de l'écriture des fichiers XMP. */
+/* "Files" source (folder or photo application): no connection to set; state of the folder or of the
+   library, and of the writing of XMP files. */
 function fileCard(m) {
   const st = m.status || {}, env = m.kind === 'folder' ? 'PHOTOS_DIR' : 'CATALOG_PATH';
   return `<section class="card" id="immcard"><h2>${srcTitle(m.source)}</h2>
@@ -258,13 +258,13 @@ function immichCard(m) {
       <div class="sub">${t('imm.optional', { perm: '<code>asset.download</code>' })}</div>
     </details></section>`;
 }
-/* Requête sur la connexion : renvoie le JSON même en cas de refus (422), pour afficher la raison. */
+/* Request on the connection: returns the JSON even when refused (422), to show the reason. */
 async function immCall(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return r.json();
 }
 function bindImmich() {
-  if (!$('#imm-url')) return;   // pas de formulaire : dossier ou logiciel photo
+  if (!$('#imm-url')) return;   // no form: folder or photo application
   const values = () => ({ url: $('#imm-url').value.trim(), key: $('#imm-key').value.trim() });
   const busy = (b, on) => { b.disabled = on; b.classList.toggle('spin', on); };
   $('#imm-test').onclick = async e => {
@@ -286,7 +286,7 @@ function bindImmich() {
   };
   $('#imm-copy').onclick = () => copyText(IMM.required.join(' '), t('imm.copied'));
 }
-/* Sous le mode de validation automatique : groupes qui n'en bénéficient jamais, et pourquoi. */
+/* Under the auto-confirmation mode: groups that never benefit from it, and why. */
 function groupsNote() {
   const g = Object.entries(STATE.status?.groups || {}).filter(([, v]) => !v.auto);
   if (!g.length) return '';
@@ -294,22 +294,22 @@ function groupsNote() {
     { group: esc(tOr(`group.${id}`, id)), ok: v.ok, n: v.reviews });
   return `<br><b>${t('auto.groups_blocked', { list: g.map(item).join(', ') })}</b>`;
 }
-/* Sous le choix GPU / processeur : ce que le serveur a réellement. */
+/* Under the GPU / CPU choice: what the server actually has. */
 function deviceNote() {
   const hw = MODELS?.hardware; if (!hw) return '';
   const vendor = { nvidia: 'NVIDIA', amd: 'AMD', intel: 'Intel', apple: 'Apple' }[hw.vendor] || '';
   return `<br><b>${hw.device !== 'cpu' ? t('device.now_gpu', { gpu: esc(`${vendor} ${hw.gpu || ''}`.trim()) })
     : SETS.values.device === 'cpu' ? t('device.now_cpu') : t('device.now_cpu_nogpu')}</b>`;
 }
-/* Sous le mode d'OWLv2 : ce qui tourne vraiment (le mode auto dépend du matériel). */
+/* Under the OWLv2 mode: what really runs (auto mode depends on the hardware). */
 function openNote() {
   const m = MODELS?.open_mode; if (!m) return '';
   return `<br><b>${t('plan.now', { what: t(`plan.${m}`) })}</b>`;
 }
-/* Modèles d'IA et matériel réellement utilisé (pas seulement ce qui est demandé). */
+/* AI models and hardware actually used (not only what is requested). */
 const ONNX_NAMES = { CUDAExecutionProvider: 'GPU NVIDIA (CUDA)', MIGraphXExecutionProvider: 'GPU AMD (MIGraphX)', ROCMExecutionProvider: 'GPU AMD (ROCm)',
   OpenVINOExecutionProvider: 'Intel (OpenVINO)', CoreMLExecutionProvider: 'Apple (Core ML)' };
-/* Taxonomie GBIF : copie locale (noms, synonymes, lignée) ou API en attendant. */
+/* GBIF taxonomy: local copy (names, synonyms, lineage) or the API meanwhile. */
 function taxonomyText(x) {
   if (!x) return '';
   if (x.local || x.state === 'ready') return t('models.tax_ready', { v: esc(x.version || '') });
@@ -325,8 +325,8 @@ function modelsCard(m) {
   const vendor = { nvidia: 'NVIDIA', amd: 'AMD', intel: 'Intel', apple: 'Apple' }[hw.vendor] || '';
   const calc = gpu ? `GPU ${vendor} : ${esc(hw.gpu || hw.device)}${hw.memory_gb ? `, ${t('models.memory', { gb: hw.memory_gb })}` : ''}${hw.runtime ? ` · ${esc(hw.runtime)}` : ''}` : t('models.cpu');
   const torchOn = gpu ? `GPU ${vendor}` : t('models.cpu');
-  // MegaDetector tourne sous ONNX Runtime : son matériel peut différer de celui de PyTorch.
-  // MegaDetector : dans PyTorch (même matériel que les autres modèles), ou en ONNX si un fichier est fourni.
+  // MegaDetector runs under ONNX Runtime: its hardware may differ from PyTorch's.
+  // MegaDetector: in PyTorch (same hardware as the other models), or in ONNX if a file is provided.
   const mdOn = !m.detector_file ? null : !m.detector_onnx ? torchOn : m.detector_providers ? onnxName(m.detector_providers[0])
     : t('models.planned', { what: onnxName(hw.onnx_wanted[0]) });
   const mdWarn = m.detector_onnx && gpu && m.detector_providers && m.detector_providers[0] === 'CPUExecutionProvider' && hw.onnx_wanted[0] !== 'CPUExecutionProvider';
@@ -345,7 +345,8 @@ function modelsCard(m) {
       : m.original === false ? t('models.small_off', { perm: '<code>asset.download</code>' })
       : `${t('models.small_maybe', { perm: '<code>asset.download</code>' })} <span class="sub">(${t('models.small_checked')})</span>`}</dd>
     <dt>${t('models.speed')}</dt><dd>${m.speed ? `${t('models.per_photo', { s: m.speed.median_s })} <span class="sub">(${t('models.speed_hint', { n: m.speed.n })})</span>`
-      : t('models.not_measured')} · ${m.loaded ? t('models.loaded') : t('models.lazy')}</dd>
+      : t('models.not_measured')} · ${m.loaded ? t('models.loaded') : t('models.lazy')}
+      ${m.speed_geo ? `<div>${t('models.speed_geo', { s: m.speed_geo.median_s })} <span class="sub">(${t('models.speed_geo_hint')})</span></div>` : ''}</dd>
     ${m.stages && Object.keys(m.stages).length ? `<dt>${t('models.stages')}</dt><dd>${STAGES.filter(k => k in m.stages)
       .map(k => `${t(`models.stage.${k}`)} <b>${m.stages[k]}</b>`).join(' · ')} <span class="sub">(${t('models.stages_hint')})</span></dd>` : ''}
     <dt>${t('models.accuracy')}</dt><dd>${t('models.accuracy_value', { ok: 53, n: 73, pct: fmtPct(53 / 73) })} <span class="sub">(${t('models.accuracy_hint')})</span></dd>
@@ -371,9 +372,9 @@ function setCtl(r, v) {
 function renderSettings() {
   const v = SETS.values, d = SETS.defaults, e = SETS.env;
   const langs = [...new Set([...(STATE.status?.langs || []), ...(STATE.status?.ui_langs || []), LANG])];
-  // Chaque langue dans sa propre langue ; « noms seulement » si l'interface n'est pas traduite (repli : français).
+  // Each language in its own language; "names only" if the interface is not translated (fallback: French).
   const opt = l => `${langName(l, l)}${l !== LANG && langName(l) !== langName(l, l) ? ` (${langName(l)})` : ''}${hasUI(l) ? '' : ` · ${t('set.lang.names_only')}`}`;
-  // Onglets : chaque groupe de réglages va dans l'onglet de SET_TAB (Analyse par défaut).
+  // Tabs: each group of settings goes in the SET_TAB tab (Analysis by default).
   const tabs = { source: sourceCard(SRC) + immichCard(IMM) + undoCard(), analysis: '', validation: '', models: modelsCard(MODELS), logs: logsCard(),
     general: `<section class="card"><h2>${t('set.group.display')}</h2><div class="setrow"><div class="lbl"><b>${t('set.lang')}</b>
     <div class="sub">${t('set.lang.sub', { tags: esc(langName(e.names_lang).toLocaleLowerCase(LANG)), env: '<code>NAMES_LANG</code>' })}</div></div>
@@ -394,7 +395,7 @@ function renderSettings() {
       <dt>${t('env.tag_root')}</dt><dd>${esc(e.tag_root)}</dd>
       <dt>${t('env.open_detector')}</dt><dd>${e.open_detector ? t('env.open_detector_on') : t('env.open_detector_off')}</dd>
     </dl></section>`;
-  const cur = STATE.status?.immich_configured && TABS.includes(setTab) ? setTab : 'source';   // pas encore de source : Source
+  const cur = STATE.status?.immich_configured && TABS.includes(setTab) ? setTab : 'source';   // no source yet: Source
   let h = `<div class="settabs" role="tablist">${TABS.map(k => `<button role="tab" id="settab-${k}" aria-controls="setpanel-${k}" aria-selected="${k === cur}" tabindex="${k === cur ? 0 : -1}" data-tab="${k}">${t(TAB_LABEL[k])}</button>`).join('')}</div>`;
   h += TABS.map(k => `<div role="tabpanel" id="setpanel-${k}" aria-labelledby="settab-${k}"${k === cur ? '' : ' hidden'}>${tabs[k]}</div>`).join('');
   $('#settings').innerHTML = h;
@@ -427,7 +428,7 @@ async function saveSetting(k, value) {
 function bindSettings() {
   $$('#settings [role=tab]').forEach(b => {
     b.onclick = () => showSetTab(b.dataset.tab);
-    b.onkeydown = ev => {   // flèches : onglet voisin (motif ARIA des onglets)
+    b.onkeydown = ev => {   // arrows: neighbouring tab (ARIA tabs pattern)
       const i = TABS.indexOf(b.dataset.tab), d = { ArrowRight: 1, ArrowLeft: -1, Home: -i, End: TABS.length - 1 - i }[ev.key];
       if (d != null) { ev.preventDefault(); showSetTab(TABS[(i + d + TABS.length) % TABS.length], true); }
     };
@@ -438,7 +439,7 @@ function bindSettings() {
     const el = $(`#set-${r.k}`);
     if (r.type === 'bool' && el) el.onchange = () => saveSetting(r.k, el.checked);
     if (r.type === 'seg' && el) el.onclick = ev => { const b = ev.target.closest('button'); if (b) saveSetting(r.k, b.dataset.o); };
-    if (r.type === 'multi' && el) el.onclick = ev => {   // cases à cocher : au moins une reste cochée
+    if (r.type === 'multi' && el) el.onclick = ev => {   // checkboxes: at least one stays ticked
       const b = ev.target.closest('button'); if (!b) return;
       const on = new Set(SETS.values[r.k].split(',').filter(Boolean));
       if (on.has(b.dataset.o)) on.delete(b.dataset.o); else on.add(b.dataset.o);

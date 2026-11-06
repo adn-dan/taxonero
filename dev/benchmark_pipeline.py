@@ -1,12 +1,12 @@
-"""Évalue le pipeline complet sur dev/photos et compare des variantes.
+"""Evaluate the full pipeline on dev/photos and compare variants.
 
-Variantes : image entière ou recadrage détecteur, avec ou sans repondération géographique.
-La vérité terrain est normalisée via GBIF (synonymes, orthographe) avant comparaison.
+Variants: whole image or detector crop, with or without geographic reweighting.
+The ground truth is normalised through GBIF (synonyms, spelling) before comparison.
 
     python dev/benchmark_pipeline.py [--device cpu|cuda] [--detector models/MDV6-apa-rtdetr-e.onnx]
 
-Sortie : dev/photos/bench_pipeline.csv + tableau récapitulatif, et courbe couverture/précision
-de l'auto-validation selon le seuil.
+Output: dev/photos/bench_pipeline.csv + summary table, and coverage/precision curve
+of the auto-confirmation depending on the threshold.
 """
 
 import argparse
@@ -26,7 +26,7 @@ PHOTOS = Path(__file__).parent / "photos"
 
 
 def judge(dec, truth) -> str:
-    """'exact' (espèce juste), 'right_rank' (rang supérieur juste), 'wrong', 'abstain'."""
+    """'exact' (right species), 'right_rank' (right higher rank), 'wrong', 'abstain'."""
     if dec.rank == "none":
         return "abstain"
     if dec.rank == "species":
@@ -49,7 +49,7 @@ def main() -> None:
     cache = PHOTOS / "bench_classif.pkl"
     if cache.exists():
         full_c, crop_c, boxes_info = pickle.loads(cache.read_bytes())
-        print("classifications relues depuis le cache")
+        print("classifications read back from the cache")
     else:
         full_c, crop_c, boxes_info = classify_all(args, truth_rows)
         cache.write_bytes(pickle.dumps((full_c, crop_c, boxes_info)))
@@ -74,13 +74,13 @@ def classify_all(args, truth_rows):
     full_c = clf.classify(images)
     crop_c = clf.classify(crops)
     t_clf = time.time() - t0
-    print(f"détection {t_det / len(images):.2f} s/img, classification {t_clf / (2 * len(images)):.2f} s/img ({args.device})")
+    print(f"detection {t_det / len(images):.2f} s/img, classification {t_clf / (2 * len(images)):.2f} s/img ({args.device})")
     return full_c, crop_c, boxes_info
 
 
 def evaluate(tx, truth_rows, truths, full_c, crop_c, boxes_info):
 
-    variants = {"entière": full_c, "recadrée": crop_c}
+    variants = {"whole": full_c, "cropped": crop_c}
     results = defaultdict(list)
     rows = []
     for i, r in enumerate(truth_rows):
@@ -91,7 +91,7 @@ def evaluate(tx, truth_rows, truths, full_c, crop_c, boxes_info):
             for geo in (False, True):
                 ranked = rerank([type(c)(**vars(c)) for c in cands[i]], tx, lat if geo else None, lon if geo else None)
                 dec = decide(ranked, tx)
-                key = f"{vname}{'+géo' if geo else ''}"
+                key = f"{vname}{'+geo' if geo else ''}"
                 verdict = judge(dec, truth)
                 top1_ok = bool(ranked) and ranked[0].gbif_key == truth.gbif_key
                 results[key].append((verdict, top1_ok, ranked[0].posterior if ranked else 0.0, r["group"]))
@@ -106,7 +106,7 @@ def evaluate(tx, truth_rows, truths, full_c, crop_c, boxes_info):
         w.writerows(rows)
 
     n = len(rows)
-    print(f"\n{'variante':16s} {'top1 esp.':>9s} {'exact':>7s} {'rang sup':>8s} {'faux':>6s} {'abstient':>8s}")
+    print(f"\n{'variant':16s} {'top1 sp.':>9s} {'exact':>7s} {'higher':>8s} {'wrong':>6s} {'abstain':>8s}")
     for key, res in results.items():
         c = defaultdict(int)
         for v, *_ in res:
@@ -115,12 +115,12 @@ def evaluate(tx, truth_rows, truths, full_c, crop_c, boxes_info):
         print(f"{key:16s} {top1:9.1%} {c['exact'] / n:7.1%} {c['right_rank'] / n:8.1%} {c['wrong'] / n:6.1%} {c['abstain'] / n:8.1%}")
 
     best = max(results, key=lambda k: sum(t for _, t, _, _ in results[k]))
-    print(f"\nAuto-validation au rang espèce ({best}) : seuil -> couverture / précision")
+    print(f"\nAuto-confirmation at species rank ({best}): threshold -> coverage / precision")
     for thr in (0.5, 0.6, 0.7, 0.8, 0.9, 0.95):
         sel = [t for _, t, p, _ in results[best] if p >= thr]
         if sel:
             print(f"  >= {thr:.2f}  {len(sel) / n:6.1%}  {sum(sel) / len(sel):6.1%}  (n={len(sel)})")
-    print("\nPar groupe (top-1 espèce,", best, ")")
+    print("\nPer group (species top-1,", best, ")")
     groups = defaultdict(list)
     for _, t, _, g in results[best]:
         groups[g].append(t)

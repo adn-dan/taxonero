@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1
 
 FROM python:3.12-slim
-# Matériel de calcul (--build-arg GPU=...) : les trois modèles (MegaDetector, OWLv2, BioCLIP) tournent dans PyTorch,
-# donc sur le même GPU, quel qu'il soit. Les poids sont téléchargés au premier lancement dans /data.
-#   cuda12 (défaut) : NVIDIA, pilote >= 525 ; torch 2.11 cu128
-#   cuda13          : NVIDIA, pilote >= 580 ; torch 2.14 cu130
-#   rocm            : AMD (ROCm 7.2), expérimental, non testé
-#   xpu             : Intel Arc et Core Ultra (pilote GPU d'Intel inclus), non testé ; Iris Xe et plus anciens :
-#                     non pris en charge par PyTorch (détecté par un calcul d'essai, analyse sur le processeur)
-#   cpu             : sans GPU (x86 et ARM)
-# ONNX Runtime (processeur) ne sert qu'à un MegaDetector ONNX fourni par DETECTOR_PATH (images d'avant).
+# Compute hardware (--build-arg GPU=...): the three models (MegaDetector, OWLv2, BioCLIP) run in PyTorch,
+# hence on the same GPU, whatever it is. Weights are downloaded at first launch into /data.
+#   cuda12 (default): NVIDIA, driver >= 525; torch 2.11 cu128
+#   cuda13          : NVIDIA, driver >= 580; torch 2.14 cu130
+#   rocm            : AMD (ROCm 7.2), experimental, untested
+#   xpu             : Intel Arc and Core Ultra (Intel GPU driver included), untested; Iris Xe and older:
+#                     not supported by PyTorch (detected by a test computation, analysis on the CPU)
+#   cpu             : no GPU (x86 and ARM)
+# ONNX Runtime (CPU) is only used for an ONNX MegaDetector provided through DETECTOR_PATH (older images).
 ARG GPU=cuda12
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/data/hf \
@@ -27,13 +27,13 @@ RUN case "$GPU" in \
     && pip install --no-cache-dir $torch --index-url https://download.pytorch.org/whl/$idx \
     && pip install --no-cache-dir onnxruntime==1.31.0
 
-# Fuseaux horaires : TZ (ex. Europe/Paris) règle l'heure du serveur, celle de la plage d'analyse.
-# tzdata : fuseau TZ ; exiftool : métadonnées et fichiers XMP de la source « dossier local ».
+# Time zones: TZ (e.g. Europe/Paris) sets the server time, that of the analysis range.
+# tzdata: TZ time zone; exiftool: metadata and XMP files of the "local folder" source.
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata libimage-exiftool-perl && rm -rf /var/lib/apt/lists/*
 
-# Intel (xpu) : PyTorch XPU a besoin du pilote GPU en espace utilisateur (Level Zero et OpenCL d'Intel), que Debian
-# ne fournit pas ; sans lui, aucun GPU n'est vu. Paquets officiels d'Intel (compute-runtime et son compilateur IGC),
-# versions figées, empreintes vérifiées (celles de compute-runtime sont publiées par Intel dans ww40.sum).
+# Intel (xpu): PyTorch XPU needs the user-space GPU driver (Intel Level Zero and OpenCL), which Debian
+# does not provide; without it, no GPU is seen. Official Intel packages (compute-runtime and its IGC compiler),
+# pinned versions, checksums verified (those of compute-runtime are published by Intel in ww40.sum).
 ARG INTEL_CR=https://github.com/intel/compute-runtime/releases/download/26.40.40196.8
 ARG INTEL_IGC=https://github.com/intel/intel-graphics-compiler/releases/download/v2.42.6
 RUN if [ "$GPU" = xpu ]; then \
@@ -56,12 +56,12 @@ RUN if [ "$GPU" = xpu ]; then \
 WORKDIR /app
 COPY pyproject.toml README.md constraints.txt ./
 COPY src ./src
-# constraints.txt : versions testées des bibliothèques Python (build reproductible).
+# constraints.txt: tested versions of the Python libraries (reproducible build).
 RUN pip install --no-cache-dir -c constraints.txt .
 
-# Utilisateur par défaut 1000 ; un autre uid (TrueNAS : apps en 568) se règle avec `user:` dans le compose.
-# /data est alors le volume monté, qui doit appartenir à cet uid. HOME pointe dessus pour les caches.
-# Pas de 0777 : la base contient la clé API Immich ; seul le propriétaire écrit dedans.
+# Default user 1000; another uid (TrueNAS: apps as 568) is set with `user:` in the compose file.
+# /data is then the mounted volume, which must belong to this uid. HOME points to it for the caches.
+# No 0777: the database holds the Immich API key; only the owner writes to it.
 RUN useradd --uid 1000 --create-home nature && mkdir -p /data && chown nature /data && chmod 0750 /data
 ENV HOME=/data
 USER nature

@@ -1,9 +1,9 @@
-"""Source « RapidRAW » : un dossier de photos ouvert dans RapidRAW.
+""""RapidRAW" source: a photo folder opened in RapidRAW.
 
-RapidRAW range ses réglages et ses mots-clés dans photo.nef.rrdata (JSON à lui, jamais écrit ici). Avec la
-synchronisation XMP active (Réglages > « XMP sync », clé enableXmpSync de settings.json ; absente = inactive), il
-lit le sidecar photo.xmp (ou photo.XMP) en parcourant le dossier et ajoute à ses mots-clés ceux de Xmp.dc.subject
-(sync_metadata_from_xmp). Il ne fait qu'ajouter : un mot-clé retiré du XMP reste dans RapidRAW.
+RapidRAW stores its settings and keywords in photo.nef.rrdata (its own JSON, never written here). With
+XMP sync enabled (Settings > "XMP sync", enableXmpSync key of settings.json; missing = disabled), it
+reads the photo.xmp (or photo.XMP) sidecar while browsing the folder and adds to its keywords those of Xmp.dc.subject
+(sync_metadata_from_xmp). It only adds: a keyword removed from the XMP stays in RapidRAW.
 """
 
 import json
@@ -14,11 +14,11 @@ from pathlib import Path
 from .files import first_existing, std_sidecar
 from .local import LocalFolder
 
-APP_ID = "io.github.CyberTimon.RapidRAW"   # identifiant Tauri : nom du dossier de ses réglages
+APP_ID = "io.github.CyberTimon.RapidRAW"   # Tauri identifier: name of its settings folder
 
 
 def settings_file() -> Path | None:
-    """settings.json de RapidRAW (dossier de données de l'application selon Tauri ; Flatpak)."""
+    """RapidRAW settings.json (application data folder according to Tauri; Flatpak)."""
     home = Path.home()
     if sys.platform == "win32":
         dirs = [Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / APP_ID]
@@ -43,14 +43,14 @@ class RapidRaw(LocalFolder):
 
     def _check_source(self) -> bool:
         ok = super()._check_source()
-        if self.settings is None:   # jamais lancé ici, ou installé ailleurs : son réglage par défaut est actif
-            self.warnings.append("réglages de RapidRAW introuvables : vérifie que la synchronisation XMP est active")
+        if self.settings is None:   # never launched here, or installed elsewhere: its default setting is active
+            self.warnings.append("RapidRAW settings not found: check that XMP sync is enabled")
             return ok
         try:
             sync = json.loads(self.settings.read_text(encoding="utf-8")).get("enableXmpSync")
         except (OSError, ValueError, AttributeError):
             sync = None
         if sync is not True:
-            self.warnings.append("RapidRAW : active la synchronisation XMP dans ses réglages pour qu'il reprenne les "
-                                 "mots-clés écrits ici")
+            self.warnings.append("RapidRAW: enable XMP sync in its settings so that it picks up the "
+                                 "keywords written here")
         return ok

@@ -1,5 +1,5 @@
-"""Validation automatique : seuil (règle, calibration sur les relectures), fiabilité par groupe du vivant, raisons
-pour lesquelles une détection reste à relire, tirage des détections de contrôle."""
+"""Auto-confirmation: threshold (rule, calibration on the reviews), reliability per group of life, reasons
+why a detection stays to review, draw of the check detections."""
 
 import hashlib
 import json
@@ -18,8 +18,8 @@ def wilson_lower(ok: int, n: int, z: float = 1.64) -> float:
 
 
 def calibrate(db: sqlite3.Connection, target: float, min_reviews: int) -> dict:
-    """Seuil minimal tel que la précision des propositions du modèle, mesurée sur tes relectures,
-    atteigne la cible (borne basse de Wilson à 95 % unilatéral, pour ne pas s'emballer sur peu de cas)."""
+    """Minimum threshold such that the precision of the model proposals, measured on your reviews,
+    reaches the target (lower Wilson bound at 95 % one-sided, so as not to get carried away on few cases)."""
     rows = db.execute(
         "SELECT model_conf, model_key, taxon_key, status FROM detection "
         "WHERE confirmed_by = 'user' AND status != 'deleted' AND model_key IS NOT NULL AND model_rank = 'species'").fetchall()
@@ -48,15 +48,15 @@ def auto_threshold(db: sqlite3.Connection, s: Settings) -> float | None:
     calibrated = calibrate(db, s.auto_confirm_target_precision, s.auto_confirm_min_reviews)["threshold"]
     if s.auto_confirm == "calibrated":
         return calibrated
-    # 'rule' : mesuré sur le jeu de dev, 0,85 + badge vert + pas de second candidat crédible donne
-    # 100 % de précision hors étiquettes douteuses. La calibration ne peut que rendre plus strict.
+    # 'rule': measured on the dev set, 0.85 + green badge + no credible runner-up gives
+    # 100 % precision excluding doubtful labels. Calibration can only make it stricter.
     return max(s.auto_confirm_threshold, calibrated or 0.0)
 
 
-# Fiabilité par groupe : la règle de confiance ne suffit pas pour les groupes où le modèle se trompe souvent
-# avec assurance. Sans relectures, les groupes mesurés comme faibles sur le jeu de dev (araignées 0/3, poissons
-# 1/3) ne sont jamais validés automatiquement ; dès GROUP_MIN_REVIEWS relectures d'un groupe (propositions au-dessus
-# du seuil), ce sont elles qui décident : précision au moins égale à AUTO_CONFIRM_TARGET_PRECISION.
+# Reliability per group: the confidence rule is not enough for groups where the model is often wrong
+# with confidence. Without reviews, the groups measured as weak on the dev set (spiders 0/3, fish
+# 1/3) are never auto-confirmed; from GROUP_MIN_REVIEWS reviews of a group (proposals above
+# the threshold), they decide: precision at least equal to AUTO_CONFIRM_TARGET_PRECISION.
 WEAK_GROUPS = ("arachnida", "pisces")
 GROUP_MIN_REVIEWS = 10
 _FISH = {"Actinopterygii", "Chondrichthyes", "Elasmobranchii", "Holocephali", "Sarcopterygii", "Dipneusti", "Actinistia",
@@ -65,7 +65,7 @@ _REPTILES = {"Reptilia", "Squamata", "Testudines", "Crocodylia"}
 
 
 def group_of(lineage: dict | None) -> str | None:
-    """Groupe du vivant d'un taxon, mêmes identifiants que le dashboard (group.<id>) pour les principaux."""
+    """Group of life of a taxon, same identifiers as the dashboard (group.<id>) for the main ones."""
     L = lineage or {}
     cls, kingdom = L.get("class"), L.get("kingdom")
     if kingdom in ("Plantae", "Fungi"):
@@ -78,8 +78,8 @@ def group_of(lineage: dict | None) -> str | None:
 
 
 def group_reliability(db: sqlite3.Connection, s: Settings) -> dict[str, dict]:
-    """Par groupe : relectures des propositions du modèle au-dessus du seuil, justes, et validation automatique
-    permise ou non."""
+    """Per group: reviews of the model proposals above the threshold, correct ones, and auto-confirmation
+    allowed or not."""
     rows = db.execute(
         "SELECT d.model_key, d.taxon_key, d.status, t.data FROM detection d LEFT JOIN taxon t ON t.gbif_key = d.model_key "
         "WHERE d.confirmed_by = 'user' AND d.status != 'deleted' AND d.model_key IS NOT NULL AND d.model_rank = 'species' "
@@ -102,9 +102,9 @@ def blocked_groups(db: sqlite3.Connection, s: Settings) -> set[str]:
     return {g for g, v in group_reliability(db, s).items() if not v["auto"]}
 
 
-# Sujet seul dont l'espèce retenue a moins de 5 % sur le recadrage : elle vient de la photo entière, le cadre est
-# peut-être à côté du sujet. Mesuré sur 49 photos de dev à un sujet : 3 cas (une espèce juste au cadre mal placé,
-# deux erreurs), jamais au-dessus du seuil de validation : aucune bonne validation automatique perdue.
+# Single subject whose kept species has less than 5 % on the crop: it comes from the whole photo, the box may
+# be next to the subject. Measured on 49 single-subject dev photos: 3 cases (one right species with a misplaced box,
+# two errors), never above the confirmation threshold: no correct auto-confirmation lost.
 FRAME_MIN_SUPPORT = 0.05
 
 
@@ -112,8 +112,8 @@ def auto_blockers(rank: str | None, plausibility: str | None, confidence: float 
                   runner_up: float, box_label: str | None, threshold: float | None, max_runner_up: float,
                   group: str | None = None, blocked: set[str] = frozenset(),
                   frame_support: float | None = None) -> list[dict]:
-    """Raisons pour lesquelles une détection n'est pas validée automatiquement (vide : elle l'est), en codes
-    avec leurs valeurs : le dashboard les traduit."""
+    """Reasons why a detection is not auto-confirmed (empty: it is), as codes
+    with their values: the dashboard translates them."""
     if threshold is None:
         return [{"code": "auto_off"}]
     out = []
@@ -125,13 +125,13 @@ def auto_blockers(rank: str | None, plausibility: str | None, confidence: float 
         out.append({"code": "low_confidence", "conf": confidence or 0.0, "thr": threshold})
     if runner_up > max_runner_up:
         out.append({"code": "runner_up", "p": runner_up})
-    if name in AMBIGUOUS_WITH_DOMESTIC:   # un chien pris pour un loup ne doit pas être tagué sans relecture
+    if name in AMBIGUOUS_WITH_DOMESTIC:   # a dog taken for a wolf must not be tagged without review
         out.append({"code": "domestic"})
-    if box_label == "image":              # jamais le repli « image entière »
+    if box_label == "image":              # never the "whole image" fallback
         out.append({"code": "whole_image"})
-    if group in blocked:                  # groupe où le modèle se trompe souvent avec assurance
+    if group in blocked:                  # group where the model is often confidently wrong
         out.append({"code": "group_unreliable", "group": group})
-    if frame_support is not None and frame_support < FRAME_MIN_SUPPORT:   # espèce vue sur la photo entière seulement
+    if frame_support is not None and frame_support < FRAME_MIN_SUPPORT:   # species seen on the whole photo only
         out.append({"code": "frame"})
     return out
 
@@ -146,6 +146,6 @@ def should_auto_confirm(a: Analysis, threshold: float | None, max_runner_up: flo
 
 
 def audit_pick(asset_id: str, box: Box, rate: float) -> bool:
-    """Tirage reproductible (même photo, même cadre : même résultat) d'une détection de contrôle."""
+    """Reproducible draw (same photo, same box: same result) of a check detection."""
     h = hashlib.sha256(f"{asset_id}:{box.x:.3f}:{box.y:.3f}".encode()).digest()
     return int.from_bytes(h[:4], "big") / 2 ** 32 < rate

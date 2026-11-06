@@ -1,11 +1,11 @@
-"""Source « RawTherapee » : un dossier de photos ouvert dans RawTherapee.
+""""RawTherapee" source: a photo folder opened in RawTherapee.
 
-RawTherapee n'a pas de catalogue : ses réglages vont dans photo.nef.pp3, qu'il ne faut pas créer à sa place (un
-.pp3 présent remplace le profil par défaut de l'image). Depuis la version 5.12, il lit aussi un sidecar XMP et en
-reprend les mots-clés et la description à l'export (Exiv2::copyXmpToIptc : Xmp.dc.subject -> IPTC Keywords), si
-Préférences > Métadonnées > « XMP sidecar synchronization » n'est pas sur « none » (défaut). Nom du sidecar selon
-le même onglet : photo.xmp (std, défaut) ou photo.nef.xmp (ext). Les deux réglages sont lus dans son fichier
-options ([Metadata] XMPSynchronization, XMPSidecarStyle).
+RawTherapee has no catalog: its settings go in photo.nef.pp3, which must not be created in its place (a
+.pp3 present replaces the default profile of the image). Since version 5.12, it also reads an XMP sidecar and
+picks up its keywords and description on export (Exiv2::copyXmpToIptc: Xmp.dc.subject -> IPTC Keywords), if
+Preferences > Metadata > "XMP sidecar synchronization" is not set to "none" (default). Sidecar name according to
+the same tab: photo.xmp (std, default) or photo.nef.xmp (ext). Both settings are read in its options
+file ([Metadata] XMPSynchronization, XMPSidecarStyle).
 """
 
 import os
@@ -17,7 +17,7 @@ from .local import LocalFolder
 
 
 def options_file() -> Path | None:
-    """Fichier options de RawTherapee (paquet, Flatpak, Windows, macOS)."""
+    """RawTherapee options file (package, Flatpak, Windows, macOS)."""
     home = Path.home()
     if sys.platform == "win32":
         dirs = [Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local") / "RawTherapee"]
@@ -30,7 +30,7 @@ def options_file() -> Path | None:
 
 
 def metadata_options(path: Path | None) -> dict[str, str]:
-    """Section [Metadata] du fichier options (format GKeyFile : [groupe], puis clé=valeur)."""
+    """[Metadata] section of the options file (GKeyFile format: [group], then key=value)."""
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path else []
     except OSError:
@@ -62,8 +62,8 @@ class RawTherapee(LocalFolder):
         ok = super()._check_source()
         meta = metadata_options(self.options)
         if not meta:
-            self.warnings.append("réglages de RawTherapee introuvables : sidecars nommés photo.xmp (son réglage par défaut)")
+            self.warnings.append("RawTherapee settings not found: sidecars named photo.xmp (its default setting)")
         if meta.get("XMPSynchronization", "none") == "none":
-            self.warnings.append("RawTherapee : règle Préférences > Métadonnées > « XMP sidecar synchronization » sur "
-                                 "« read » pour qu'il reprenne les mots-clés écrits ici")
+            self.warnings.append("RawTherapee: set Preferences > Metadata > \"XMP sidecar synchronization\" to "
+                                 "\"read\" so that it picks up the keywords written here")
         return ok

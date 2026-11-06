@@ -1,7 +1,7 @@
-# Immich jetable pour le développement. Totalement séparé de la prod :
-# projet compose, volumes et port différents. Pas de conteneur ML (inutile ici).
-# Démarrage : docker compose -f dev/docker-compose.yml up -d
-# Suppression complète : docker compose -f dev/docker-compose.yml down -v
+# Throwaway Immich for development. Fully separate from production:
+# compose project, volumes and port all different. No ML container (useless here).
+# Start: docker compose -f dev/docker-compose.yml up -d
+# Full removal: docker compose -f dev/docker-compose.yml down -v
 
 name: taxonero-dev
 

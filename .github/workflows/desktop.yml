@@ -1,11 +1,11 @@
-# Édition de bureau : un lanceur léger par système et processeur (packaging/bootstrap.py, ~40 Mo : uv, la roue de
-# taxonero, ExifTool), construit à chaque tag vX.Y.Z et joint à la version GitHub. Au premier lancement, il installe
-# dans le dossier de l'utilisateur le PyTorch adapté au GPU détecté (NVIDIA, AMD, Intel Arc, Apple Silicon, sinon
-# processeur), comme ComfyUI Desktop ou Invoke. Mac Intel non pris en charge : PyTorch s'y est arrêté à la version 2.2.
+# Desktop edition: one light launcher per system and processor (packaging/bootstrap.py, ~40 MB: uv, the taxonero
+# wheel, ExifTool), built at every vX.Y.Z tag and attached to the GitHub release. At first launch, it installs
+# in the user folder the PyTorch matching the detected GPU (NVIDIA, AMD, Intel Arc, Apple Silicon, otherwise
+# CPU), like ComfyUI Desktop or Invoke. Intel Macs not supported: PyTorch stopped there at version 2.2.
 #
-# Fichiers produits :
-#   Windows : installeur (Inno Setup) et version portable (zip)    macOS : Taxonero.app dans un .dmg
-#   Linux : .deb, .rpm et AppImage (packaging/linux-packages.sh)
+# Files produced:
+#   Windows: installer (Inno Setup) and portable version (zip)    macOS: Taxonero.app in a .dmg
+#   Linux: .deb, .rpm and AppImage (packaging/linux-packages.sh)
 name: desktop
 on:
   push:
@@ -33,14 +33,14 @@ jobs:
       - name: Version
         shell: bash
         run: |
-          # Tag vX.Y.Z : X.Y.Z ; lancement à la main : la version de pyproject.toml.
+          # vX.Y.Z tag: X.Y.Z; manual run: the version from pyproject.toml.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v=${GITHUB_REF_NAME#v}; else v=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml); fi
           echo "VERSION=$v" >> "$GITHUB_ENV"
-      - name: Outils
+      - name: Tools
         run: python -m pip install pyinstaller==6.22.3
-      - name: uv, roue, ExifTool
+      - name: uv, wheel, ExifTool
         run: python packaging/prepare.py
-      - name: Lanceur
+      - name: Launcher
         run: pyinstaller packaging/taxonero.spec --noconfirm --distpath dist --workpath build
 
       - name: Linux (.deb, .rpm, AppImage)
@@ -57,7 +57,7 @@ jobs:
           ln -s /Applications dmg/Applications
           hdiutil create -volname Taxonero -srcfolder dmg -ov -format UDZO "out/Taxonero-$VERSION-macos-arm64.dmg"
 
-      - name: Windows (installeur et version portable)
+      - name: Windows (installer and portable version)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -66,18 +66,18 @@ jobs:
           $env:TAXONERO_VERSION = $env:VERSION
           New-Item -ItemType Directory -Force out | Out-Null
           Compress-Archive -Path dist\taxonero.exe -DestinationPath "out\Taxonero-$env:VERSION-windows-$env:TAXONERO_ARCH-portable.zip"
-          # Inno Setup 6.7.4, version figée, empreinte vérifiée ; installé pour l'utilisateur, sans droits d'administrateur.
+          # Inno Setup 6.7.4, pinned version, checksum verified; installed for the user, without admin rights.
           Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe -OutFile is.exe
-          if ((Get-FileHash is.exe -Algorithm SHA256).Hash -ne "A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C") { throw "Inno Setup : empreinte inattendue" }
+          if ((Get-FileHash is.exe -Algorithm SHA256).Hash -ne "A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C") { throw "Inno Setup: unexpected checksum" }
           Start-Process .\is.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=$env:RUNNER_TEMP\inno" -Wait
           & "$env:RUNNER_TEMP\inno\ISCC.exe" packaging\taxonero.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué" }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: taxonero-${{ matrix.name }}
           path: out/*
-      - name: Version GitHub
+      - name: GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:

@@ -36,6 +36,9 @@ fish, plants, fungi and lichens): an [Immich](https://immich.app) library, a loc
 - Everything the dashboard shows (species sheets, names, range maps, articles) is cached locally by the
   sync, so reviewing never waits for the network. The "Sync" button fetches new photos from Immich,
   analyzes them, writes tags and refreshes local data, with a progress bar.
+- Analysis in two phases, each with its own progress bar: the AI part (detection, identification) runs for
+  the whole queue first, then the GPU is released while the geographic check queries GBIF. Presence around
+  a point costs one GBIF request per 1° area for all species at once (cached 180 days), not one per candidate.
 - Dashboard styled like Immich (same colors, font, sidebar): Photos page with filters (to review,
   auto-confirmed, confirmed by me, rejected, no detection) and a keyboard-driven full-screen viewer;
   clickable boxes that open the Wikipedia or Wikispecies article in a side panel; common names in
@@ -425,7 +428,8 @@ The main ones:
   then converted into `data/gbif-backbone.sqlite` (~1.5 GB, about ten minutes; keep ~2.5 GB free during the
   conversion). From then on, name matching and taxon records (rank, lineage) no longer go over the network:
   on the benchmark with an empty cache, 34 requests per photo instead of 55, twice as fast. Still online:
-  presence around the point and fossils (occurrences), common names and IUCN status (once per taxon), maps.
+  presence around the point (one request per 1° area for all species), fossils (one world list of the species
+  with fossils, once a year), common names and IUCN status (once per taxon), maps.
   The status is shown in **Settings > AI models**. If the API moves to a new taxonomy version, the copy is
   rebuilt at the next start.
 - `ANALYSIS_WINDOW`: time window for analysis (e.g. `01:00-07:00`), to leave the GPU to Immich's machine

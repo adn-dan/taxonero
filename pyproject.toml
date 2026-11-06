@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taxonero"
-version = "0.1.2"
+version = "0.1.3"
 description = "Self-hosted AI species identification for your photos: Immich, local folders or photo apps. Never modifies your pictures."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,17 +17,17 @@ dependencies = [
   "pillow>=10",
   "numpy>=1.26",
   "pybioclip>=2.1",
-  "transformers>=4.45",   # OWLv2 (détecteur à vocabulaire ouvert)
-  "mapbox-vector-tile>=2.0",  # aires de répartition GBIF
-  "pillow-heif>=1.7",   # photos HEIC (iPhone) de la source « dossier local »
-  # onnxruntime (CPU) ou onnxruntime-gpu : installé selon la cible (voir Dockerfile).
+  "transformers>=4.45",   # OWLv2 (open-vocabulary detector)
+  "mapbox-vector-tile>=2.0",  # GBIF range maps
+  "pillow-heif>=1.7",   # HEIC photos (iPhone) of the "local folder" source
+  # onnxruntime (CPU) or onnxruntime-gpu: installed depending on the target (see Dockerfile).
 ]
 
 [project.optional-dependencies]
 cpu = ["onnxruntime>=1.18"]
-# Édition de bureau : fenêtre d'application (taxonero desktop) ; sous Linux avec Qt (PyQt6 et son WebEngine).
+# Desktop edition: application window (taxonero desktop); on Linux with Qt (PyQt6 and its WebEngine).
 desktop = ["pywebview>=6.1", "pywebview[qt]>=6.1; sys_platform == 'linux'"]
-dev = ["pytest>=8", "playwright>=1.48"]   # tests navigateur : puis « playwright install firefox »
+dev = ["pytest>=8", "playwright>=1.48"]   # browser tests: then "playwright install firefox"
 
 [project.scripts]
 taxonero = "taxonero.__main__:main"

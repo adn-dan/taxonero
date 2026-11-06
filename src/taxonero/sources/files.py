@@ -1,15 +1,15 @@
-"""Base des sources « fichiers » : photos sur le disque, résultats dans un fichier XMP à côté de chacune (« sidecar »).
+"""Base of the "file" sources: photos on disk, results in an XMP file next to each one ("sidecar").
 
-Lecture : fichiers et métadonnées (date, GPS, appareil) par ExifTool. Écriture, sans jamais toucher aux photos :
-- mots-clés hiérarchiques (XMP-lr:HierarchicalSubject, « Nature|Aves|Paridae|Mésange charbonnière ») et le
-  dernier niveau en mot-clé simple (XMP-dc:Subject) pour les logiciels sans hiérarchie ;
-- description (XMP-dc:Description), avec le même bloc délimité qu'avec Immich.
+Reading: files and metadata (date, GPS, camera) through ExifTool. Writing, without ever touching the photos:
+- hierarchical keywords (XMP-lr:HierarchicalSubject, "Nature|Aves|Paridae|Great tit") and the
+  last level as a plain keyword (XMP-dc:Subject) for applications without hierarchy;
+- description (XMP-dc:Description), with the same delimited block as with Immich.
 
-Chaque source précise d'où viennent les fichiers (un dossier, la bibliothèque d'un logiciel) et le nom des sidecars
-que son logiciel lit : _files, _resolve, _sidecars, et _check_source pour l'état. Même interface que ImmichClient
-(voir sources/__init__.py) : les « tags » sont identifiés par leur valeur (« Nature/Aves/… ») et les assets par un
-identifiant stable tiré de la clé du fichier (chemin relatif au dossier, ou absolu pour une bibliothèque). Les vidéos
-ne sont pas prises en charge.
+Each source specifies where the files come from (a folder, the library of an application) and the name of the sidecars
+its application reads: _files, _resolve, _sidecars, and _check_source for the state. Same interface as ImmichClient
+(see sources/__init__.py): "tags" are identified by their value ("Nature/Aves/…") and assets by a
+stable identifier derived from the file key (path relative to the folder, or absolute for a library). Videos
+are not supported.
 """
 
 import io
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 IMAGE_EXT = {"jpg", "jpeg", "png", "webp", "tif", "tiff", "heic", "heif"} | RAW_EXT
 READ_TAGS = ["DateTimeOriginal", "CreateDate", "GPSLatitude", "GPSLongitude", "Make", "Model", "LensModel",
              "ImageWidth", "ImageHeight", "Orientation"]
-SIZES = {"thumbnail": 250, "preview": 1440}   # petit côté, comme les vignettes et aperçus d'Immich
+SIZES = {"thumbnail": 250, "preview": 1440}   # short side, like Immich thumbnails and previews
 NAMESPACE = uuid.UUID("6f1c2b8e-6a7d-4a43-9d8e-4f3e5c2a1b90")
 
 try:   # HEIC (iPhone) : greffon facultatif
@@ -50,7 +50,7 @@ def _iso(ts: float) -> str:
 
 
 def _taken(meta: dict) -> str | None:
-    """Date de prise de vue, heure de l'appareil (sans fuseau), au format ISO."""
+    """Capture date, camera time (without time zone), in ISO format."""
     for k in ("DateTimeOriginal", "CreateDate"):
         v = str(meta.get(k) or "")
         if len(v) >= 19 and v[:4].isdigit() and not v.startswith("0000"):
@@ -62,7 +62,7 @@ WINDOWS = sys.platform == "win32"
 
 
 def same_file(path: str) -> str:
-    """Chemin comparable au SourceFile d'ExifTool, qui sous Windows remplace les \\ par des /."""
+    """Path comparable with ExifTool's SourceFile, which on Windows replaces \\ with /."""
     return path.replace("\\", "/") if WINDOWS else path
 
 
@@ -80,7 +80,7 @@ def ext_sidecar(p: Path) -> Path:
 
 
 def std_sidecar(p: Path) -> Path:
-    """photo.xmp (Lightroom Classic, Capture One, Bridge, RapidRAW) ; photo.XMP s'il existe déjà sous ce nom."""
+    """photo.xmp (Lightroom Classic, Capture One, Bridge, RapidRAW); photo.XMP if it already exists under that name."""
     upper = p.with_suffix(".XMP")
     return upper if upper.exists() and not p.with_suffix(".xmp").exists() else p.with_suffix(".xmp")
 
@@ -90,7 +90,7 @@ def first_existing(paths: Iterable[Path]) -> Path | None:
 
 
 def open_readonly(path: Path) -> sqlite3.Connection:
-    """Base d'un autre logiciel, en lecture seule (jamais modifiée)."""
+    """Database of another application, read-only (never modified)."""
     db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
     db.row_factory = sqlite3.Row
     return db
@@ -98,11 +98,11 @@ def open_readonly(path: Path) -> sqlite3.Connection:
 
 class FileSource:
     name = ""
-    label = ""          # nom affiché comme « version » de la source
-    write_gap = 0.0     # pas de course d'écriture comme avec Immich
+    label = ""          # name shown as the "version" of the source
+    write_gap = 0.0     # no write race as with Immich
 
     def __init__(self, root: Path, data_dir: Path, dry_run: bool = True):
-        self.root = Path(root)   # dossier des photos, ou fichier de la bibliothèque du logiciel
+        self.root = Path(root)   # photo folder, or library file of the application
         self.dry_run = dry_run
         self.version: str | None = None
         self.writable = False
@@ -118,31 +118,32 @@ class FileSource:
         """)
         self._lock = threading.Lock()
         self.et = ExifTool()
+        self.on_file = None   # called for each file walked (scan progress)
 
-    # -- à préciser par chaque source --------------------------------------------------------------------------
+    # -- to be specified by each source --------------------------------------------------------------------------
 
     def _files(self) -> Iterable[tuple[str, Path]]:
-        """(clé, chemin) de chaque photo."""
+        """(key, path) of each photo."""
         raise NotImplementedError
 
     def _resolve(self, key: str) -> Path:
         raise NotImplementedError
 
     def _sidecars(self, p: Path) -> list[Path]:
-        """Fichiers XMP de la photo, à écrire (créés s'ils manquent) ; le premier existant est relu."""
+        """XMP files of the photo, to write (created if missing); the first existing one is read back."""
         raise NotImplementedError
 
     def _check_source(self) -> bool:
-        """Dossier ou bibliothèque utilisable (sinon self.errors) ; réglages du logiciel dans self.warnings.
-        Renvoie True si les fichiers XMP peuvent être écrits."""
+        """Folder or library usable (otherwise self.errors); application settings in self.warnings.
+        Return True if the XMP files can be written."""
         raise NotImplementedError
 
-    # -- état ------------------------------------------------------------------------------------------------
+    # -- state ------------------------------------------------------------------------------------------------
 
     def check(self) -> bool:
         self.errors, self.warnings = [], []
         if not available():
-            self.errors.append(f"ExifTool introuvable : {INSTALL_HINT}")
+            self.errors.append(f"ExifTool not found: {INSTALL_HINT}")
         can_write = self._check_source()
         self.version = self.label
         self.writable = not self.errors and can_write
@@ -158,10 +159,16 @@ class FileSource:
     def link(self, asset_id: str) -> str | None:
         return None
 
-    # -- fichiers ---------------------------------------------------------------------------------------------
+    # -- files ------------------------------------------------------------------------------------------------
+
+    def count_files(self) -> int:
+        """Number of photos of the source (scan progress), without reading their metadata."""
+        return sum(1 for _ in self._files())
 
     def _walk(self):
         for key, p in self._files():
+            if self.on_file:   # scan progress (Worker.scan), also for unchanged files
+                self.on_file()
             try:
                 st = p.stat()
             except OSError:
@@ -189,13 +196,13 @@ class FileSource:
 
     def iter_assets(self, updated_after: str | None = None, size: int = 250, with_exif: bool = True,
                     kind: str = "IMAGE", with_people: bool = False):
-        """Photos de la source. updated_after : seulement celles dont le fichier a changé depuis le dernier passage
-        (tout, sinon). with_exif=False : liste rapide sans lecture des métadonnées (contrôle des suppressions)."""
+        """Photos of the source. updated_after: only those whose file changed since the last pass
+        (everything otherwise). with_exif=False: fast list without reading the metadata (deletion check)."""
         if kind != "IMAGE":
             return
         with self._lock:
-            # Métadonnées vides : jamais lues (ExifTool renvoie toujours au moins SourceFile), par exemple sous Windows
-            # avant la 0.1.2 : relues au prochain passage.
+            # Empty metadata: never read (ExifTool always returns at least SourceFile), for instance on Windows
+            # before 0.1.2: read again at the next pass.
             known = {r["path"]: (r["size"], r["mtime"])
                      for r in self.db.execute("SELECT path, size, mtime FROM file WHERE meta IS NOT NULL AND meta != '{}'")}
         batch = []
@@ -224,7 +231,7 @@ class FileSource:
             yield self._asset(key, sz, mt, metas.get(paths[key], {}))
 
     def get_asset(self, asset_id: str, missing_ok: bool = False) -> dict | None:
-        """Photo avec ses mots-clés et sa description actuels (fichier XMP)."""
+        """Photo with its current keywords and description (XMP file)."""
         p = self._path(asset_id)
         if p is None or not p.exists():
             if missing_ok:
@@ -248,12 +255,12 @@ class FileSource:
     # -- images ----------------------------------------------------------------------------------------------
 
     def _image(self, p: Path) -> Image.Image:
-        if is_raw(p):   # RAW : le plus grand JPEG intégré par l'appareil
+        if is_raw(p):   # RAW: the largest JPEG embedded by the camera
             for tag in ("JpgFromRaw", "PreviewImage", "OtherImage"):
                 out = self._binary(p, tag)
                 if out:
                     return Image.open(io.BytesIO(out))
-            raise ValueError(f"RAW sans aperçu intégré : {p.name}")
+            raise ValueError(f"RAW without an embedded preview: {p.name}")
         return Image.open(p)
 
     def _binary(self, p: Path, tag: str) -> bytes | None:
@@ -261,8 +268,8 @@ class FileSource:
         return r.stdout or None
 
     def thumbnail(self, asset_id: str, size: str = "preview") -> bytes:
-        """Vignette (250 px) ou aperçu (1440 px sur le petit côté), en JPEG, gardés en cache tant que le fichier ne
-        change pas."""
+        """Thumbnail (250 px) or preview (1440 px on the short side), as JPEG, cached as long as the file does not
+        change."""
         p = self._path(asset_id)
         if p is None or not p.exists():
             raise FileNotFoundError(asset_id)
@@ -277,7 +284,7 @@ class FileSource:
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=85)
         self.thumbs.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_name(f"{cache.name}.{uuid.uuid4().hex}.tmp")   # unique : plusieurs requêtes pour la même vignette
+        tmp = cache.with_name(f"{cache.name}.{uuid.uuid4().hex}.tmp")   # unique: several requests for the same thumbnail
         tmp.write_bytes(buf.getvalue())
         tmp.replace(cache)
         return buf.getvalue()
@@ -292,7 +299,7 @@ class FileSource:
             return buf.getvalue()
         return p.read_bytes()
 
-    # -- écriture (fichiers XMP) ------------------------------------------------------------------------------
+    # -- writing (XMP files) ------------------------------------------------------------------------------
 
     def _write(self, asset_id: str, assignments: list[str]) -> None:
         if self.dry_run:
@@ -305,7 +312,7 @@ class FileSource:
 
     @staticmethod
     def _xmp(value: str) -> tuple[str, str]:
-        """Tag « Nature/Aves/… » -> (hiérarchie XMP « Nature|Aves|… », dernier niveau)."""
+        """Tag "Nature/Aves/…" -> (XMP hierarchy "Nature|Aves|…", last level)."""
         parts = [x.replace("|", "-") for x in value.split("/")]
         return "|".join(parts), parts[-1]
 
@@ -316,7 +323,7 @@ class FileSource:
     def upsert_tags(self, values: list[str]) -> list[dict]:
         if not self.dry_run:
             with self._lock:
-                # Comme Immich, crée aussi les niveaux parents.
+                # Like Immich, also creates the parent levels.
                 self.db.executemany("INSERT OR IGNORE INTO tag VALUES (?)",
                                     [(v.rsplit("/", i)[0],) for v in values for i in range(v.count("/") + 1)])
                 self.db.commit()
@@ -328,7 +335,7 @@ class FileSource:
             for v in tag_ids:
                 h, leaf = self._xmp(v)
                 args += [f"-XMP-lr:HierarchicalSubject-={escape(h)}", f"-XMP-lr:HierarchicalSubject+={escape(h)}",
-                         f"-XMP-dc:Subject-={escape(leaf)}", f"-XMP-dc:Subject+={escape(leaf)}"]   # -= puis += : pas de doublon
+                         f"-XMP-dc:Subject-={escape(leaf)}", f"-XMP-dc:Subject+={escape(leaf)}"]   # -= then +=: no duplicate
             self._write(aid, args)
             if not self.dry_run:
                 with self._lock:
@@ -359,11 +366,11 @@ class FileSource:
 
 
 def check_folder(src: FileSource) -> bool:
-    """Dossier des photos : présent, et accessible en écriture pour les fichiers XMP."""
+    """Photo folder: present, and writable for the XMP files."""
     if not src.root.is_dir():
-        src.errors.append(f"dossier des photos introuvable : {src.root}")
+        src.errors.append(f"photo folder not found: {src.root}")
         return False
     if not os.access(src.root, os.W_OK):
-        src.warnings.append(f"dossier en lecture seule : {src.root} (pas d'écriture des fichiers XMP)")
+        src.warnings.append(f"read-only folder: {src.root} (XMP files not written)")
         return False
     return True

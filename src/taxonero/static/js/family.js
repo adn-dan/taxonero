@@ -1,6 +1,6 @@
-/* ============================== page d'un rang supérieur ============================== */
-/* Règne, embranchement, classe, ordre, famille ou genre (#family/Canidae, #order/Passeriformes…) : sa fiche,
-   l'article et la carte, puis ses espèces photographiées. */
+/* ============================== page of a higher rank ============================== */
+/* Kingdom, phylum, class, order, family or genus (#family/Canidae, #order/Passeriformes…): its record,
+   the article and the map, then its photographed species. */
 const HIGHER_RANKS = ['kingdom', 'phylum', 'class', 'order', 'family', 'genus'];
 const SPF = { id: 'fa', key: null, name: null, wsrc: 'wikipedia', wlang: '', map: null };
 const higherLink = (rank, name, html) => `<a href="#${rank}/${encodeURIComponent(name)}" title="${esc(rankName(rank))}">${html}</a>`;
@@ -19,7 +19,7 @@ async function loadFamilyPage(name, rank = 'family', scope = {}) {
   if (SPF.name !== `${rank}/${name}`) return;
   SPF.key = r.key;
   const tx = r.taxon || {}, L = tx.lineage || {}, list = r.species, g = groupOf(list[0].taxon);
-  // Noms communs et liens des rangs affichés (fil, arbre) : ceux qui ne sont pas encore connus du navigateur.
+  // Common names and links of the ranks shown (trail, tree): those not yet known to the browser.
   const names = [...new Set([name, ...Object.values(L), ...list.flatMap(x => Object.values(x.taxon?.lineage || {}))])]
     .filter(n => n && !(SP.higher || {})[n]);
   if (names.length) {
@@ -59,13 +59,13 @@ async function loadFamilyPage(name, rank = 'family', scope = {}) {
     ${treeInfoHTML()}
     <section class="card group" style="--gc:${g.c};--gc-soft:color-mix(in srgb, ${g.c} 40%, var(--line))"><div class="body" id="falist"></div></section>
     <h2 class="sph">${t('nav.photos')}</h2><div class="faphotos"></div>`;
-  // Espèces : en arbre (le taxon de la page en racine, puis les rangs en dessous) ou en grille, comme la page Espèces.
+  // Species: as a tree (the taxon of the page as the root, then the ranks below) or as a grid, like the Species page.
   const below = ['phylum', 'class', 'order', 'family'].filter(k => HIGHER_RANKS.indexOf(k) > HIGHER_RANKS.indexOf(rank));
   const drawList = () => {
     root.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === SP.mode));
-    // Arbre : horizontal sur écran large (moins de défilement), vertical en grand sinon.
+    // Tree: horizontal on a wide screen (less scrolling), vertical and large otherwise.
     root.querySelector('#falist').innerHTML = SP.mode !== 'tree' ? `<div class="spgrid2">${spOrder(list).map(spTile).join('')}</div>`
-      : matchMedia('(min-width: 1000px)').matches ? `<div class="htree">${treeLevels(list, below, 'h')}</div>`   // racine : l'en-tête de la page
+      : matchMedia('(min-width: 1000px)').matches ? `<div class="htree">${treeLevels(list, below, 'h')}</div>`   // root: the page header
       : `<div class="tree big">${treeNode(name, rank, list, treeLevels(list, below, 'big'))}</div>`;
   };
   drawList();

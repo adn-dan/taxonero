@@ -1,9 +1,9 @@
-"""Ajoute au jeu de test des séries de plusieurs photos d'une même espèce (observations distinctes,
-lieux différents), pour tester les vues par espèce, la carte et les filtres.
+"""Add to the test set series of several photos of the same species (distinct observations,
+different places), to test the per-species views, the map and the filters.
 
     python dev/fetch_series.py "Erithacus rubecula:6" "Vulpes vulpes:5" ...
 
-Les photos s'ajoutent à dev/photos et à truth.csv (mêmes règles que fetch_dataset.py).
+Photos are added to dev/photos and to truth.csv (same rules as fetch_dataset.py).
 """
 
 import csv
@@ -31,7 +31,7 @@ def fetch(http: httpx.Client, name: str, n: int, known: set[str]) -> list[dict]:
             continue
         lat, lon = (float(x) for x in obs["location"].split(","))
         cell = (round(lat), round(lon))
-        if cell in places:  # une photo par zone d'environ 100 km : des lieux variés
+        if cell in places:  # one photo per area of about 100 km: varied places
             continue
         photo = next((p for p in obs["photos"] if p.get("license_code") in ("cc0", "cc-by")), None)
         if not photo:
@@ -70,7 +70,7 @@ def main(specs: list[str]) -> None:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
         w.writerows(existing + added)
-    print(f"{len(added)} photos ajoutées ({len(existing) + len(added)} au total)")
+    print(f"{len(added)} photos added ({len(existing) + len(added)} in total)")
 
 
 if __name__ == "__main__":

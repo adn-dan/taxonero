@@ -1,10 +1,10 @@
-"""Benchmark de bout en bout : chaque photo passe par Analyzer.analyze (détecteurs, fusion,
-classification, géographie, dédoublonnage), comme en production.
+"""End-to-end benchmark: each photo goes through Analyzer.analyze (detectors, merging,
+classification, geography, deduplication), as in production.
 
     python dev/benchmark_e2e.py [--device cpu|cuda] [--no-owl] [--owl-mode always|fallback]
 
-Mesure : espèce juste (détection la plus sûre), nombre de boîtes, et précision de la règle
-d'auto-validation (autoconfirm.should_auto_confirm).
+Measures: right species (most certain detection), number of boxes, and precision of the
+auto-confirmation rule (autoconfirm.should_auto_confirm).
 """
 
 import argparse
@@ -28,7 +28,7 @@ def main() -> None:
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--no-owl", action="store_true")
     ap.add_argument("--owl-mode", default="always", choices=("always", "fallback"))
-    ap.add_argument("--out", default="", help="nom du CSV de sortie (dans dev/photos)")
+    ap.add_argument("--out", default="", help="name of the output CSV (in dev/photos)")
     ap.add_argument("--threshold", type=float, default=0.85)
     ap.add_argument("--groups", default="", help="ex. Plantae,Fungi,Insecta")
     args = ap.parse_args()
@@ -66,12 +66,12 @@ def main() -> None:
     n = len(rows)
     print(f"{n} photos, {dt / n:.1f} s/photo ({args.device}, "
           f"OWLv2 {'non' if args.no_owl else args.owl_mode})")
-    print(f"espèce juste : {sum(o['ok'] for o in out) / n:.1%}")
-    print("boîtes par photo :", dict(sorted(nboxes.items())))
+    print(f"right species: {sum(o['ok'] for o in out) / n:.1%}")
+    print("boxes per photo:", dict(sorted(nboxes.items())))
     for g, oks in per_group.items():
         print(f"  {g:15s} n={len(oks):2d} {sum(oks) / len(oks):6.1%}")
     if auto:
-        print(f"auto-validation (seuil {args.threshold}) : {len(auto)} détections, précision {sum(a[0] for a in auto) / len(auto):.1%}")
+        print(f"auto-confirmation (threshold {args.threshold}): {len(auto)} detections, precision {sum(a[0] for a in auto) / len(auto):.1%}")
         print("  erreurs :", [f"{a[1]} -> {a[2]}" for a in auto if not a[0]])
 
 

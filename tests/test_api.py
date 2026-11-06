@@ -1,5 +1,5 @@
-"""API du dashboard contre l'Immich de dev, sur une copie de la base de dev ; identification simulée
-(pas de modèle chargé). Ignoré si l'Immich de dev ou sa base ne sont pas disponibles."""
+"""Dashboard API against the dev Immich, on a copy of the dev database; simulated identification
+(no model loaded). Skipped if the dev Immich or its database are not available."""
 
 import json
 import sqlite3
@@ -8,7 +8,7 @@ import pytest
 
 from conftest import DEV_READY
 
-pytestmark = pytest.mark.skipif(not DEV_READY, reason="Immich de dev non initialisé")
+pytestmark = pytest.mark.skipif(not DEV_READY, reason="dev Immich not initialised")
 
 
 @pytest.fixture
@@ -85,8 +85,8 @@ def test_bulk_review_and_undo(client):
 
 
 def test_bulk_reject_whole_filter(client):
-    """« Tout sélectionner » : toutes les photos du filtre, même non chargées, sauf les exclues. Le rejet prend ce qui
-    reste à relire ; sur une photo où rien ne reste à relire, ce qui est validé."""
+    """"Select all": all photos of the filter, even not loaded, except the excluded ones. Rejection takes what
+    remains to review; on a photo where nothing remains to review, what is confirmed."""
     c, db = client
     auto = [r[0] for r in db.execute("SELECT DISTINCT asset_id FROM detection WHERE status = 'confirmed' AND confirmed_by = 'auto'")]
     assert len(auto) >= 2
@@ -100,7 +100,7 @@ def test_bulk_reject_whole_filter(client):
     assert db.execute("SELECT count(*) FROM detection WHERE asset_id = ? AND status = 'rejected' AND reviewed_at IS NULL", (keep,)).fetchone()[0] == 0
     c.post("/api/detections/restore-many", json=r["changed"])
     assert {r["id"]: dict(r) for r in db.execute("SELECT * FROM detection")} == snap
-    # « À relire » : les validations faites à la main sur les mêmes photos restent.
+    # "To review": the confirmations done by hand on the same photos stay.
     user = db.execute("SELECT count(*) FROM detection WHERE status = 'confirmed' AND confirmed_by = 'user'").fetchone()[0]
     r = c.post("/api/photos/bulk", json={"filter": "pending", "every": True, "action": "reject"}).json()
     assert r["changed"] and all(d["status"] == "pending" for d in r["changed"])
@@ -109,7 +109,7 @@ def test_bulk_reject_whole_filter(client):
 
 
 def test_photo_months_follow_list_order(client):
-    """Frise : nombre de photos par mois, dans l'ordre de la liste par date (le cumul donne la position d'un mois)."""
+    """Timeline: number of photos per month, in the order of the list by date (the running total gives the position of a month)."""
     c, _ = client
     months = c.get("/api/photos/months?filter=all").json()
     assert sum(x["n"] for x in months) == c.get("/api/photos/counts").json()["all"]
@@ -121,8 +121,8 @@ def test_photo_months_follow_list_order(client):
 
 
 def test_bulk_taxon_reset_reanalyze_and_undo(client):
-    """Espèce en lot : validée sur la détection à relire ; photo sans détection : détection « image entière » ;
-    photo à plusieurs sujets à relire : laissée. Remettre à relire, ré-analyser, annuler."""
+    """Species in bulk: confirmed on the detection awaiting review; photo without a detection: "whole image" detection;
+    photo with several subjects to review: left. Put back to review, analyse again, undo."""
     c, db = client
     key = db.execute("SELECT taxon_key FROM detection WHERE taxon_key IS NOT NULL LIMIT 1").fetchone()[0]
     one = db.execute("SELECT asset_id FROM detection WHERE status = 'pending' GROUP BY asset_id HAVING count(*) = 1 LIMIT 1").fetchone()[0]
@@ -147,7 +147,7 @@ def test_bulk_taxon_reset_reanalyze_and_undo(client):
 
 
 def test_reference_photos_keep_only_open_licences(client, monkeypatch):
-    """Photos de référence (iNaturalist) : taxon du même nom, photos sous licence libre seulement."""
+    """Reference photos (iNaturalist): taxon with the same name, photos under a free licence only."""
     from taxonero import refphotos
     calls = []
 
@@ -167,7 +167,7 @@ def test_reference_photos_keep_only_open_licences(client, monkeypatch):
 
 
 def test_reference_photos_follow_inaturalist_synonym():
-    """Nom GBIF qu'iNaturalist classe autrement : taxon retrouvé par matched_term, le nom exact restant prioritaire."""
+    """GBIF name that iNaturalist classifies differently: taxon found through matched_term, the exact name keeping priority."""
     from taxonero import refphotos
 
     class Tx:
@@ -202,14 +202,14 @@ def test_models_info(client):
 
 
 def test_manual_actions_survive_gbif_outage(client, monkeypatch):
-    """Service d'observations GBIF en panne : recadrer répond vite, sans erreur, candidats « non vérifiés »."""
+    """GBIF observation service down: reframing answers fast, without error, candidates "unverified"."""
     import time
     import httpx
     from taxonero.taxonomy import Taxonomy
     real = Taxonomy._fetch
     def fetch(self, url, retries=6):
         if "/occurrence/" in url:
-            raise httpx.HTTPError("panne simulée")
+            raise httpx.HTTPError("simulated outage")
         return real(self, url, retries)
     monkeypatch.setattr(Taxonomy, "_fetch", fetch)
     c = client[0] if isinstance(client, tuple) else client
@@ -235,7 +235,7 @@ def test_identify_upload_stores_nothing(client):
     assert c.post("/api/identify?lat=45", content=buf.getvalue()).status_code == 400
     placed = c.post("/api/identify?lat=45.5&lon=2.5", content=buf.getvalue(), headers={"Content-Type": "application/octet-stream"})
     assert placed.status_code == 200 and (placed.json()["lat"], placed.json()["lon"]) == (45.5, 2.5)
-    bad = c.post("/api/identify", content=b"pas une image", headers={"Content-Type": "application/octet-stream"})
+    bad = c.post("/api/identify", content=b"not an image", headers={"Content-Type": "application/octet-stream"})
     assert bad.status_code == 400 and bad.json()["detail"]["code"] == "bad_image"
 
 
@@ -245,11 +245,11 @@ def test_backup_daily_rotation_without_caches(dev_app):
     s.backup_keep = 2
     folder = s.data_dir / "backups"
     folder.mkdir()
-    for day in ("2026-01-01", "2026-01-02"):   # deux anciennes sauvegardes : la plus vieille doit partir
+    for day in ("2026-01-01", "2026-01-02"):   # two old backups: the oldest must go
         (folder / f"taxonero-{day}.sqlite").write_bytes(b"")
-    store.set_state(w.db, "last_backup", "")                     # la base de dev copiée a pu déjà être sauvegardée
+    store.set_state(w.db, "last_backup", "")                     # the copied dev database may already have been backed up
     dest = w.backup()
-    assert dest and dest.exists() and w.backup() is None          # une seule par jour
+    assert dest and dest.exists() and w.backup() is None          # only one per day
     assert sorted(p.name for p in folder.glob("taxonero-*.sqlite")) == ["taxonero-2026-01-02.sqlite", dest.name]
     copy = sqlite3.connect(dest)
     assert copy.execute("SELECT count(*) FROM detection").fetchone()[0] == w.db.execute("SELECT count(*) FROM detection").fetchone()[0]
@@ -275,8 +275,8 @@ def test_immich_key_never_sent_to_browser(client):
 
 
 def test_immich_connection_from_dashboard(dev_app, monkeypatch):
-    """Sans IMMICH_URL ni IMMICH_API_KEY : démarrage possible, connexion saisie dans le dashboard, testée avant
-    d'être enregistrée, puis reprise au redémarrage."""
+    """Without IMMICH_URL or IMMICH_API_KEY: startup possible, connection entered in the dashboard, tested before
+    being saved, then picked up again at restart."""
     from fastapi.testclient import TestClient
     from conftest import ENV
     from taxonero.config import Settings
@@ -298,13 +298,13 @@ def test_immich_connection_from_dashboard(dev_app, monkeypatch):
     r = c.put("/api/immich", json={"url": env["IMMICH_URL"] + "/", "key": env["IMMICH_API_KEY"]}).json()
     assert r["saved"] and r["configured"] and r["status"]["code"] == "ok" and r["url"] == env["IMMICH_URL"]
     assert c.get("/api/status").json()["immich_configured"] is True
-    again = Worker(Settings())                                   # redémarrage : connexion reprise de la base
+    again = Worker(Settings())                                   # restart: connection picked up from the database
     assert again.configured and again.check()
 
 
 def test_main_photo_can_be_chosen_and_reset(client):
     c, db = client
-    db.execute("DELETE FROM cover_choice")                              # la base de dev copiée peut en avoir
+    db.execute("DELETE FROM cover_choice")                              # the copied dev database may have some
     db.commit()
     key, n = db.execute("SELECT taxon_key, count(DISTINCT asset_id) AS n FROM detection WHERE status = 'confirmed' "
                         "AND taxon_key IS NOT NULL GROUP BY taxon_key ORDER BY n DESC LIMIT 1").fetchone()
@@ -329,7 +329,7 @@ def test_higher_rank_pages(client):
     order = birds["species"][0]["taxon"]["lineage"]["order"]
     sub = c.get(f"/api/higher/order/{order}").json()["species"]
     assert sub and {s["taxon_key"] for s in sub} <= {s["taxon_key"] for s in birds["species"]}
-    assert c.get("/api/higher/species/Aves").status_code == 404          # pas un rang supérieur
+    assert c.get("/api/higher/species/Aves").status_code == 404          # not a higher rank
     assert c.get("/api/higher/family/Inexistantidae").status_code == 404
 
 
@@ -374,7 +374,7 @@ def test_bulk_delete_and_undo(client):
 def test_reject_keeps_manual_validation_while_something_is_pending(client):
     c, db = client
     aid = db.execute("SELECT asset_id FROM detection WHERE status = 'pending' LIMIT 1").fetchone()[0]
-    for flt in ("all", "user", "pending"):   # même règle quel que soit le filtre affiché
+    for flt in ("all", "user", "pending"):   # same rule whatever the filter shown
         r = c.post("/api/photos/bulk", json={"asset_ids": [aid], "filter": flt, "action": "reject"}).json()
         assert all(d["status"] == "pending" for d in r["changed"]), flt
         c.post("/api/photos/bulk-undo", json={"changed": r["changed"]})
@@ -394,7 +394,7 @@ def test_search_places_cameras_files(client):
     c, db = client
     name = db.execute("SELECT file_name FROM asset WHERE file_name IS NOT NULL LIMIT 1").fetchone()[0]
     assert any(f["file_name"] == name for f in c.get("/api/search", params={"q": name[:8]}).json()["files"])
-    assert c.get("/api/search?q=%25%25").json()["files"] == []              # % n'est pas un joker
+    assert c.get("/api/search?q=%25%25").json()["files"] == []              # % is not a wildcard
     assert c.get("/api/search?q=a").json()["files"] == []
 
 
@@ -415,17 +415,17 @@ def test_logs_keep_recent_lines_and_mask_secrets(client):
     after = start[-1]["id"] if start else 0
     s.dashboard_password = "motdepasse-secret"
     try:
-        log.warning("échec avec la clé %s et %s", s.immich_api_key, s.dashboard_password)
+        log.warning("failure with the key %s and %s", s.immich_api_key, s.dashboard_password)
         try:
             raise ValueError("boum")
         except ValueError:
-            log.exception("étape en échec")
+            log.exception("stage failed")
         log.debug("trop bavard")
     finally:
         s.dashboard_password = ""
     got = c.get("/api/logs", params={"after": after}).json()["entries"]
     got = [e for e in got if e["name"] == "taxonero.test"]
-    assert [e["level"] for e in got] == ["WARNING", "ERROR"]     # pas de DEBUG
+    assert [e["level"] for e in got] == ["WARNING", "ERROR"]     # no DEBUG
     assert s.immich_api_key not in got[0]["msg"] and "motdepasse-secret" not in got[0]["msg"] and "***" in got[0]["msg"]
     assert "ValueError: boum" in got[1]["msg"]                   # trace d'erreur comprise
     assert c.get("/api/logs", params={"after": got[-1]["id"]}).json()["entries"] == []

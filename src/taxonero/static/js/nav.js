@@ -1,8 +1,8 @@
 /* ============================== navigation ============================== */
-/* L'adresse porte tout l'état d'une page : #vue/argument?filtres&photo=<id de la photo ouverte>. Filtres et photo
-   suivante remplacent l'entrée d'historique (replaceState) ; changer de page ou ouvrir la visionneuse en ajoute une.
-   NAV.stack double l'historique du navigateur (qui ne donne pas accès aux entrées voisines) : titre et position de
-   chaque page, pour le bouton Retour de la barre du haut, qui reste ainsi d'accord avec le bouton de la souris. */
+/* The address carries the whole state of a page: #view/argument?filters&photo=<id of the open photo>. Filters and next
+   photo replace the history entry (replaceState); changing page or opening the viewer adds one.
+   NAV.stack mirrors the browser history (which gives no access to the neighbouring entries): title and position of
+   each page, for the Back button of the top bar, which thus stays in agreement with the mouse button. */
 const SCOPE_INT = ['taxon', 'month', 'year'], SCOPE_KEYS = [...SCOPE_INT, 'rank', 'name', 'country', 'city', 'camera', 'day'];
 const NAV = { stack: [], idx: 0, base: null, parent: null, settling: false };
 try {
@@ -15,7 +15,7 @@ history.scrollRestoration = 'manual';
 const parseHash = h => { const [path, query] = (h || '#photos').slice(1).split('?'); return { path: path || 'photos', q: new URLSearchParams(query || '') }; };
 const hashOf = (path, q) => { const s = q.toString(); return `#${path}${s ? `?${s}` : ''}`; };
 const baseOf = h => { const { path, q } = parseHash(h); q.delete('photo'); return hashOf(path, q); };
-/* Modifie les paramètres de l'adresse sans créer d'étape d'historique (null ou '' : retiré). */
+/* Change the address parameters without creating a history step (null or '': removed). */
 function setQuery(changes) {
   const { path, q } = parseHash(location.hash);
   Object.entries(changes).forEach(([k, v]) => { if (v == null || v === '') q.delete(k); else q.set(k, v); });
@@ -30,15 +30,15 @@ function navTrack(hash) {
     const prev = NAV.stack[NAV.idx];
     NAV.idx = NAV.stack.length ? NAV.idx + 1 : 0;
     NAV.stack.length = NAV.idx;
-    // Visionneuse ouverte sur la même page : elle garde la position de la grille en dessous.
+    // Viewer opened on the same page: it keeps the position of the grid below.
     NAV.stack.push({ hash, title: prev?.title || '', scroll: prev && baseOf(prev.hash) === baseOf(hash) ? prev.scroll : 0 });
     history.replaceState({ navIdx: NAV.idx }, '', hash);
   }
   saveNav();
 }
-/* Titre de la page courante, affiché par le bouton Retour de la page suivante. */
+/* Title of the current page, shown by the Back button of the next page. */
 function setNavTitle(title) { if (NAV.stack[NAV.idx]) { NAV.stack[NAV.idx].title = title; saveNav(); } }
-/* Parent logique : destination du Retour quand on est arrivé directement (lien, favori). */
+/* Logical parent: destination of Back when arriving directly (link, bookmark). */
 function setNavParent(hash, title) { NAV.parent = { hash, title }; drawBack(); }
 function drawBack() {
   const prev = NAV.idx > 0 ? NAV.stack[NAV.idx - 1] : NAV.parent, b = $('#b-back');
@@ -55,11 +55,11 @@ function goBack() {
 }
 $('#b-back').onclick = goBack;
 
-/* Barre latérale : la page où l'on est déjà ne s'empile pas, elle remonte en haut. */
+/* Sidebar: the page you are already on is not stacked, it scrolls back to the top. */
 $$('.nav a').forEach(a => a.addEventListener('click', e => {
   if (a.dataset.v !== STATE.view) return;
   const { q } = parseHash(location.hash);
-  if (SCOPE_KEYS.some(k => q.has(k)) || (STATE.view === 'species' && q.toString())) return;   // filtres à retirer : vraie navigation
+  if (SCOPE_KEYS.some(k => q.has(k)) || (STATE.view === 'species' && q.toString())) return;   // filters to remove: real navigation
   e.preventDefault(); window.scrollTo(0, 0);
 }));
 
@@ -74,7 +74,7 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 
 const gridActive = () => ['photos', 'sp', 'fa'].includes(STATE.view);
-/* Retour à une page : ses photos rechargées au besoin, puis la position d'avant. */
+/* Back to a page: its photos reloaded if needed, then the previous position. */
 async function restoreScroll(entry, seq) {
   const y = entry.scroll || 0;
   if (!y) return;
@@ -83,7 +83,7 @@ async function restoreScroll(entry, seq) {
   }
   if (seq === routeSeq) window.scrollTo(0, y);
 }
-/* Visionneuse d'après l'adresse : ouverte sur cette photo, ou fermée. */
+/* Viewer according to the address: opened on this photo, or closed. */
 async function syncViewer(photo) {
   if (!photo) { if (V.open) closeViewer(); return; }
   if (V.open && cur()?.asset_id === photo) return;
@@ -94,7 +94,7 @@ async function syncViewer(photo) {
     i = list.findIndex(a => a.asset_id === photo);
   }
   if (seq !== routeSeq) return;
-  if (i < 0) {   // hors de la liste affichée : la photo seule
+  if (i < 0) {   // outside the displayed list: the photo alone
     try { list = [await api(`/api/assets/${encodeURIComponent(photo)}`)]; i = 0; }
     catch (e) { setQuery({ photo: null }); fail(e); return; }
     if (seq !== routeSeq) return;
@@ -108,13 +108,13 @@ function route(force) {
   navTrack(hash);
   closeWiki();
   const { path, q } = parseHash(hash), photo = q.get('photo');
-  if (force !== true && baseOf(hash) === NAV.base) { syncViewer(photo); drawBack(); return; }   // même page : visionneuse seule
-  if (STATE.view === 'identify') clearIdentify();   // l'image déposée est oubliée dès qu'on quitte la page
+  if (force !== true && baseOf(hash) === NAV.base) { syncViewer(photo); drawBack(); return; }   // same page: viewer only
+  if (STATE.view === 'identify') clearIdentify();   // the dropped image is forgotten as soon as the page is left
   if (V.open) closeViewer(true);
   q.delete('photo');
   const entry = NAV.stack[NAV.idx], seq = ++routeSeq;
   NAV.base = baseOf(hash); NAV.parent = null; NAV.settling = true;
-  // #vue/argument?filtres : #species/123, #family/Canidae (aussi #order/…, #class/…), #species?iucn=ENDANGERED&month=5…
+  // #view/argument?filters: #species/123, #family/Canidae (also #order/…, #class/…), #species?iucn=ENDANGERED&month=5…
   const [v, arg] = path.split('/');
   homeGrid();
   STATE.view = v === 'species' && arg ? 'sp' : HIGHER_RANKS.includes(v) && arg ? 'fa'
@@ -127,7 +127,7 @@ function route(force) {
   if (!['sp', 'fa'].includes(STATE.view)) setNavTitle(t(`nav.${STATE.view}`));
   drawBack();
   if (!entry.scroll) window.scrollTo(0, 0);
-  // Serveur en erreur : message et nouvel essai plutôt qu'une page vide.
+  // Server in error: a message and a new attempt rather than an empty page.
   (async () => {
     if (STATE.view === 'sp') await loadSpeciesPage(+arg, readScope(q));
     else if (STATE.view === 'fa') await loadFamilyPage(decodeURIComponent(arg), v, readScope(q));
@@ -152,7 +152,7 @@ function readScope(q) {
     if (SCOPE_INT.includes(k)) { if (Number.isInteger(+v)) out[k] = +v; } else out[k] = v; });
   return out;
 }
-/* L'adresse décide de l'état de la page. Sans filtre, Photos reprend le dernier filtre choisi. */
+/* The address decides the state of the page. Without a filter, Photos picks up the last chosen filter. */
 function applyQuery(view, q) {
   if (view === 'photos') {
     const scope = readScope(q), scoped = Object.keys(scope).length > 0;

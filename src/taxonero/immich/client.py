@@ -1,9 +1,9 @@
-"""Client Immich minimal, limité au contrat (contract.py).
+"""Minimal Immich client, limited to the contract (contract.py).
 
-Garanties :
-- aucune requête hors contrat ne peut partir (ContractViolation) ;
-- aucune écriture tant que check() n'a pas validé le serveur, ni en mode dry-run ;
-- en dry-run, les écritures sont journalisées au lieu d'être envoyées.
+Guarantees:
+- no request outside the contract can be sent (ContractViolation);
+- no write until check() has validated the server, nor in dry-run mode;
+- in dry-run, writes are logged instead of being sent.
 """
 
 import logging
@@ -26,8 +26,8 @@ class ReadOnlyError(RuntimeError):
 
 
 def is_missing(e: Exception) -> bool:
-    """Asset supprimé d'Immich (ou hors de portée de la clé) : Immich répond 400 « Not found or no
-    asset.read access », parfois 404. Source « dossier local » : fichier disparu."""
+    """Asset deleted from Immich (or out of reach of the key): Immich answers 400 "Not found or no
+    asset.read access", sometimes 404. "Local folder" source: file gone."""
     if isinstance(e, FileNotFoundError):
         return True
     if not isinstance(e, httpx.HTTPStatusError):
@@ -37,7 +37,7 @@ def is_missing(e: Exception) -> bool:
 
 
 def is_transient(e: BaseException) -> bool:
-    """Panne passagère plutôt que photo illisible : réseau coupé, délai dépassé, 429 ou erreur 5xx."""
+    """Transient outage rather than an unreadable photo: network down, timeout, 429 or 5xx error."""
     if isinstance(e, httpx.TransportError):
         return True
     return isinstance(e, httpx.HTTPStatusError) and (e.response.status_code == 429 or e.response.status_code >= 500)
@@ -57,7 +57,7 @@ class ImmichClient:
         self.version: str | None = None
         self.warnings: list[str] = []
         self.errors: list[str] = []
-        # Permissions de la clé (None : inconnues), et l'écart avec le contrat.
+        # Permissions of the key (None: unknown), and the gap with the contract.
         self.permissions: list[str] | None = None
         self.missing: list[str] = []
         self.extra: list[str] = []
@@ -74,42 +74,42 @@ class ImmichClient:
     # -- garde-fou -----------------------------------------------------------
 
     def check(self) -> bool:
-        """Vérifie version et spec du serveur. Active l'écriture seulement si tout est compatible."""
+        """Check the server version and spec. Enable writing only if everything is compatible."""
         v = self._http.get("/server/version").raise_for_status().json()
         self.version = f"{v['major']}.{v['minor']}.{v['patch']}"
         spec = self._http.get("/spec.json").raise_for_status().json()
         self.errors, self.warnings = check_spec(spec)
         self._methods = {ep.path: m for ep in CONTRACT if (m := resolve_method(spec, ep))}
         if self.version not in TESTED_VERSIONS:
-            self.warnings.append(f"version {self.version} non testée (testées : {', '.join(TESTED_VERSIONS)})")
-        # Vérifie aussi que la clé a bien accès (lecture seule, sans effet).
+            self.warnings.append(f"version {self.version} untested (tested: {', '.join(TESTED_VERSIONS)})")
+        # Also check that the key has access (read-only, no effect).
         self._request("get", "/server/about")
         self._check_permissions()
         self.writable = not self.errors
         return self.writable
 
     def _check_permissions(self) -> None:
-        """Compare les permissions de la clé au contrat : une manquante bloque l'écriture, une de trop
-        (ou « all ») est signalée, la clé devant rester limitée au strict nécessaire."""
+        """Compare the key permissions with the contract: a missing one blocks writing, an extra one
+        (or "all") is reported, as the key must stay limited to what is strictly needed."""
         try:
             self.permissions = self._request("get", "/api-keys/me").json().get("permissions", [])
         except httpx.HTTPStatusError:
-            self.permissions = None   # Immich plus ancien : on ne sait pas, les erreurs 403 le diront
+            self.permissions = None   # older Immich: unknown, 403 errors will tell
             return
         perms = set(self.permissions)
         self.missing = [] if "all" in perms else sorted(set(REQUIRED_PERMISSIONS) - perms)
         self.extra = sorted(perms - set(REQUIRED_PERMISSIONS) - set(OPTIONAL_PERMISSIONS))
         if self.missing:
-            self.errors.append(f"permissions manquantes sur la clé API : {', '.join(self.missing)}")
+            self.errors.append(f"permissions missing on the API key: {', '.join(self.missing)}")
         if self.extra:
-            self.warnings.append(f"clé API plus puissante que nécessaire : {', '.join(self.extra)}")
+            self.warnings.append(f"API key more powerful than needed: {', '.join(self.extra)}")
 
     def status(self) -> dict:
         return {"version": self.version, "writable": self.writable, "errors": self.errors, "warnings": self.warnings,
                 "permissions": self.permissions, "missing": self.missing, "extra": self.extra}
 
 
-    # -- requêtes ------------------------------------------------------------
+    # -- requests ------------------------------------------------------------
 
     def _endpoint(self, method: str, path: str) -> Endpoint:
         for ep, pat in _ROUTES:
@@ -121,7 +121,7 @@ class ImmichClient:
         ep = self._endpoint(method, path)
         if ep.writes:
             if not self.writable:
-                raise ReadOnlyError(f"écriture refusée ({method.upper()} {path}) : serveur non validé")
+                raise ReadOnlyError(f"write refused ({method.upper()} {path}): server not validated")
             if self.dry_run:
                 log.info("[dry-run] %s %s %s", method.upper(), path, kw.get("json", ""))
                 return httpx.Response(204, request=httpx.Request(method, path))
@@ -134,8 +134,8 @@ class ImmichClient:
 
     def iter_assets(self, updated_after: str | None = None, size: int = 250, with_exif: bool = True,
                     kind: str = "IMAGE", with_people: bool = False) -> Iterator[dict]:
-        """Photos (kind IMAGE) ou vidéos (VIDEO), hors corbeille, page par page. with_people : personnes
-        reconnues par Immich dans 'people' (sans lui, la liste est vide)."""
+        """Photos (kind IMAGE) or videos (VIDEO), outside the trash, page by page. with_people: people
+        recognised by Immich in 'people' (without it, the list is empty)."""
         page: int | None = 1
         while page:
             body = {"page": page, "size": size, "type": kind, "withExif": with_exif, "withPeople": with_people}
@@ -150,7 +150,7 @@ class ImmichClient:
         return int(data["assets"]["total"])
 
     def get_asset(self, asset_id: str, missing_ok: bool = False) -> dict | None:
-        """missing_ok : None si l'asset n'existe plus dans Immich, au lieu d'une exception."""
+        """missing_ok: None if the asset no longer exists in Immich, instead of an exception."""
         try:
             return self._request("get", f"/assets/{asset_id}").json()
         except httpx.HTTPStatusError as e:
@@ -162,13 +162,13 @@ class ImmichClient:
         return self._request("get", f"/assets/{asset_id}/thumbnail", params={"size": size}).content
 
     def original(self, asset_id: str) -> bytes:
-        """Fichier original (permission facultative asset.download)."""
+        """Original file (optional asset.download permission)."""
         return self._request("get", f"/assets/{asset_id}/original").content
 
     def list_tags(self) -> list[dict]:
         return self._request("get", "/tags").json()
 
-    # -- écriture ------------------------------------------------------------
+    # -- writing ------------------------------------------------------------
 
     def set_description(self, asset_id: str, description: str) -> None:
         method = self._update_method("/assets/{id}")
@@ -189,19 +189,19 @@ class ImmichClient:
 
 
 def probe(url: str, api_key: str, dry_run: bool = True, timeout: float = 10.0) -> tuple["ImmichClient | None", dict]:
-    """Essaie une connexion sans rien écrire. (client prêt ou None, état) ; état['code'] : ok, readonly
-    (connecté, mais permissions manquantes ou serveur incompatible), unreachable, bad_key, not_immich.
-    timeout : court pour un simple test ; celui d'un client gardé ensuite (Worker.connect) est le délai normal."""
+    """Try a connection without writing anything. (ready client or None, state); state['code']: ok, readonly
+    (connected, but missing permissions or incompatible server), unreachable, bad_key, not_immich.
+    timeout: short for a simple test; that of a client kept afterwards (Worker.connect) is the normal timeout."""
     if not url or not api_key:
-        return None, {"code": "missing", "errors": ["URL ou clé API manquante"]}
+        return None, {"code": "missing", "errors": ["URL or API key missing"]}
     client = ImmichClient(url, api_key, dry_run=dry_run, timeout=timeout)
     try:
         ok = client.check()
     except httpx.HTTPStatusError as e:
         client.close()
         code = "bad_key" if e.response.status_code in (401, 403) else "not_immich"
-        return None, {"code": code, "errors": [f"HTTP {e.response.status_code} sur {e.request.url.path}"]}
-    except (httpx.HTTPError, ValueError, KeyError) as e:   # réseau, URL invalide, réponse qui n'est pas Immich
+        return None, {"code": code, "errors": [f"HTTP {e.response.status_code} on {e.request.url.path}"]}
+    except (httpx.HTTPError, ValueError, KeyError) as e:   # network, invalid URL, response that is not Immich
         client.close()
         code = "unreachable" if isinstance(e, httpx.TransportError) or isinstance(e, httpx.InvalidURL) else "not_immich"
         return None, {"code": code, "errors": [f"{type(e).__name__}: {e}"]}

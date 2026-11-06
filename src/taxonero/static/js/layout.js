@@ -1,14 +1,14 @@
-/* ============================== parois déplaçables ============================== */
-/* Préférences de mise en page, propres à ce navigateur : part de la colonne de gauche (infos et article) à côté
-   de la carte (%), hauteur du bloc (px).
-   Souris ou doigt pour déplacer, flèches du clavier, double-clic pour revenir au réglage par défaut. */
+/* ============================== movable dividers ============================== */
+/* Layout preferences, specific to this browser: share of the left column (information and article) next to
+   the map (%), height of the block (px).
+   Mouse or finger to move, keyboard arrows, double click to go back to the default setting. */
 const LAYOUT_DEFAULT = { split: 45, blockh: 780 };
 const LAYOUT = { ...LAYOUT_DEFAULT };
 try { Object.assign(LAYOUT, JSON.parse(localStorage.getItem('layout') || '{}')); } catch (e) {}
 const saveLayout = () => { try { localStorage.setItem('layout', JSON.stringify(LAYOUT)); } catch (e) {} };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const separator = (cls, orient) => `<div class="${cls}" tabindex="0" role="separator" aria-orientation="${orient}" title="${esc(t('layout.drag'))}"></div>`;
-/* opts : start() -> état au début du geste ; move(dx, dy, état) ; step(sens) pour le clavier ; reset() ; done(). */
+/* opts: start() -> state at the start of the gesture; move(dx, dy, state); step(direction) for the keyboard; reset(); done(). */
 function splitter(handle, opts) {
   if (!handle) return;
   handle.addEventListener('pointerdown', e => {
@@ -26,8 +26,8 @@ function splitter(handle, opts) {
   });
   handle.addEventListener('dblclick', () => { opts.reset(); opts.done?.(); saveLayout(); });
 }
-/* À gauche les infos (l'en-tête .sphero, déplacé ici par bindMid) et l'article dessous ; à droite la carte sur
-   toute la hauteur : bas de la carte et bas de l'article alignés, le texte de l'article défile dans sa boîte. */
+/* On the left the information (the .sphero header, moved here by bindMid) and the article below; on the right the map over
+   the whole height: bottom of the map and bottom of the article aligned, the article text scrolls in its box. */
 function midHTML(id, hint) {
   return `<div class="spmidc"><div class="spmid">
       <section class="card spwiki">${wikiCardHTML(id)}</section>${separator('vsplit', 'vertical')}${mapCardHTML(id, hint)}

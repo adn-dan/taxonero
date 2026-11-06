@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Envoie dev/photos/*.jpg dans l'Immich de dev, avec le compte admin de dev.
+# Sends dev/photos/*.jpg to the dev Immich, with the dev admin account.
 set -euo pipefail
 URL="${IMMICH_URL:-http://127.0.0.1:2284}"
 cd "$(dirname "$0")"
 
 case "$URL" in
   http://127.0.0.1:*|http://localhost:*) ;;
-  *) echo "Refus : upload réservé à une instance locale ($URL)" >&2; exit 1 ;;
+  *) echo "Refused: upload only for a local instance ($URL)" >&2; exit 1 ;;
 esac
 
 TOKEN=$(curl -sf -X POST "$URL/api/auth/login" -H 'Content-Type: application/json' \
@@ -18,4 +18,4 @@ for f in photos/*.jpg; do
   curl -sf -X POST "$URL/api/assets" -H "Authorization: Bearer $TOKEN" \
     -F "assetData=@$f" -F "fileCreatedAt=$now" -F "fileModifiedAt=$now" >/dev/null && n=$((n+1))
 done
-echo "$n photos envoyées"
+echo "$n photos sent"

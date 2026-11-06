@@ -1,9 +1,9 @@
-# Recette PyInstaller du lanceur de l'édition de bureau (voir bootstrap.py) : un petit exécutable qui contient uv,
-# la roue de taxonero, constraints.txt et ExifTool, et installe PyTorch pour le GPU de la machine au premier
-# lancement.
+# PyInstaller recipe of the desktop edition launcher (see bootstrap.py): a small executable that contains uv,
+# the taxonero wheel, constraints.txt and ExifTool, and installs PyTorch for the machine's GPU at first
+# launch.
 #   python packaging/prepare.py && pyinstaller packaging/taxonero.spec --noconfirm
-# Windows et Linux : un seul fichier (taxonero.exe, taxonero). macOS : Taxonero.app (dossier, comme toute application
-# Mac ; PyInstaller déconseille le fichier unique dans une .app).
+# Windows and Linux: a single file (taxonero.exe, taxonero). macOS: Taxonero.app (a folder, like any Mac
+# application; PyInstaller advises against a single file inside an .app).
 import sys
 from pathlib import Path
 
@@ -16,8 +16,8 @@ datas.append((str(BUILD / "constraints.txt"), "."))
 
 a = Analysis([str(Path(SPECPATH) / "bootstrap.py")], datas=datas)
 pyz = PYZ(a.pure)
-# Sans console : la première installation (quelques minutes) s'affiche dans une fenêtre Tk, puis l'application
-# s'ouvre dans la sienne.
+# Without a console: the first installation (a few minutes) is shown in a Tk window, then the application
+# opens in its own.
 if sys.platform == "darwin":
     exe = EXE(pyz, a.scripts, exclude_binaries=True, name="taxonero", console=False)
     coll = COLLECT(exe, a.binaries, a.datas, name="taxonero")

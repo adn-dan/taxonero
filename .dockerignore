@@ -1,4 +1,4 @@
-# Contexte de build léger : ni la base, ni les modèles téléchargés, ni les photos de test.
+# Light build context: neither the database, nor the downloaded models, nor the test photos.
 .git
 .venv
 data

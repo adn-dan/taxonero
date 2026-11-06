@@ -1,4 +1,4 @@
-"""Routes de la page Paramètres : réglages, source des photos, connexion à Immich, modèles."""
+"""Routes of the Settings page: settings, photo source, Immich connection, models."""
 
 import json
 
@@ -18,13 +18,13 @@ from ..worker import Busy
 from .context import fail
 
 
-UNDO_CONFIRM = "remove-from-immich"   # envoyé par le dashboard une fois le mot de confirmation saisi
+UNDO_CONFIRM = "remove-from-immich"   # sent by the dashboard once the confirmation word is typed
 
 
 def register(app, c) -> None:
     s, w, db, auth = c.s, c.w, c.db, c.auth
 
-    # -- retrait de ce que l'outil a écrit dans Immich ------------------------------
+    # -- removal of what the tool wrote to Immich ------------------------------
 
     class UndoIn(BaseModel):
         confirm: str = ""
@@ -35,33 +35,33 @@ def register(app, c) -> None:
 
     @app.post("/api/immich/uninstall", dependencies=[Depends(auth)])
     def undo_start(body: UndoIn):
-        """Refuse tout ce qui rendrait le retrait inutile ou dangereux, avant la moindre écriture."""
+        """Refuse anything that would make the removal useless or dangerous, before any write."""
         if body.confirm != UNDO_CONFIRM:
-            fail(400, "undo_confirm", "confirmation manquante")
+            fail(400, "undo_confirm", "confirmation missing")
         state = w.undo_summary(db)
         if state["state"] == "running":
-            fail(409, "undo_running", "retrait déjà en cours")
+            fail(409, "undo_running", "removal already running")
         if s.source != "immich":
-            fail(409, "local_source", f"source : {s.source} (pas Immich)")
+            fail(409, "local_source", f"source: {s.source} (not Immich)", source=s.source)
         if s.dry_run:
-            fail(409, "undo_dry_run", "DRY_RUN=true : rien ne peut être écrit dans Immich")
+            fail(409, "undo_dry_run", "DRY_RUN=true: nothing can be written to Immich")
         if not w.client.writable:
-            fail(409, "undo_readonly", "serveur Immich non validé (lecture seule)")
+            fail(409, "undo_readonly", "Immich server not validated (read-only)")
         if not (state["photos"] or state["tags"]):
-            fail(409, "undo_empty", "rien à retirer")
+            fail(409, "undo_empty", "nothing to remove")
         try:
             same = Syncer(db, w.client).same_server()
         except httpx.HTTPError as e:
-            fail(502, "undo_unreachable", f"Immich injoignable : {e}")
+            fail(502, "undo_unreachable", f"Immich unreachable: {e}", error=str(e))
         if not same:
-            fail(409, "undo_other_server", "aucun des tags écrits n'existe sur ce serveur : autre Immich ou autre compte ?")
+            fail(409, "undo_other_server", "none of the written tags exists on this server: another Immich or another account?")
         w.start_uninstall(state["photos"])
         return w.undo_summary(db)
 
     @app.post("/api/immich/resume-writes", dependencies=[Depends(auth)])
     def undo_resume():
         if w.undo.get("state") == "running":
-            fail(409, "undo_running", "retrait en cours")
+            fail(409, "undo_running", "removal running")
         try:
             w.resume_writes()
         except Busy as e:
@@ -77,11 +77,11 @@ def register(app, c) -> None:
                 "env": {"dry_run": s.dry_run, "names_lang": s.names_lang, "device": s.device,
                         "tag_root": s.tag_root, "open_detector": s.open_detector}}
 
-    # -- connexion à Immich (Paramètres > Immich) ----------------------------------
-    # La clé n'est jamais renvoyée au navigateur : seulement ses 4 derniers caractères.
+    # -- Immich connection (Settings > Immich) ----------------------------------
+    # The key is never sent back to the browser: only its last 4 characters.
 
     def immich_info() -> dict:
-        if s.source != "immich":   # dossier ou logiciel photo : pas de connexion à régler, seulement son état
+        if s.source != "immich":   # folder or photo application: no connection to set, only its state
             return {"source": s.source, "kind": kind(s.source), "path": str(source_path(s) or ""), "dry_run": s.dry_run,
                     "status": {"code": "ok" if w.client.writable else ("readonly" if w.client.version else "missing"),
                                **w.client.status()}}
@@ -92,12 +92,12 @@ def register(app, c) -> None:
                 "status": {"code": "ok" if w.client.writable else ("readonly" if w.client.version else "missing"),
                            **w.client.status()} if w.configured else {"code": "missing"}}
 
-    # -- source des photos (Paramètres) ------------------------------------------------
+    # -- photo source (Settings) ------------------------------------------------
 
     @app.get("/api/sources", dependencies=[Depends(auth)])
     def get_sources():
-        """Sources proposées, avec le chemin à préremplir pour chacune : le chemin en cours, sinon le dossier des
-        photos ou la bibliothèque du logiciel à son emplacement habituel."""
+        """Sources offered, with the path to prefill for each: the current path, otherwise the usual location of the
+        photo folder or of the application library."""
         def suggested(o: dict):
             if o["id"] == s.source:
                 return source_path(s)
@@ -113,7 +113,7 @@ def register(app, c) -> None:
 
     class SourceIn(BaseModel):
         source: str | None = None
-        path: str | None = None   # dossier des photos ou bibliothèque du logiciel, selon la source
+        path: str | None = None   # photo folder or application library, depending on the source
         dry_run: bool | None = None
 
     @app.put("/api/source", dependencies=[Depends(auth)])
@@ -137,11 +137,11 @@ def register(app, c) -> None:
 
     class ImmichIn(BaseModel):
         url: str = ""
-        key: str = ""   # vide : garder la clé enregistrée
+        key: str = ""   # empty: keep the saved key
 
     @app.post("/api/immich/test", dependencies=[Depends(auth)])
     def test_immich(body: ImmichIn):
-        """Essaie une connexion sans rien enregistrer ni écrire dans Immich."""
+        """Try a connection without saving or writing anything to Immich."""
         try:
             url, key = w.credentials(body.url, body.key)
         except ValueError as e:
@@ -153,12 +153,12 @@ def register(app, c) -> None:
 
     @app.put("/api/immich", dependencies=[Depends(auth)])
     def put_immich(body: ImmichIn):
-        """Enregistre la connexion si Immich répond et accepte la clé ; sinon rien ne change."""
+        """Save the connection if Immich answers and accepts the key; otherwise nothing changes."""
         if s.source != "immich":
-            fail(409, "local_source", f"source : {s.source} (pas Immich)")
+            fail(409, "local_source", f"source: {s.source} (not Immich)", source=s.source)
         try:
             state = w.connect(body.url, body.key)
-        except Busy as e:   # même forme qu'un échec de connexion : affiché par la fiche Immich
+        except Busy as e:   # same shape as a connection failure: shown by the Immich card
             return JSONResponse({"code": "cycle_running", "errors": [], "saved": False, "message": str(e)}, status_code=409)
         if state["code"] not in ("ok", "readonly"):
             return JSONResponse({**state, "saved": False}, status_code=422)
@@ -166,7 +166,7 @@ def register(app, c) -> None:
 
     @app.get("/api/models", dependencies=[Depends(auth)])
     def models():
-        """Modèles d'IA, matériel de calcul réellement utilisé, vitesse mesurée."""
+        """AI models, compute hardware actually used, measured speed."""
         info = w.models_info()
         info["outdated"] = db.execute("SELECT count(*) FROM asset WHERE analyzed_at IS NOT NULL AND analyzer IS NOT ? "
                                       "AND missing_at IS NULL", (info["analyzer_id"],)).fetchone()[0]
@@ -174,12 +174,12 @@ def register(app, c) -> None:
 
     @app.put("/api/settings", dependencies=[Depends(auth)])
     def put_settings(values: dict):
-        """Enregistre des réglages (null = revenir à la valeur par défaut / de l'environnement)."""
+        """Save settings (null = back to the default / environment value)."""
         reset = [k for k, v in values.items() if v is None]
         try:
             changes = validate_overrides(s, {k: v for k, v in values.items() if v is not None})
             if any(k not in EDITABLE for k in reset):
-                raise ValueError("réglage inconnu")
+                raise ValueError("unknown setting")
         except ValueError as e:
             fail(422, "invalid_value", str(e))
         before = (s.exclude_extinct, s.hide_absent)
@@ -192,8 +192,8 @@ def register(app, c) -> None:
         for k, v in changes.items():
             setattr(s, k, v)
         if (s.exclude_extinct, s.hide_absent) != before:
-            w.start_prune()   # sinon appliqué au cycle suivant (« pruned_with » diffère)
+            w.start_prune()   # otherwise applied at the next cycle ("pruned_with" differs)
         if {"detection", "detect_groups"} & changes.keys():
-            drop_unwanted(db, s)   # détections automatiques à relire devenues hors réglage, retirées tout de suite
+            drop_unwanted(db, s)   # automatic detections awaiting review now outside the settings, removed right away
             db.commit()
         return get_settings()

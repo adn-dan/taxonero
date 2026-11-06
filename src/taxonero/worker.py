@@ -1,5 +1,5 @@
-"""Boucle de travail : scan des assets Immich, analyse, auto-validation calibrée, synchronisation.
-Règles de validation automatique : autoconfirm.py ; détections à relire déjà en base : curation.py."""
+"""Work loop: Immich asset scan, analysis, calibrated auto-confirmation, synchronisation.
+Auto-confirmation rules: autoconfirm.py; detections already in the database awaiting review: curation.py."""
 
 import hashlib
 import io
@@ -31,42 +31,42 @@ from .curation import EXCLUDED, cand_json, candidate_filter, drop_unwanted, prun
 log = logging.getLogger(__name__)
 
 ANALYZER_ID = "mdv6-apa-rtdetr-e+owlv2-base+bioclip-2"
-# Candidats dont les noms communs sont récupérés dès l'analyse (affichés dans la fiche de relecture).
+# Candidates whose common names are fetched during analysis (shown in the review card).
 CANDIDATE_NAMES = 5
-# Repli « image entière » (aucun animal détecté) : conservé seulement au-dessus de ce seuil.
+# "Whole image" fallback (no animal detected): kept only above this threshold.
 FALLBACK_MIN_CONF = 0.6
 
 
 class Unavailable(RuntimeError):
-    """Service réseau momentanément indisponible pendant l'analyse (Immich, GBIF)."""
+    """Network service temporarily unavailable during analysis (Immich, GBIF)."""
 
 
 class Busy(RuntimeError):
-    """Un cycle tourne encore malgré la demande d'arrêt : le réglage demandé depuis le dashboard n'est pas appliqué."""
+    """A cycle is still running despite the stop request: the setting asked for from the dashboard is not applied."""
 
 
 class Interrupted(BaseException):
-    """Cycle arrêté à un point sûr pour appliquer un réglage du dashboard (Worker._idle). BaseException, comme
-    KeyboardInterrupt : les « except Exception » qui protègent une photo ou une requête ne l'arrêtent pas."""
+    """Cycle stopped at a safe point to apply a dashboard setting (Worker._idle). BaseException, like
+    KeyboardInterrupt: the "except Exception" blocks that protect a photo or a request do not stop it."""
 
 
-# Photo gardée dans la file d'analyse (condition SQL sur asset ; paramètres : Settings.skip_args, soit
+# Photo kept in the analysis queue (SQL condition on asset; parameters: Settings.skip_args, i.e.
 # analyze_videos, skip_raw_twins, skip_people).
 SKIPPED_NOT = "(? OR kind IS NOT 'VIDEO') AND (NOT ? OR twin_of IS NULL) AND (NOT ? OR coalesce(people, 0) = 0)"
-# Boîte non identifiée gardée pour relecture seulement si le détecteur est sûr de lui
-# (échelles de score propres à chaque détecteur).
+# Unidentified box kept for review only if the detector is confident
+# (score scales specific to each detector).
 UNKNOWN_BOX_MIN_SCORE = {"md": 0.7, "owl": 0.5}
-# Au-delà, une photo dont l'analyse échoue n'est plus retentée (sinon elle bloque la file).
+# Beyond this, a photo whose analysis fails is no longer retried (otherwise it blocks the queue).
 MAX_FAILURES = 3
-# Contrôle complet de l'état d'Immich (photos disparues, tags retirés à la main) : une fois par jour.
+# Full check of the Immich state (missing photos, tags removed by hand): once a day.
 DAILY = 86400
-# Changement de réglage pendant un cycle : délai laissé au cycle pour atteindre un point d'arrêt (une photo, une
-# requête réseau) avant de renoncer (Busy).
+# Setting changed during a cycle: time given to the cycle to reach a stopping point (one photo, one
+# network request) before giving up (Busy).
 STOP_WAIT = 60
 
 
 def in_window(window: str, now: datetime | None = None) -> bool:
-    """Fenêtre horaire "HH:MM-HH:MM" (peut passer minuit). Vide = toujours."""
+    """Time window "HH:MM-HH:MM" (may span midnight). Empty = always."""
     if not window:
         return True
     now = now or datetime.now()
@@ -76,8 +76,8 @@ def in_window(window: str, now: datetime | None = None) -> bool:
 
 
 def fetch_model(url: str, dest: Path, sha256: str = "", user_agent: str = "taxonero") -> None:
-    """Télécharge un fichier de modèle (fichier temporaire renommé à la fin ; empreinte vérifiée si donnée)."""
-    log.info("téléchargement du modèle %s…", dest.name)
+    """Download a model file (temporary file renamed at the end; checksum verified if given)."""
+    log.info("downloading model %s…", dest.name)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp, h = dest.with_suffix(".part"), hashlib.sha256()
     try:
@@ -88,20 +88,20 @@ def fetch_model(url: str, dest: Path, sha256: str = "", user_agent: str = "taxon
                 f.write(chunk)
                 h.update(chunk)
         if sha256 and h.hexdigest() != sha256.lower():
-            raise ValueError(f"empreinte inattendue pour {dest.name} : {h.hexdigest()}")
+            raise ValueError(f"unexpected checksum for {dest.name}: {h.hexdigest()}")
         tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
 
 
-# Plus gros fichier de chaque modèle de Hugging Face (dépôt, fichier, type de dépôt) : présent dans le cache, le
-# modèle est téléchargé. BioCLIP 2 : poids du modèle et empreintes de texte des espèces (jeu TreeOfLife-200M).
+# Largest file of each Hugging Face model (repository, file, repository type): present in the cache, the
+# model is downloaded. BioCLIP 2: model weights and species text embeddings (TreeOfLife-200M dataset).
 HF_FILES = [("imageomics/bioclip-2", "open_clip_model.safetensors", None),
             ("imageomics/TreeOfLife-200M", "embeddings/txt_emb_species.npy", "dataset")]
 
 
 def models_on_disk(s: Settings) -> bool:
-    """Modèles déjà téléchargés. Sinon le premier usage commence par ~5 Go de téléchargement, à annoncer."""
+    """Models already downloaded. Otherwise first use starts with a ~5 GB download, to be announced."""
     from huggingface_hub import try_to_load_from_cache
 
     from .megadetector import VERSION
@@ -112,12 +112,12 @@ def models_on_disk(s: Settings) -> bool:
 
 
 def fetch_models(s: Settings) -> None:
-    """Télécharge les modèles, chargés sur le processeur puis aussitôt libérés (installation de bureau : tout est
-    prêt au premier usage). Mêmes chemins que l'analyse, donc exactement les fichiers qu'elle demandera."""
+    """Download the models, loaded on the CPU then released right away (desktop installation: everything is
+    ready at first use). Same paths as the analysis, hence exactly the files it will ask for."""
     import gc
 
     from .megadetector import weights
-    if models_on_disk(s):   # mise à jour de l'application : rien à télécharger
+    if models_on_disk(s):   # application update: nothing to download
         return
     if not s.detector_path.exists():
         print("MegaDetector", flush=True)
@@ -131,11 +131,15 @@ def fetch_models(s: Settings) -> None:
 
 
 def requeue(db: sqlite3.Connection, scope: str) -> int:
-    """Remet des photos dans la file d'analyse. failed : abandonnées après échecs ; outdated : analysées
-    par une autre version des modèles ; all : toutes. Les détections relues sont conservées."""
+    """Put photos back in the analysis queue. failed: given up after failures; outdated: analysed
+    by another model version; all: all of them. Reviewed detections are kept."""
     where, args = {"failed": ("fail_count >= ?", (MAX_FAILURES,)),
                    "outdated": ("analyzed_at IS NOT NULL AND analyzer IS NOT ?", (ANALYZER_ID,)),
                    "all": ("1", ())}[scope]
+    # AI results still waiting for the geographic check: made again too (other model version, or failed). Before
+    # the update, which resets fail_count.
+    db.execute(f"DELETE FROM inferred WHERE asset_id IN (SELECT asset_id FROM asset WHERE {where})" if scope == "failed"
+               else "DELETE FROM inferred", args if scope == "failed" else ())
     n = db.execute(f"UPDATE asset SET analyzed_at = NULL, fail_count = 0, last_error = NULL WHERE {where}", args).rowcount
     db.commit()
     return n
@@ -148,18 +152,18 @@ class Worker:
         self.s = s
         self.db = store.connect(s.db_path)
         self.undo: dict = {"state": "idle"}   # retrait d'Immich (start_uninstall)
-        # Valeurs de l'environnement (ou par défaut), puis réglages faits depuis le dashboard par-dessus.
+        # Environment values (or defaults), then settings made from the dashboard on top.
         self.env_defaults = {k: getattr(s, k) for k in EDITABLE}
         apply_overrides(s, store.get_state(self.db, "settings"))
-        # Connexion à Immich : environnement d'abord, sinon celle enregistrée depuis le dashboard.
+        # Immich connection: environment first, otherwise the one saved from the dashboard.
         self.env_immich = {"url": bool(s.immich_url), "key": bool(s.immich_api_key)}
         saved = json.loads(store.get_state(self.db, "immich") or "{}")
         s.immich_url = s.immich_url or saved.get("url", "")
         s.immich_api_key = s.immich_api_key or saved.get("key", "")
-        # Bureau : écriture des résultats réglée dans le dashboard (DRY_RUN de l'environnement sinon).
+        # Desktop: result writing set in the dashboard (DRY_RUN from the environment otherwise).
         if s.edition == "desktop" and "dry_run" not in s.model_fields_set and store.get_state(self.db, "dry_run"):
             s.dry_run = store.get_state(self.db, "dry_run") == "1"
-        # Source des photos : environnement d'abord (verrouillée), sinon celle choisie dans le dashboard.
+        # Photo source: environment first (locked), otherwise the one chosen in the dashboard.
         self.env_source = bool({"source", "photos_dir", "catalog_path"} & s.model_fields_set)
         saved_source = json.loads(store.get_state(self.db, "source") or "{}")
         if not self.env_source and saved_source.get("source") in SOURCES:
@@ -169,48 +173,51 @@ class Worker:
         self.client = make_source(s)
         self.tx = Taxonomy(self.db, langs=s.langs, user_agent=s.user_agent, backbone=s.backbone_path if s.gbif_local else None)
         self._analyzer = analyzer
-        self._device: str | None = None   # périphérique des modèles chargés (None : fournis de l'extérieur)
-        # Santé (/healthz) : dernière activité de la boucle ; une boucle figée rend le conteneur « unhealthy ».
+        self._device: str | None = None   # device of the loaded models (None: provided from outside)
+        # Health (/healthz): last loop activity; a frozen loop makes the container "unhealthy".
         self.loop_started, self.last_activity = False, time.time()
-        # Chargement des modèles (plusieurs Go) : une seule fois, même si le dashboard et le cycle le demandent ensemble.
+        # Model loading (several GB): only once, even if the dashboard and the cycle ask for it together.
         self._analyzer_lock = threading.Lock()
-        self._models_used = 0.0   # dernière demande des modèles (time.monotonic), pour les décharger après inactivité
-        self._stages_kept: dict[str, list] = {}   # temps par étape des modèles déchargés (page Paramètres)
-        # Original des petits sujets : None tant que non essayé, True si obtenu, False sans la permission asset.download.
+        self._models_used = 0.0   # last request for the models (time.monotonic), to unload them when idle
+        self._stages_kept: dict[str, list] = {}   # time per stage of unloaded models (Settings page)
+        # Original for small subjects: None until tried, True if obtained, False without the asset.download permission.
         self._original_ok: bool | None = None
-        self.backbone_state = {"state": "waiting" if s.gbif_local else "off"}   # taxonomie GBIF locale (Paramètres)
-        self._speed: list[float] = []   # durée d'analyse des dernières photos (s) : modèles et requêtes GBIF, sans le téléchargement de l'image
-        self._timings: dict[str, list] = {}   # étapes du worker (téléchargement, enregistrement) -> [secondes, photos]
+        self.backbone_state = {"state": "waiting" if s.gbif_local else "off"}   # local GBIF taxonomy (Settings)
+        self._speed: list[float] = []   # time per photo of the latest photos (s), whole analysis or AI part (two phases)
+        self._speed_geo: list[float] = []   # same for the geographic check (second phase)
+        self._last_done_geo = 0.0
+        self._decider: Analyzer | None = None   # decision without the models (second phase), see decider
+        self._timings: dict[str, list] = {}   # worker stages (download, saving) -> [seconds, photos]
         self._last_done = 0.0
         self._blocked_set: set[str] = set()
         self._blocked_at = -1e9
-        # Un seul cycle à la fois (boucle automatique ou bouton « Synchroniser »), même connexion SQLite.
+        # One cycle at a time (automatic loop or "Sync" button), same SQLite connection.
         self.cycle_lock = threading.Lock()
-        # Arrêt demandé par un réglage du dashboard (_idle), vérifié aux points sûrs du cycle (_checkpoint) ; réveil
-        # de la boucle pour reprendre aussitôt après.
+        # Stop requested by a dashboard setting (_idle), checked at the cycle's safe points (_checkpoint); wakes
+        # the loop to resume right after.
         self._stop, self._wake = threading.Event(), threading.Event()
-        self._cycle_manual = False    # le cycle en cours est-il manuel (bouton « Synchroniser ») ?
-        self._resume_manual = False   # cycle manuel arrêté par un réglage : la boucle le relance en manuel
-        self._resume_pending = False  # cycle arrêté par un réglage, à relancer par la boucle
-        self._loading: threading.Thread | None = None   # chargement des modèles, hors du cycle
-        # Analyse mise en pause depuis le dashboard (elle prend toute la machine) : gardé d'un lancement à l'autre.
+        self._cycle_manual = False    # is the running cycle manual ("Sync" button)?
+        self._resume_manual = False   # manual cycle stopped by a setting: the loop restarts it as manual
+        self._resume_pending = False  # cycle stopped by a setting, to be restarted by the loop
+        self._loading: threading.Thread | None = None   # model loading, outside the cycle
+        # Analysis paused from the dashboard (it takes the whole machine): kept from one launch to the next.
         self.analysis_paused = store.get_state(self.db, "analysis_paused") == "1"
         self._load_error: BaseException | None = None
         self.progress: dict = {"running": False, "step": None, "done": 0, "total": 0, "current": None, "step_started": None,
                                "started": None, "finished": None, "error": None}
         n = tidy_names(self.db)
         if n:
-            log.info("%d nom(s) commun(s) remis en casse normale (ex. « DOGS »)", n)
+            log.info("%d common name(s) set back to normal case (e.g. \"DOGS\")", n)
         n = ranges.migrate_legacy(self.db)
         if n:
-            log.info("%d aire(s) de répartition d'un ancien format supprimée(s), retéléchargée(s) ensuite", n)
+            log.info("%d range map(s) in an old format deleted, downloaded again later", n)
 
     def backup(self, force: bool = False) -> Path | None:
-        """Copie de la base du jour dans DATA_DIR/backups (une par jour, les BACKUP_KEEP plus récentes gardées).
-        Copie cohérente même pendant l'analyse (VACUUM INTO), allégée des caches réseau qui se retéléchargent :
-        réponses GBIF/Wikidata et aires de répartition. Sans la clé API Immich non plus (à ressaisir dans le
-        dashboard après une restauration). Restauration : arrêter le service, copier le fichier voulu sur
-        DATA_DIR/taxonero.sqlite, relancer."""
+        """Copy of today's database in DATA_DIR/backups (one per day, the BACKUP_KEEP most recent kept).
+        Consistent copy even during analysis (VACUUM INTO), stripped of the network caches that can be downloaded
+        again: GBIF/Wikidata responses and range maps. Without the Immich API key either (to be entered again in the
+        dashboard after a restore). Restore: stop the service, copy the chosen file over
+        DATA_DIR/taxonero.sqlite, restart."""
         keep = self.s.backup_keep
         today = datetime.now().strftime("%Y-%m-%d")
         if keep <= 0 or (not force and store.get_state(self.db, "last_backup") == today):
@@ -225,7 +232,8 @@ class Worker:
         for table in ("http_cache", "taxon_range"):
             if copy.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone():
                 copy.execute(f"DELETE FROM {table}")
-        copy.execute("DELETE FROM state WHERE key = 'immich'")   # la clé API ne voyage pas avec les sauvegardes
+        copy.execute("DELETE FROM state WHERE key = 'immich'")   # the API key does not travel with backups
+        copy.execute("DELETE FROM inferred")   # AI results waiting for the check: made again after a restore
         copy.commit()
         copy.execute("VACUUM")
         copy.close()
@@ -237,24 +245,28 @@ class Worker:
         return dest
 
     def _checkpoint(self) -> None:
-        """Point d'arrêt sûr du cycle (rien d'écrit à moitié) : Interrupted si un réglage attend (_idle). Atteindre un
-        point d'arrêt prouve que le cycle avance : /healthz le compte comme une activité (longue synchronisation,
-        contrôle quotidien), sans quoi le conteneur passerait « unhealthy » en plein travail."""
+        """Safe stopping point of the cycle (nothing half written): Interrupted if a setting is waiting (_idle). Reaching a
+        stopping point proves the cycle is progressing: /healthz counts it as activity (long synchronisation,
+        daily check), without which the container would turn "unhealthy" in the middle of the work."""
         self.last_activity = time.time()
         if self._stop.is_set():
             raise Interrupted()
 
     def _step(self, step: str, total: int = 0) -> None:
-        """Étape en cours, en code (check, scan, reconcile, models, analyze, prune, sync, prefetch) : le dashboard
-        la traduit. current : élément en cours (nom du fichier pendant l'analyse). Point d'arrêt (_checkpoint)."""
+        """Current stage, as a code (check, scan, reconcile, models, analyze, prune, sync, prefetch): the dashboard
+        translates it. current: item in progress (file name during analysis). Stopping point (_checkpoint)."""
         self._checkpoint()
-        self.progress.update(step=step, done=0, total=total, current=None, step_started=time.time())
+        self.progress.update(step=step, done=0, total=total, scale=1, current=None, step_started=time.time())
+        if step not in ("analyze", "geo"):
+            self.progress["phases"] = None
         self.last_activity = time.time()
 
     def _tick(self) -> None:
-        """Élément suivant d'une étape ; point d'arrêt (_checkpoint) : à appeler hors transaction en cours."""
+        """Next item of a stage; stopping point (_checkpoint): call outside any open transaction."""
         self._checkpoint()
         self.progress["done"] += 1
+        if (phases := self.progress.get("phases")) and self.progress["step"] in phases:
+            phases[self.progress["step"]][0] += 1
         self.last_activity = time.time()
 
     @property
@@ -263,9 +275,9 @@ class Worker:
             device, why = hardware.resolve(self.s.device)
             ov_mode = hardware.open_mode(self.s.open_detector_mode, device)
             if self._analyzer is not None and self._device not in (None, device):
-                # Choix GPU / processeur changé dans les Paramètres : modèles rechargés sur le nouveau périphérique
-                # (l'analyse en cours, s'il y en a une, finit sur l'ancien).
-                log.info("calcul : passage de %s à %s, modèles rechargés", self._device, device)
+                # GPU / CPU choice changed in Settings: models reloaded on the new device
+                # (the running analysis, if any, finishes on the old one).
+                log.info("compute: switching from %s to %s, models reloaded", self._device, device)
                 old, self._analyzer = self._device, None
                 hardware.release(old)
             if self._analyzer is None:
@@ -273,15 +285,15 @@ class Worker:
                 hardware.full_precision()
                 self._device = device
                 det = None
-                if self.s.detector_path.exists():   # ONNX (images Docker d'avant, ou fourni) : gardé tel quel
+                if self.s.detector_path.exists():   # ONNX (older Docker images, or provided): kept as is
                     det = Detector(self.s.detector_path, providers=hardware.onnx_session_providers(device),
                                    min_score=self.s.detector_min_score)
                     det.providers = det.session.get_providers()
-                else:   # PyTorch, poids officiels téléchargés au premier usage (megadetector.py)
+                else:   # PyTorch, official weights downloaded at first use (megadetector.py)
                     from .megadetector import TorchDetector, weights
                     det = TorchDetector(weights(self.s.data_dir / "models", self.s.user_agent), device,
                                         min_score=self.s.detector_min_score)
-                log.info("détecteur : %s", ", ".join(det.providers))
+                log.info("detector: %s", ", ".join(det.providers))
                 ov = None
                 if self.s.open_detector:
                     ov = OpenVocabDetector(self.s.open_detector_model, device=device,
@@ -289,14 +301,14 @@ class Worker:
                 analyzer = Analyzer(det, Classifier(device=device), self.tx, open_detector=ov)
                 analyzer.drop = candidate_filter(self.s, self.tx)
                 self._analyzer = analyzer
-            self._analyzer.open_mode = ov_mode   # sans rechargement
+            self._analyzer.open_mode = ov_mode   # no reload
             self._models_used = time.monotonic()
             return self._analyzer
 
     def unload_idle(self) -> bool:
-        """Modèles inutilisés depuis models_idle_minutes : retirés de la mémoire du GPU, rechargés à la prochaine demande.
-        Une analyse en cours garde sa référence aux modèles : elle finit normalement. Rien sur processeur, où ils ne
-        prennent pas de mémoire du GPU, ni pour un analyseur fourni de l'extérieur (_device None)."""
+        """Models unused for models_idle_minutes: removed from GPU memory, reloaded on the next request.
+        A running analysis keeps its reference to the models: it finishes normally. Nothing on the CPU, where they
+        take no GPU memory, nor for an analyser provided from outside (_device None)."""
         minutes = self.s.models_idle_minutes
         with self._analyzer_lock:
             if (self._analyzer is None or self._device in (None, "cpu") or minutes <= 0
@@ -305,7 +317,7 @@ class Worker:
             device, self._stages_kept = self._device, {**self._stages_kept, **getattr(self._analyzer, "timings", {})}
             self._analyzer = None
         hardware.release(device)
-        log.info("modèles déchargés de %s après %d min sans analyse", device, minutes)
+        log.info("models unloaded from %s after %d min without analysis", device, minutes)
         return True
 
     def _watch_idle_models(self) -> None:
@@ -314,31 +326,31 @@ class Worker:
             try:
                 self.unload_idle()
             except Exception:
-                log.exception("déchargement des modèles en échec")
+                log.exception("model unloading failed")
 
     @property
     def configured(self) -> bool:
         return self.s.source != "immich" or bool(self.s.immich_url and self.s.immich_api_key)
 
     def credentials(self, url: str, api_key: str) -> tuple[str, str]:
-        """(adresse, clé) d'une connexion saisie dans le dashboard ; les valeurs de l'environnement priment. Clé vide :
-        la clé enregistrée, mais seulement pour le serveur déjà réglé (ou au premier réglage de l'adresse) : envoyée à
-        une autre adresse, elle partirait chez ce serveur-là. ValueError dans ce cas."""
+        """(url, key) of a connection entered in the dashboard; environment values take precedence. Empty key:
+        the saved key, but only for the server already set (or when the url is first set): sent to
+        another url, it would go to that other server. ValueError in that case."""
         url = self.s.immich_url if self.env_immich["url"] else url.strip().rstrip("/")
         given = "" if self.env_immich["key"] else api_key.strip()
         if not given and self.s.immich_url and url != self.s.immich_url:
-            raise ValueError("nouvelle adresse : saisir aussi la clé API")
+            raise ValueError("new address: enter the API key as well")
         return url, given or self.s.immich_api_key
 
     def connect(self, url: str, api_key: str) -> dict:
-        """Nouvelle connexion depuis le dashboard : testée, puis enregistrée et utilisée seulement si Immich répond
-        et accepte la clé (sinon rien ne change). Les valeurs venues de l'environnement ne sont pas remplacées.
-        Clé vide : la clé enregistrée (voir credentials)."""
+        """New connection from the dashboard: tested, then saved and used only if Immich answers
+        and accepts the key (otherwise nothing changes). Values coming from the environment are not replaced.
+        Empty key: the saved key (see credentials)."""
         try:
             url, api_key = self.credentials(url, api_key)
         except ValueError as e:
             return {"code": "key_required", "errors": [str(e)]}
-        # Délai normal (30 s) : ce client sert ensuite à l'analyse (originaux lourds), pas seulement au test.
+        # Normal timeout (30 s): this client is then used for analysis (heavy originals), not only for the test.
         client, state = probe(url, api_key, dry_run=self.s.dry_run, timeout=30.0)
         if client is None:
             return state
@@ -353,32 +365,32 @@ class Worker:
         except Busy:
             client.close()
             raise
-        log.info("connexion à Immich %s enregistrée (%s)", client.version, state["code"])
+        log.info("Immich %s connection saved (%s)", client.version, state["code"])
         threading.Timer(30, old.close).start()
         return state
 
     def set_dry_run(self, value: bool) -> None:
-        """Édition de bureau : écriture des résultats activée depuis le dashboard (pas d'environnement à régler)."""
+        """Desktop edition: result writing enabled from the dashboard (no environment to set)."""
         if self.s.edition != "desktop":
-            raise ValueError("DRY_RUN se règle dans l'environnement (édition serveur)")
+            raise ValueError("DRY_RUN is set in the environment (server edition)")
         with self._idle():
             before = self.s.dry_run
             self.s.dry_run = self.client.dry_run = bool(value)
             try:
                 self.check()
-            except Exception:   # source injoignable : réglage inchangé, surtout quand il s'agit d'activer l'écriture
+            except Exception:   # source unreachable: setting unchanged, especially when enabling writes
                 self.s.dry_run = self.client.dry_run = before
                 raise
             store.set_state(self.db, "dry_run", "1" if value else "0")
 
     def set_source(self, source: str, path: str | None = None) -> dict:
-        """Change de source depuis le dashboard (sauf si l'environnement la fixe) : dossier des photos ou
-        bibliothèque du logiciel selon la source. Les photos de l'ancienne source restent en base avec leurs
-        relectures : masquées au prochain contrôle, elles reviennent si on y retourne."""
+        """Change source from the dashboard (unless the environment sets it): photo folder or
+        application library depending on the source. Photos of the previous source stay in the database with their
+        reviews: hidden at the next check, they come back if the user switches back."""
         if self.env_source:
-            raise ValueError("source fixée par l'environnement (SOURCE, PHOTOS_DIR, CATALOG_PATH)")
+            raise ValueError("source set by the environment (SOURCE, PHOTOS_DIR, CATALOG_PATH)")
         if not any(o["id"] == source and o["available"] for o in available(self.s.edition)):
-            raise ValueError(f"source non disponible ici : {source}")
+            raise ValueError(f"source not available here: {source}")
         with self._idle():
             where = SOURCES[source]["kind"]
             before = (self.s.source, self.s.photos_dir, self.s.catalog_path)
@@ -395,7 +407,7 @@ class Worker:
             try:
                 self.client = make_source(self.s)
                 self.check()
-            except Exception:   # source injoignable : on reste sur l'ancienne, rien n'est enregistré
+            except Exception:   # source unreachable: stay on the previous one, nothing is saved
                 if self.client is not old:
                     self.client.close()
                 self.client = old
@@ -405,17 +417,17 @@ class Worker:
                                                            "catalog_path": str(self.s.catalog_path or "")}))
             threading.Timer(30, old.close).start()
             for key in ("last_scan", "last_scan_video", "last_reconcile"):
-                store.set_state(self.db, key, "")   # nouvelle source : tout relister au prochain cycle
-        log.info("source des photos : %s %s", source, source_path(self.s) or self.s.immich_url)
+                store.set_state(self.db, key, "")   # new source: list everything again at the next cycle
+        log.info("photo source: %s %s", source, source_path(self.s) or self.s.immich_url)
         return {"source": source, "writable": self.client.writable, **self.client.status()}
 
     @contextmanager
     def _idle(self):
-        """Changement fait depuis le dashboard (source, connexion, écriture) : jamais pendant un cycle, qui utilise
-        la même connexion SQLite et la même source (sinon un scan en cours écrase son repère « tout relister », ou
-        continue sur un client fermé). Un cycle en cours est arrêté au prochain point sûr (_checkpoint), le réglage
-        appliqué, puis le cycle relancé aussitôt : l'utilisateur n'a rien à refaire. Busy si le cycle n'a pas pu
-        s'arrêter dans STOP_WAIT secondes."""
+        """Change made from the dashboard (source, connection, writing): never during a cycle, which uses
+        the same SQLite connection and the same source (otherwise a running scan overwrites its "list everything" marker, or
+        goes on with a closed client). A running cycle is stopped at the next safe point (_checkpoint), the setting
+        applied, then the cycle restarted right away: the user has nothing to redo. Busy if the cycle could not
+        stop within STOP_WAIT seconds."""
         running = not self.cycle_lock.acquire(blocking=False)
         if running:
             manual = self._cycle_manual
@@ -423,12 +435,12 @@ class Worker:
             got = self.cycle_lock.acquire(timeout=STOP_WAIT)
             self._stop.clear()
             if not got:
-                raise Busy("un cycle de synchronisation est en cours")
+                raise Busy("a synchronisation cycle is running")
         try:
             yield
         finally:
             self.cycle_lock.release()
-            if running:   # reprise par la boucle (loop), dans le même mode
+            if running:   # restarted by the loop (loop), in the same mode
                 self._resume_manual = self._resume_manual or manual
                 self._resume_pending = True
                 self._wake.set()
@@ -437,23 +449,23 @@ class Worker:
         if not self.configured:
             store.set_state(self.db, "writable", "0")
             return False
-        self._original_ok = None   # permission asset.download peut-être ajoutée depuis un 403
+        self._original_ok = None   # asset.download permission possibly added since a 403
         ok = self.client.check()
         for w in self.client.warnings:
-            log.warning("compatibilité : %s", w)
+            log.warning("compatibility: %s", w)
         for e in self.client.errors:
-            log.error("incompatibilité : %s", e)
+            log.error("incompatibility: %s", e)
         store.set_state(self.db, "immich_version", self.client.version or "")
         store.set_state(self.db, "writable", "1" if ok else "0")
         return ok
 
     def mark_missing(self, asset_id: str) -> None:
-        log.info("photo %s absente d'Immich (supprimée ou à la corbeille) : masquée", asset_id)
+        log.info("photo %s missing from Immich (deleted or in the trash): hidden", asset_id)
         self.db.execute("UPDATE asset SET missing_at = ? WHERE asset_id = ?", (time.time(), asset_id))
         self.db.commit()
 
     def refresh_taxa(self, limit: int = 50) -> int:
-        """Ré-enrichit les taxons enregistrés dans un format plus ancien (ex. avant les noms multilingues)."""
+        """Enrich again the taxa saved in an older format (e.g. before multilingual names)."""
         n = 0
         for r in self.db.execute("SELECT gbif_key, data FROM taxon").fetchall():
             data = json.loads(r["data"])
@@ -467,8 +479,8 @@ class Worker:
                 n += 1
         self.db.commit()
         if n:
-            log.info("%d taxon(s) ré-enrichi(s) au format %d", n, TAXON_VERSION)
-        # Noms des rangs supérieurs au pluriel (GBIF) pour les taxons en cache d'avant cette règle.
+            log.info("%d taxon(s) enriched again to format %d", n, TAXON_VERSION)
+        # Plural names of higher ranks (GBIF) for taxa cached before this rule.
         m = 0
         for r in self.db.execute("SELECT gbif_key, data FROM taxon").fetchall():
             data = json.loads(r["data"])
@@ -479,14 +491,14 @@ class Worker:
             try:
                 data = self.tx.plural_names({**data, "gbif_key": r["gbif_key"]})
             except Exception:
-                log.debug("noms GBIF indisponibles pour %s", data.get("scientific_name"), exc_info=True)
+                log.debug("GBIF names unavailable for %s", data.get("scientific_name"), exc_info=True)
                 continue
             store.save_taxon(self.db, r["gbif_key"], json.dumps(data, ensure_ascii=False))
             m += 1
         self.db.commit()
         if m:
-            log.info("%d rang(s) supérieur(s) renommé(s) au pluriel (noms GBIF)", m)
-        # Espèces sans article : recherche par nom et par synonymes (Wikidata a souvent une fiche par nom).
+            log.info("%d higher rank(s) renamed to plural (GBIF names)", m)
+        # Species without an article: search by name and by synonyms (Wikidata often has one item per name).
         a = 0
         for r in self.db.execute("SELECT gbif_key, data FROM taxon").fetchall():
             data = json.loads(r["data"])
@@ -497,17 +509,17 @@ class Worker:
             try:
                 data = self.tx.refresh_articles({**data, "gbif_key": r["gbif_key"]})
             except Exception:
-                log.debug("articles indisponibles pour %s", data.get("scientific_name"), exc_info=True)
+                log.debug("articles unavailable for %s", data.get("scientific_name"), exc_info=True)
                 continue
             store.save_taxon(self.db, r["gbif_key"], json.dumps(data, ensure_ascii=False))
             a += 1
         self.db.commit()
         if a:
-            log.info("articles recherchés de nouveau pour %d espèce(s)", a)
+            log.info("articles searched again for %d species", a)
         return n + m + a
 
     def refresh_places(self, limit: int = 200) -> int:
-        """Rattrapage : lieux (ville, région, pays) des photos enregistrées avant leur prise en charge."""
+        """Catch-up: places (city, region, country) of photos saved before they were supported."""
         rows = self.db.execute("SELECT asset_id FROM asset WHERE country IS NULL AND lat IS NOT NULL AND missing_at IS NULL "
                                "AND (city IS NULL OR city != '') LIMIT ?", (limit,)).fetchall()
         for r in rows:
@@ -518,7 +530,7 @@ class Worker:
                 self.mark_missing(r["asset_id"])
                 continue
             exif = a.get("exifInfo") or {}
-            # Chaîne vide si Immich n'a pas de lieu : évite de redemander à chaque cycle.
+            # Empty string if Immich has no place: avoids asking again at every cycle.
             self.db.execute("UPDATE asset SET city = ?, state = ?, country = ? WHERE asset_id = ?",
                             (exif.get("city") or "", exif.get("state"), exif.get("country"), r["asset_id"]))
         self.db.commit()
@@ -528,43 +540,54 @@ class Worker:
         return ("IMAGE", "VIDEO") if self.s.analyze_videos else ("IMAGE",)
 
     def scan(self) -> int:
-        """Récupère les assets nouveaux ou modifiés depuis le dernier scan. Un repère par type : activer les
-        vidéos plus tard les récupère toutes au cycle suivant."""
+        """Fetch the assets new or changed since the last scan. One marker per type: enabling
+        videos later fetches all of them at the next cycle."""
         n = 0
-        for kind in self.kinds():
-            key = "last_scan" if kind == "IMAGE" else "last_scan_video"
-            since = store.get_state(self.db, key)
-            started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            for a in self.client.iter_assets(updated_after=since or None, kind=kind, with_people=True):
-                self._checkpoint()   # repère non avancé : le prochain scan reprend ces photos
-                if store.upsert_asset(self.db, a, with_people=True):
-                    n += 1
-            self.db.commit()
-            store.set_state(self.db, key, started)
+        # Progress: files walked out of the total for a file source (known in advance), otherwise a counter of the
+        # photos received (Immich gives no total for "changed since").
+        walked = hasattr(self.client, "count_files")
+        if walked:
+            self.progress["total"] = self.client.count_files()
+            self.client.on_file = self._tick
+        try:
+            for kind in self.kinds():
+                key = "last_scan" if kind == "IMAGE" else "last_scan_video"
+                since = store.get_state(self.db, key)
+                started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                for a in self.client.iter_assets(updated_after=since or None, kind=kind, with_people=True):
+                    # Stopping point; marker not advanced: the next scan picks these photos up again.
+                    self._checkpoint() if walked else self._tick()
+                    if store.upsert_asset(self.db, a, with_people=True):
+                        n += 1
+                self.db.commit()
+                store.set_state(self.db, key, started)
+        finally:
+            if walked:
+                self.client.on_file = None
         return n
 
     def reconcile(self, force: bool = False) -> dict | None:
-        """Une fois par jour : liste complète des photos d'Immich (sans EXIF, donc légère) pour repérer
-        celles qui ont été supprimées ou mises à la corbeille. Elles sont masquées, pas effacées : une photo
-        restaurée réapparaît avec ses relectures. Relit aussi les personnes de chaque photo : Immich reconnaît
-        les visages après l'import, sans changer la date de modification que suit scan()."""
+        """Once a day: full list of Immich photos (without EXIF, hence light) to spot
+        those deleted or moved to the trash. They are hidden, not erased: a restored
+        photo comes back with its reviews. Also reads the people of each photo again: Immich recognises
+        faces after import, without changing the modification date that scan() follows."""
         last = float(store.get_state(self.db, "last_reconcile") or 0)
-        # Base d'avant le comptage des personnes : un passage tout de suite, sans attendre le lendemain.
+        # Database from before people were counted: one pass right away, without waiting for the next day.
         unknown = self.db.execute("SELECT 1 FROM asset WHERE people IS NULL AND missing_at IS NULL "
                                   "AND (? OR kind IS NOT 'VIDEO') LIMIT 1", (self.s.analyze_videos,)).fetchone()
         if not force and not unknown and time.time() - last < DAILY:
             return None
         self._step("reconcile")
-        # Vidéos désactivées : elles ne sont pas listées, donc masquées comme des photos disparues.
+        # Videos disabled: they are not listed, hence hidden like missing photos.
         listed = {}
         for kind in self.kinds():
             for a in self.client.iter_assets(with_exif=False, size=1000, kind=kind, with_people=True):
-                self._checkpoint()
+                self._tick()   # counter of the photos listed (no total known in advance)
                 listed[a["id"]] = len(a.get("people") or [])
         present = listed.keys()
         local = {r["asset_id"]: r["missing_at"] for r in self.db.execute("SELECT asset_id, missing_at FROM asset")}
         if not present and local:
-            log.warning("Immich ne renvoie aucune photo : contrôle des suppressions ignoré")
+            log.warning("Immich returns no photo: deletion check skipped")
             return None
         gone = [a for a, m in local.items() if a not in present and m is None]
         back = [a for a, m in local.items() if a in present and m is not None]
@@ -576,13 +599,13 @@ class Worker:
         self.db.commit()
         store.set_state(self.db, "last_reconcile", str(now))
         if gone or back:
-            log.info("photos disparues d'Immich : %d, revenues : %d", len(gone), len(back))
+            log.info("photos missing from Immich: %d, back: %d", len(gone), len(back))
         return {"missing": len(gone), "back": len(back)}
 
     def original(self, asset_id: str, kind: str | None = None) -> bytes | None:
-        """Original pour les petits sujets ; None sans la permission asset.download (on le note une fois), et
-        jamais pour une vidéo (fichier lourd, et l'image clé d'Immich est déjà à pleine taille d'aperçu). Photo
-        supprimée (is_missing) : l'exception remonte, pour que l'appelant le dise au lieu d'invoquer la permission."""
+        """Original for small subjects; None without the asset.download permission (noted once), and
+        never for a video (heavy file, and Immich's key frame is already at full preview size). Deleted
+        photo (is_missing): the exception propagates, so that the caller says so instead of blaming the permission."""
         if self._original_ok is False:
             return None
         if kind is None:
@@ -599,29 +622,29 @@ class Worker:
                 raise
             if e.response.status_code in (401, 403):
                 self._original_ok = False
-                log.info("pas de permission asset.download : petits sujets identifiés sur l'aperçu")
+                log.info("no asset.download permission: small subjects identified on the preview")
             return None
-        except (OSError, ValueError) as e:   # dossier local : RAW sans aperçu intégré, fichier illisible
-            if is_missing(e):   # fichier disparu
+        except (OSError, ValueError) as e:   # local folder: RAW without an embedded preview, unreadable file
+            if is_missing(e):   # file gone
                 raise
             return None
 
     def _blocked(self) -> set[str]:
-        """Groupes exclus de la validation automatique : recalculés au plus une fois par minute (le calcul parcourt
-        les relectures ; à chaque photo, il coûtait ~90 ms sur une base de 70 000 photos et grossissait avec elle)."""
+        """Groups excluded from auto-confirmation: recomputed at most once a minute (the computation goes through
+        the reviews; for every photo, it cost ~90 ms on a 70,000-photo database and grew with it)."""
         now = time.monotonic()
         if now - self._blocked_at > 60:
             self._blocked_set, self._blocked_at = blocked_groups(self.db, self.s), now
         return self._blocked_set
 
     def _prepare(self, asset_id: str, results: list[Analysis], threshold: float | None) -> list[tuple]:
-        """Lignes à insérer pour une analyse. Tout l'accès réseau (fiches des taxons, noms des candidats) se
-        fait ici, avant d'écrire : l'écriture qui suit est alors une transaction courte et atomique."""
-        # Détections déjà relues (validées, rejetées, supprimées) : une ré-analyse ne les recrée pas en double.
+        """Rows to insert for an analysis. All network access (taxon records, candidate names) happens
+        here, before writing: the write that follows is then a short, atomic transaction."""
+        # Detections already reviewed (confirmed, rejected, deleted): a re-analysis does not create them twice.
         reviewed = [Box(r["x"], r["y"], r["w"], r["h"], 1.0, "animal") for r in self.db.execute(
             "SELECT x, y, w, h FROM detection WHERE asset_id = ? AND status != 'pending'", (asset_id,))]
         blocked = self._blocked() if threshold is not None else set()
-        # Fiches et noms communs à récupérer (décisions, premiers candidats) : demandés en parallèle d'abord.
+        # Records and common names to fetch (decisions, top candidates): requested in parallel first.
         stale = lambda k: k and ((t := store.load_taxon(self.db, k)) is None or t.get("v", 0) < TAXON_VERSION)
         self.tx.prefetch_enrich([a.decision.gbif_key for a in results if stale(a.decision.gbif_key)]
                                 + [c.gbif_key for a in results for c in a.decision.candidates[:CANDIDATE_NAMES]
@@ -637,7 +660,7 @@ class Worker:
                 continue
             if a.domestic and self.s.domestic_animals == "skip":
                 continue
-            # Boîte non identifiée : gardée pour relecture seulement si le détecteur est sûr de lui.
+            # Unidentified box: kept for review only if the detector is confident.
             if d.rank == "none" and a.box.score < UNKNOWN_BOX_MIN_SCORE.get(a.box.source, 1.0):
                 continue
             known = store.load_taxon(self.db, d.gbif_key) if d.gbif_key else None
@@ -670,7 +693,7 @@ class Worker:
         return len(rows)
 
     def _enrich_candidates(self, cands) -> None:
-        """Noms communs des premiers candidats, pour une relecture lisible (mis en cache, sans bloquer)."""
+        """Common names of the top candidates, for a readable review (cached, non-blocking)."""
         for c in cands:
             if c.gbif_key and not store.load_taxon(self.db, c.gbif_key):
                 try:
@@ -679,27 +702,24 @@ class Worker:
                         store.save_taxon(self.db, t.gbif_key, to_json(t))
                         self.db.commit()
                 except Exception:
-                    log.debug("noms indisponibles pour %s", c.name, exc_info=True)
+                    log.debug("names unavailable for %s", c.name, exc_info=True)
 
     def _analyze_asset(self, asset_id: str, lat: float | None, lon: float | None) -> list[Analysis]:
         data = self.client.thumbnail(asset_id, self.s.thumbnail_size)
-        analyzer = self.analyzer   # chargement des modèles hors chronométrage
-        t = time.monotonic()
+        analyzer = self.analyzer
         out = analyzer.analyze(data, lat, lon, original=lambda: self.original(asset_id), fallback=self.s.full_image_fallback,
                                groups=self.s.groups)
-        self._speed.append(time.monotonic() - t)
-        del self._speed[:-50]
         return out
 
     def models_info(self) -> dict:
-        """Modèles, matériel réellement utilisé et vitesse mesurée (page Paramètres)."""
+        """Models, hardware actually used and measured speed (Settings page)."""
         hw = hardware.describe(self.s.device)
         det = getattr(self._analyzer, "detector", None)
-        speed = sorted(self._speed)
+        median = lambda v: {"median_s": round((v[(len(v) - 1) // 2] + v[len(v) // 2]) / 2, 1), "n": len(v)} if v else None
         return {
             "hardware": hw,
             "loaded": self._analyzer is not None,
-            "detector_file": True,   # ONNX fourni, sinon PyTorch (poids téléchargés au premier usage)
+            "detector_file": True,   # ONNX provided, otherwise PyTorch (weights downloaded at first use)
             "detector_onnx": self.s.detector_path.exists(),
             "detector_providers": det.providers if det else None,
             "open_detector": self.s.open_detector, "open_detector_model": self.s.open_detector_model,
@@ -707,42 +727,71 @@ class Worker:
             "original": self._original_ok,
             "analyzer_id": ANALYZER_ID,
             "taxonomy": {**self.backbone_state, "local": self.tx.local is not None},
-            # Où passe le temps : ms par photo pour chaque étape (les étapes se chevauchent, voir analyze()).
+            # Where the time goes: ms per photo for each stage (stages overlap, see analyze()).
             "stages": {k: round(sec / n * 1000) for k, (sec, n) in {**self._stages_kept, **getattr(self._analyzer, "timings", {}), **self._timings}.items() if n},
-            "speed": {"median_s": round((speed[(len(speed) - 1) // 2] + speed[len(speed) // 2]) / 2, 1), "n": len(speed)} if speed else None,
+            "speed": median(sorted(self._speed)),           # whole analysis, or its AI part (two phases)
+            "speed_geo": median(sorted(self._speed_geo)),   # geographic check, second phase
         }
 
     def queue_sql(self) -> tuple[str, tuple]:
-        """Photos à analyser (condition SQL sur asset, paramètres) : ni disparues, ni abandonnées, ni écartées
-        (vidéos si désactivées, RAW doublé d'un JPG, photos avec des personnes si SKIP_PEOPLE)."""
+        """Photos to analyse (SQL condition on asset, parameters): not missing, not given up, not skipped
+        (videos if disabled, RAW paired with a JPG, photos with people if SKIP_PEOPLE)."""
         return ("analyzed_at IS NULL AND missing_at IS NULL AND fail_count < ? AND " + SKIPPED_NOT,
                 (MAX_FAILURES, *self.s.skip_args))
 
     def pending_analysis(self) -> int:
-        if self.s.detection == "manual":   # rectangles tracés à la main seulement : pas d'analyse automatique
+        if self.s.detection == "manual":   # boxes drawn by hand only: no automatic analysis
             return 0
         where, args = self.queue_sql()
         return self.db.execute(f"SELECT count(*) FROM asset WHERE {where}", args).fetchone()[0]
 
-    def analyze(self, limit: int | None = None) -> int:
-        """Un lot de photos à analyser, les plus récentes d'abord. Une photo en échec est retentée aux cycles
-        suivants, puis abandonnée après MAX_FAILURES échecs (visible dans le dashboard, relançable).
+    def pending_ai(self) -> int:
+        """Photos of the queue still waiting for the AI part (first phase)."""
+        return self.pending_analysis() - self.pending_geo()
 
-        En chaîne, pour que le GPU attende le moins possible : les aperçus des photos suivantes se téléchargent
-        et se décodent pendant que les modèles travaillent, et les modèles traitent un groupe (fil « gpu ») pendant
-        que le groupe précédent passe la vérification géographique (GBIF) et l'enregistrement en base."""
+    def pending_geo(self) -> int:
+        """Photos of the queue whose AI result waits for the geographic check (second phase)."""
+        if self.s.detection == "manual":
+            return 0
         where, args = self.queue_sql()
+        return self.db.execute(f"SELECT count(*) FROM inferred i JOIN asset ON asset.asset_id = i.asset_id WHERE {where}",
+                               args).fetchone()[0]
+
+    @property
+    def decider(self) -> Analyzer:
+        """Analyser without models, for the second phase: rerank and decision only (GBIF, settings filters).
+        Its time goes with the worker's stages (geo)."""
+        # Same taxonomy and filters as the analyser of the first phase (one provided from outside keeps its own).
+        outside = isinstance(self._analyzer, Analyzer) and self._device is None
+        if self._decider is None:
+            self._decider = Analyzer(None, None, self._analyzer.taxonomy if outside else self.tx)
+            self._decider.timings = self._timings
+        self._decider.drop = self._analyzer.drop if outside else candidate_filter(self.s, self.tx)
+        return self._decider
+
+    def analyze(self, limit: int | None = None, infer_only: bool = False) -> int:
+        """A batch of photos to analyse, most recent first. A failed photo is retried at the following
+        cycles, then given up after MAX_FAILURES failures (visible in the dashboard, can be restarted).
+
+        Pipelined, so that the GPU waits as little as possible: previews of the next photos are downloaded
+        and decoded while the models work, and the models process a group ("gpu" thread) while
+        the previous group goes through the geographic check (GBIF) and the database write.
+        infer_only: first phase of the two-phase analysis (run_once), the models only: results stored for decide()."""
+        where, args = self.queue_sql()
+        if infer_only:
+            where += " AND NOT EXISTS (SELECT 1 FROM inferred i WHERE i.asset_id = asset.asset_id)"
         rows = self.db.execute(f"SELECT asset_id, file_name, lat, lon, kind FROM asset WHERE {where} "
                                "ORDER BY fail_count, taken_at DESC LIMIT ?", (*args, limit or self.s.batch_size)).fetchall()
         threshold = auto_threshold(self.db, self.s)
-        if self.progress["step"] != "analyze":   # run_once compte toute la file, pas seulement ce lot
+        if self.progress["step"] != "analyze":   # run_once counts the whole queue, not only this batch
             self._step("analyze", len(rows))
         if not rows:
             return 0
-        analyzer = self.analyzer   # chargement des modèles avant le chronométrage et le choix du lot
-        # GPU : plusieurs photos par passage de BioCLIP. Processeur : une à la fois (aucun gain à grouper).
+        analyzer = self.analyzer   # model loading before the timing and the batch choice
+        # GPU: several photos per BioCLIP pass. CPU: one at a time (no gain from grouping).
         chunk = self.s.gpu_batch if self._device not in (None, "cpu") and hasattr(analyzer, "analyze_many") else 1
         piped = hasattr(analyzer, "infer_many")
+        finish = self._keep if infer_only and piped else self._finish
         load = lambda r: open_image(self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)) if piped else \
             self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)
         with ThreadPoolExecutor(4, thread_name_prefix="apercu") as pool, ThreadPoolExecutor(1, thread_name_prefix="gpu") as gpu:
@@ -751,7 +800,7 @@ class Worker:
             previous = None
             try:
                 for i in range(0, len(rows), chunk):
-                    if self.analysis_paused:   # pause : le groupe en cours finit, les suivants attendent
+                    if self.analysis_paused:   # pause: the current group finishes, the next ones wait
                         break
                     group = rows[i:i + chunk]
                     pending += [fetch(r) for r in rows[i + chunk * 2:i + chunk * 3]]
@@ -770,17 +819,17 @@ class Worker:
                         continue
                     job = gpu.submit(analyzer.infer_many, self._args(items), self.s.full_image_fallback, self.s.groups) if items else None
                     if previous:
-                        self._finish(analyzer, *previous, threshold)
+                        finish(analyzer, *previous, threshold)
                     previous = (items, job)
             finally:
-                for fut in pending:   # arrêt (Interrupted) : aperçus pas encore commencés abandonnés
+                for fut in pending:   # stop (Interrupted): previews not started yet are dropped
                     fut.cancel()
                 if previous:
-                    self._finish(analyzer, *previous, threshold)
+                    finish(analyzer, *previous, threshold)
         return len(rows)
 
     def _args(self, items: list[tuple]) -> list[tuple]:
-        # kind passé tel quel : _original ne lit pas la base depuis le fil des modèles.
+        # kind passed as is: _original does not read the database from the model thread.
         return [(data, r["lat"], r["lon"], (lambda aid=r["asset_id"], kind=r["kind"]: self.original(aid, kind))) for r, data in items]
 
     def _timed(self, stage: str, t0: float, photos: int) -> None:
@@ -789,8 +838,8 @@ class Worker:
         acc[1] += photos
 
     def _finish(self, analyzer, items: list[tuple], job, threshold: float | None) -> None:
-        """Fin d'analyse d'un groupe dont les modèles ont tourné dans le fil « gpu » : décision (GBIF) et
-        enregistrement. Si le groupe a échoué, chaque photo est reprise seule."""
+        """End of the analysis of a group whose models ran in the "gpu" thread: decision (GBIF) and
+        database write. If the group failed, each photo is retried alone."""
         if not items:
             return
         try:
@@ -803,9 +852,64 @@ class Worker:
             return
         self._save(items, batch, threshold)
 
+    def _keep(self, analyzer, items: list[tuple], job, threshold: float | None = None) -> None:
+        """End of the AI part of a group (first phase): results stored for the geographic check (decide). If
+        the group failed, each photo is run again alone, so that an unreadable photo does not hold the others."""
+        if not items:
+            return
+        try:
+            out = job.result()
+        except Exception:
+            out = None
+        t0 = time.perf_counter()
+        for k, (r, data) in enumerate(items):
+            aid = r["asset_id"]
+            try:
+                res = out[k] if out is not None else \
+                    analyzer.infer_many(self._args([(r, data)]), self.s.full_image_fallback, self.s.groups)[0]
+                self.db.execute("INSERT OR REPLACE INTO inferred VALUES (?, ?, ?)", (aid, analyzer.pack(res), time.time()))
+                self.db.commit()
+            except Exception as e:
+                self._failed(aid, e)
+        self._timed("save", t0, len(items))
+        self._last_done = self._measure(self._speed, self._last_done, len(items))
+
+    def decide(self, limit: int | None = None) -> int:
+        """Second phase of the analysis: geographic check (GBIF), decision and saving of the photos whose AI result
+        is stored, without the models (the GPU is free). A photo whose check fails is counted as failed (given up
+        after MAX_FAILURES); a GBIF outage (Unavailable) stops the phase, the results wait for the next cycle."""
+        where, args = self.queue_sql()
+        # AI results of photos that left the queue (deleted, skipped, given up): no longer needed.
+        self.db.execute(f"DELETE FROM inferred WHERE asset_id NOT IN (SELECT asset_id FROM asset WHERE {where})", args)
+        self.db.commit()
+        rows = self.db.execute("SELECT a.asset_id, a.file_name, a.kind, i.data FROM inferred i JOIN asset a ON a.asset_id = i.asset_id "
+                               "ORDER BY a.taken_at DESC LIMIT ?", (limit or self.s.batch_size,)).fetchall()
+        if self.progress["step"] != "geo":   # run_once counts the whole phase, not only this batch
+            self._step("geo", len(rows))
+        threshold = auto_threshold(self.db, self.s)
+        decider = self.decider
+        for r in rows:
+            self._tick()
+            self.progress["current"] = r["file_name"]
+            try:
+                batch = decider.decide_many([decider.unpack(r["data"])], self.s.groups)
+            except Exception as e:
+                self._failed(r["asset_id"], e)
+                continue
+            self._save([(r, None)], batch, threshold, geo=True)
+        return len(rows)
+
+    def _measure(self, speed: list[float], last: float, n: int) -> float:
+        """Actual throughput (time per photo between two groups, pipelined stages included); returns the new mark."""
+        now = time.monotonic()
+        if last and now - last < 600:
+            speed += [(now - last) / n] * n
+            del speed[:-50]
+        return now
+
     def _analyze_group(self, analyzer, items: list[tuple], threshold: float | None) -> None:
-        """Analyse et enregistre un lot de photos déjà téléchargées. Si le lot échoue, chaque photo est reprise
-        seule : une photo illisible ne fait pas échouer les autres."""
+        """Analyse and save a batch of already downloaded photos. If the batch fails, each photo is retried
+        alone: an unreadable photo does not make the others fail."""
         if not items:
             return
         args = self._args(items)
@@ -822,66 +926,65 @@ class Worker:
             return
         self._save(items, batch, threshold)
 
-    def _save(self, items: list[tuple], batch: list, threshold: float | None) -> None:
+    def _save(self, items: list[tuple], batch: list, threshold: float | None, geo: bool = False) -> None:
         t0 = time.perf_counter()
         for (r, _), results in zip(items, batch):
             aid = r["asset_id"]
             try:
                 new = self._prepare(aid, results, threshold)
-                # Ré-analyse : on remplace les détections automatiques encore en attente, jamais les relues.
+                # Re-analysis: replace the automatic detections still pending, never the reviewed ones.
                 self.db.execute("DELETE FROM detection WHERE asset_id = ? AND source = 'auto' AND status = 'pending'", (aid,))
                 self._insert(new)
                 self.db.execute("UPDATE asset SET analyzed_at = ?, analyzer = ?, fail_count = 0, last_error = NULL "
                                 "WHERE asset_id = ?", (time.time(), ANALYZER_ID, aid))
+                self.db.execute("DELETE FROM inferred WHERE asset_id = ?", (aid,))
                 self.db.commit()
             except Exception as e:
                 self._failed(aid, e)
         self._timed("save", t0, len(items))
-        # Débit réel (photos terminées par seconde), étapes en chaîne comprises.
-        now = time.monotonic()
-        if self._last_done and now - self._last_done < 600:
-            self._speed += [(now - self._last_done) / len(items)] * len(items)
-            del self._speed[:-50]
-        self._last_done = now
+        if geo:   # second phase: its own speed (the AI part is measured by _keep)
+            self._last_done_geo = self._measure(self._speed_geo, self._last_done_geo, len(items))
+        else:
+            self._last_done = self._measure(self._speed, self._last_done, len(items))
 
     def _failed(self, aid: str, e: BaseException) -> None:
-        """Photo en échec : comptée (abandonnée après MAX_FAILURES), ou masquée si elle a disparu d'Immich."""
+        """Failed photo: counted (given up after MAX_FAILURES), or hidden if it disappeared from Immich."""
         self.db.rollback()
         if is_missing(e):
             self.mark_missing(aid)
             return
         if is_transient(e):
-            # Réseau, Immich ou GBIF momentanément indisponible (429 : trop de requêtes) : la photo n'y est pour
-            # rien, elle n'est pas comptée en échec. L'analyse s'arrête et reprend au cycle suivant.
+            # Network, Immich or GBIF temporarily unavailable (429: too many requests): the photo is not
+            # to blame, it is not counted as failed. The analysis stops and resumes at the next cycle.
             raise Unavailable(f"{type(e).__name__}: {e}"[:300]) from e
-        log.error("analyse impossible pour %s", aid, exc_info=e)
+        log.error("analysis failed for %s", aid, exc_info=e)
         self.db.execute("UPDATE asset SET fail_count = fail_count + 1, last_error = ? WHERE asset_id = ?",
                         (f"{type(e).__name__}: {e}"[:500], aid))
         self.db.commit()
 
     def apply_skips(self) -> int:
-        """Relie les RAW à leur JPG, puis retire les détections automatiques encore en attente des photos
-        écartées (RAW doublé, personnes si SKIP_PEOPLE), analysées avant que la règle ne s'applique.
-        Les détections relues restent. Ces photos repassent « à analyser » : si la règle est levée
-        (SKIP_PEOPLE désactivé, JPG supprimé), elles sont analysées."""
+        """Link RAW files to their JPG, then remove the automatic detections still pending from skipped
+        photos (RAW pair, people if SKIP_PEOPLE), analysed before the rule applied.
+        Reviewed detections stay. These photos go back to "to analyse": if the rule is lifted
+        (SKIP_PEOPLE disabled, JPG deleted), they are analysed."""
         store.link_raw_twins(self.db)
         skipped = f"SELECT asset_id FROM asset WHERE NOT ({SKIPPED_NOT})"
         args = self.s.skip_args
         n = self.db.execute(f"DELETE FROM detection WHERE source = 'auto' AND status = 'pending' AND asset_id IN ({skipped}) "
                             "AND asset_id IN (SELECT asset_id FROM asset WHERE kind IS NOT 'VIDEO')", args).rowcount
-        if not self.s.full_image_fallback:   # image entière classée sans rien de détecté : retirée si le réglage l'exclut
+        if not self.s.full_image_fallback:   # whole image classified with nothing detected: removed if the setting excludes it
             n += self.db.execute("DELETE FROM detection WHERE source = 'auto' AND status = 'pending' AND detector = 'image'").rowcount
         n += drop_unwanted(self.db, self.s)
         self.db.execute(f"UPDATE asset SET analyzed_at = NULL WHERE analyzed_at IS NOT NULL AND kind IS NOT 'VIDEO' "
                         f"AND asset_id IN ({skipped}) AND NOT EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = asset.asset_id)", args)
         self.db.commit()
         if n:
-            log.info("%d détection(s) en attente retirée(s) : photos écartées (personnes, RAW doublé d'un JPG), image "
-                     "entière sans sujet détecté, groupe non cherché ou détection manuelle", n)
+            log.info("%d pending detection(s) removed: skipped photos (people, RAW paired with a JPG), whole "
+                     "image without a detected subject, group not searched or manual detection", n)
         return n
 
     def prune(self) -> int:
-        """Filtres de candidats appliqués aux détections en attente, si les paramètres ont changé."""
+        """Candidate filters applied to pending detections, if the settings changed."""
         key = json.dumps([self.s.exclude_extinct, self.s.hide_absent])
         if store.get_state(self.db, "pruned_with") == key:
             return 0
@@ -891,20 +994,20 @@ class Worker:
         return n
 
     def start_prune(self) -> bool:
-        """prune() en arrière-plan (après un changement de paramètres) ; False si un cycle tourne déjà :
-        il sera appliqué à la fin de ce cycle-là ou au suivant."""
+        """prune() in the background (after a settings change); False if a cycle is already running:
+        it will be applied at the end of that cycle or the next one."""
         if not self.cycle_lock.acquire(blocking=False):
             return False
         def run():
             try:
-                self._cycle_manual = False   # arrêté par un réglage : le prochain cycle refait prune()
+                self._cycle_manual = False   # stopped by a setting: the next cycle runs prune() again
                 self.progress.update(running=True, started=time.time(), finished=None, error=None, manual=True)
-                log.info("paramètres appliqués à %d détection(s) en attente", self.prune())
+                log.info("settings applied to %d pending detection(s)", self.prune())
             except Interrupted:
-                log.info("application des paramètres interrompue : reprise au prochain cycle")
+                log.info("applying settings interrupted: resumed at the next cycle")
             except Exception:
-                self.db.rollback()   # pas de transaction laissée ouverte (voir run_once)
-                log.exception("application des paramètres en échec")
+                self.db.rollback()   # no transaction left open (see run_once)
+                log.exception("applying settings failed")
             finally:
                 self.progress.update(running=False, step=None, finished=time.time())
                 self.cycle_lock.release()
@@ -912,10 +1015,10 @@ class Worker:
         return True
 
     def reanalyze(self, asset_id: str) -> int:
-        """Ré-analyse immédiate d'une photo. Comme une remise en file : les détections relues ou dessinées restent,
-        seules les propositions à relire sont remplacées. Rien n'est effacé tant que l'analyse n'a pas abouti."""
+        """Immediate re-analysis of a photo. Like putting it back in the queue: reviewed or drawn detections stay,
+        only the proposals awaiting review are replaced. Nothing is erased until the analysis has succeeded."""
         if not self.cycle_lock.acquire(timeout=5):
-            raise Busy("un cycle de synchronisation est en cours")
+            raise Busy("a synchronisation cycle is running")
         self._cycle_manual = False
         try:
             r = self.db.execute("SELECT lat, lon FROM asset WHERE asset_id = ?", (asset_id,)).fetchone()
@@ -925,6 +1028,7 @@ class Worker:
             rows = self._prepare(asset_id, results, auto_threshold(self.db, self.s))
             try:
                 self.db.execute("DELETE FROM detection WHERE asset_id = ? AND status = 'pending' AND source != 'manual'", (asset_id,))
+                self.db.execute("DELETE FROM inferred WHERE asset_id = ?", (asset_id,))
                 n = self._insert(rows)
                 self.db.execute("UPDATE asset SET analyzed_at = ?, analyzer = ?, fail_count = 0, last_error = NULL "
                                 "WHERE asset_id = ?", (time.time(), ANALYZER_ID, asset_id))
@@ -940,7 +1044,7 @@ class Worker:
         return requeue(self.db, scope)
 
     def undo_summary(self, db) -> dict:
-        """Ce que le retrait toucherait (traces en base, sans appeler Immich) et où il en est."""
+        """What the removal would touch (traces in the database, without calling Immich) and how far it got."""
         q = lambda sql: db.execute(sql).fetchone()[0]
         return {"photos": q("SELECT count(DISTINCT asset_id) FROM written WHERE kind IN ('tag_asset', 'description')"),
                 "tags": q("SELECT count(*) FROM written WHERE kind = 'tag'"),
@@ -954,10 +1058,10 @@ class Worker:
         with self._idle():
             store.set_state(self.db, store.WRITES_PAUSED, "0")
             self.db.commit()
-        log.info("écritures reprises : les photos validées seront réécrites aux prochains cycles")
+        log.info("writes resumed: confirmed photos will be written again at the next cycles")
 
     def start_uninstall(self, total: int) -> None:
-        """Retrait en arrière-plan : le cycle en cours est arrêté d'abord (_idle), une seule écriture à la fois."""
+        """Removal in the background: the running cycle is stopped first (_idle), one write at a time."""
         self.undo = {"state": "running", "done": 0, "total": total, "stats": None, "error": None, "remaining": 0}
 
         def tick():
@@ -966,45 +1070,51 @@ class Worker:
             self.last_activity = time.time()
 
         def run():
-            log.warning("retrait demandé : %d photo(s) à nettoyer dans Immich", total)
+            log.warning("removal requested: %d photo(s) to clean up in Immich", total)
             try:
                 with self._idle():
                     syncer = Syncer(self.db, self.client, self.s.tag_root, self.s.names_lang, self.s.write_description,
                                     write_gap=getattr(self.client, "write_gap", WRITE_GAP), checkpoint=tick)
                     stats = syncer.uninstall()
                 self.undo.update(state="done", stats=asdict(stats), remaining=syncer.remaining)
-                log.warning("retrait terminé : %s, photos restantes : %d", stats, syncer.remaining)
+                log.warning("removal finished: %s, remaining photos: %d", stats, syncer.remaining)
             except Interrupted:
                 self.undo.update(state="interrupted")
-                log.warning("retrait interrompu : le relancer reprend où il en était")
+                log.warning("removal interrupted: running it again resumes where it stopped")
             except Exception as e:
                 self.undo.update(state="failed", error=str(e)[:300])
-                log.exception("retrait en échec : le relancer reprend où il en était")
+                log.exception("removal failed: running it again resumes where it stopped")
 
-        threading.Thread(target=run, daemon=True, name="retrait").start()
+        threading.Thread(target=run, daemon=True, name="removal").start()
 
     def sync(self):
         if self.writes_paused():
-            log.info("écritures suspendues après un retrait : rien n'est écrit")
+            log.info("writes suspended after a removal: nothing is written")
             return None
         if not self.client.writable:
-            log.warning("serveur Immich non validé : synchronisation suspendue (lecture seule)")
+            log.warning("Immich server not validated: synchronisation suspended (read-only)")
             return None
         last_full = float(store.get_state(self.db, "last_full_sync") or 0)
         full = time.time() - last_full >= DAILY
         syncer = Syncer(self.db, self.client, self.s.tag_root, self.s.names_lang, self.s.write_description,
-                        write_gap=getattr(self.client, "write_gap", WRITE_GAP), checkpoint=self._checkpoint)
+                        write_gap=getattr(self.client, "write_gap", WRITE_GAP), checkpoint=self._checkpoint,
+                        progress=self._sync_progress)
         try:
             stats = syncer.sync_all(full=full)
-        finally:   # même après un arrêt (Interrupted)
+        finally:   # even after a stop (Interrupted)
             for aid in syncer.missing:
                 self.mark_missing(aid)
         if full and not self.client.dry_run:
             store.set_state(self.db, "last_full_sync", str(time.time()))
         return stats
 
+    def _sync_progress(self, done: int, total: int, phases: int) -> None:
+        """Progress of the tag writing (Syncer): done and total in work units, phases units per photo (read,
+        tags, description); the dashboard shows photos and computes the remaining time on the units."""
+        self.progress.update(done=done, total=total, scale=phases)
+
     def ensure_quality(self, asset_id: str) -> float:
-        """Qualité de l'image (couleurs, netteté), calculée une fois sur la vignette puis gardée en base."""
+        """Image quality (colours, sharpness), computed once on the thumbnail then kept in the database."""
         row = self.db.execute("SELECT quality FROM image_quality WHERE asset_id = ?", (asset_id,)).fetchone()
         if row:
             return row["quality"]
@@ -1014,10 +1124,10 @@ class Worker:
         return q
 
     def prefetch(self, candidates: int = 3, limit: int = 400) -> int:
-        """Met en local tout ce que le dashboard affiche : fiche du taxon (noms, liens), aire de répartition
-        et article Wikipédia, pour les taxons validés et les premiers candidats des détections à relire,
-        et qualité des photos validées (choix des photos de couverture).
-        Ainsi la visionneuse, les pages espèce et les cartes n'attendent plus le réseau."""
+        """Store locally everything the dashboard shows: taxon record (names, links), range map
+        and Wikipedia article, for confirmed taxa and the top candidates of detections awaiting review,
+        and quality of confirmed photos (choice of cover photos).
+        This way the viewer, species pages and maps no longer wait for the network."""
         wanted: dict[int, str] = {}
         for r in self.db.execute("SELECT DISTINCT taxon_key FROM detection WHERE status = 'confirmed' AND taxon_key IS NOT NULL"):
             t = store.load_taxon(self.db, r["taxon_key"])
@@ -1048,31 +1158,31 @@ class Worker:
                 url = (t or {}).get("wikipedia", {}).get(self.s.names_lang)
                 if url:
                     wiki.article(self.tx, url)   # mis en cache (7 jours)
-            except httpx.TransportError as e:   # réseau coupé : une ligne, et le reste attend le prochain cycle
-                log.warning("données locales incomplètes pour %s, reprise au prochain cycle : %s", key, str(e) or type(e).__name__)
+            except httpx.TransportError as e:   # network down: one line, and the rest waits for the next cycle
+                log.warning("local data incomplete for %s, resumed at the next cycle: %s", key, str(e) or type(e).__name__)
                 break
             except httpx.HTTPError as e:
-                log.warning("données locales incomplètes pour %s : %s", key, e)
+                log.warning("local data incomplete for %s: %s", key, e)
             except Exception:
-                log.warning("données locales incomplètes pour %s", key, exc_info=True)
+                log.warning("local data incomplete for %s", key, exc_info=True)
         for aid in no_quality:
             self._tick()
             try:
                 self.ensure_quality(aid)
             except Exception:
-                log.debug("qualité indisponible pour %s", aid, exc_info=True)
+                log.debug("quality unavailable for %s", aid, exc_info=True)
         return len(todo)
 
     def run_once(self, manual: bool = False) -> dict:
-        """Un cycle complet. Manuel (bouton « Synchroniser ») : analyse aussi hors de la fenêtre horaire.
-        L'analyse enchaîne les lots jusqu'à vider la file, dans la limite de ANALYSIS_MAX_MINUTES ; s'il en
-        reste, report['more'] le signale et la boucle relance un cycle sans attendre."""
+        """A full cycle. Manual ("Sync" button): also analyses outside the time window.
+        The analysis runs batch after batch until the queue is empty, within ANALYSIS_MAX_MINUTES; if any
+        remain, report['more'] says so and the loop starts another cycle without waiting."""
         if not self.configured:
             return {"configured": False}
         if not self.cycle_lock.acquire(blocking=False):
             return {"busy": True}
         self._cycle_manual = manual
-        self.progress.update(running=True, started=time.time(), finished=None, error=None, manual=manual)
+        self.progress.update(running=True, started=time.time(), finished=None, error=None, manual=manual, phases=None)
         report: dict = {"at": time.time(), "manual": manual, "dry_run": self.s.dry_run}
         try:
             self._step("check")
@@ -1083,30 +1193,62 @@ class Worker:
             report["skipped"] = self.apply_skips()
             self._soft(report, "taxa_refreshed", self.refresh_taxa)
             self._soft(report, "places_refreshed", self.refresh_places)
-            report["analyzed"] = 0
-            deadline = time.monotonic() + self.s.analysis_max_minutes * 60
-            analyzing = lambda: (manual or in_window(self.s.analysis_window)) and not self.analysis_paused and self.pending_analysis()
-            if analyzing():
+            report["analyzed"] = report["inferred"] = 0
+            # Two phases with the real analyser: the AI part for the whole queue (GPU at full speed), then the GPU is
+            # released and the geographic check (GBIF, network) runs on the stored results. An analyser provided
+            # from outside (tests) analyses in one go.
+            two = self._analyzer is None or isinstance(self._analyzer, Analyzer)
+            allowed = lambda: manual or in_window(self.s.analysis_window)
+            todo = self.pending_ai if two else self.pending_analysis
+            ai = lambda: allowed() and not self.analysis_paused and todo()
+            if ai():
                 if self._analyzer is None:
-                    # Premier lancement : modèles téléchargés (~5 Go) puis chargés, plusieurs minutes possibles.
+                    # First launch: models downloaded (~5 GB) then loaded, possibly several minutes.
                     self._step("models")
                     self._wait_models()
-                self._step("analyze", self.pending_analysis())
-            while analyzing():
+                n = todo()
+                self._step("analyze", n)
+                if two:   # two bars: AI part, and geographic check of everything that will reach it
+                    self.progress["phases"] = {"analyze": [0, n], "geo": [0, n + self.pending_geo()]}
+            deadline = time.monotonic() + self.s.analysis_max_minutes * 60
+            while ai():
                 if time.monotonic() >= deadline:
                     report["more"] = True
                     break
                 try:
-                    report["analyzed"] += self.analyze()
+                    n = self.analyze(infer_only=two)
                 except Unavailable as e:
-                    log.warning("analyse suspendue jusqu'au prochain cycle : %s", e)
+                    log.warning("analysis suspended until the next cycle: %s", e)
                     report["paused"] = str(e)
                     break
-            if self.analysis_paused:
-                # Pause en plein groupe : le groupe gardait les modèles, la mémoire du GPU n'est rendue qu'ici.
+                report["inferred" if two else "analyzed"] += n
+                if not n:
+                    break
+            if self.analysis_paused or (two and self._analyzer is not None and not self.pending_ai()):
+                # Pause, or AI part done: GPU memory given back now, not after models_idle_minutes. The
+                # geographic check needs no model.
                 self.unload_models()
+            if two and allowed() and self.pending_geo():
+                n = self.pending_geo()
+                self._step("geo", n)
+                phases = self.progress.get("phases") or {"analyze": [0, 0]}
+                self.progress["phases"] = {**phases, "geo": [0, n]}
+                deadline = time.monotonic() + self.s.analysis_max_minutes * 60
+                while self.pending_geo():
+                    if time.monotonic() >= deadline:
+                        report["more"] = True
+                        break
+                    try:
+                        n = self.decide()
+                    except Unavailable as e:
+                        log.warning("geographic check suspended until the next cycle: %s", e)
+                        report["paused"] = str(e)
+                        break
+                    report["analyzed"] += n
+                    if not n:
+                        break
             self._soft(report, "pruned", self.prune)
-            # Séries (rafales) et lissage des propositions à relire d'une même série (series.py).
+            # Series (bursts) and smoothing of the proposals awaiting review within a series (series.py).
             report["series"] = series.assign(self.db)
             report["smoothed"] = series.smooth(self.db, lambda k: store.load_taxon(self.db, k))
             self._step("sync")
@@ -1114,8 +1256,8 @@ class Worker:
             self._soft(report, "prefetched", self.prefetch)
             try:
                 self.backup()
-            except Exception:   # disque plein, droits : signalé, sans bloquer le cycle
-                log.exception("sauvegarde de la base impossible")
+            except Exception:   # disk full, permissions: reported, without blocking the cycle
+                log.exception("database backup failed")
             report["failed"] = self.db.execute("SELECT count(*) FROM asset WHERE fail_count >= ? AND missing_at IS NULL",
                                                (MAX_FAILURES,)).fetchone()[0]
             store.set_state(self.db, "last_run", json.dumps(report))
@@ -1123,15 +1265,15 @@ class Worker:
                 self.progress["error"] = " ; ".join(f"{k} : {v}" for k, v in report["errors"].items())
             return report
         except Interrupted:
-            # Arrêt demandé par un réglage du dashboard (_idle) : rien d'écrit à moitié n'est gardé, le cycle repart
-            # juste après le changement.
+            # Stop requested by a dashboard setting (_idle): nothing half written is kept, the cycle restarts
+            # right after the change.
             self.db.rollback()
             report["interrupted"] = True
-            log.info("cycle arrêté pour appliquer un réglage du dashboard")
+            log.info("cycle stopped to apply a dashboard setting")
             return report
         except Exception as e:
-            # Écritures du cycle pas encore validées (scan coupé par une panne d'Immich…) : annulées, sinon la
-            # transaction resterait ouverte et bloquerait les écritures du dashboard jusqu'au cycle suivant.
+            # Cycle writes not committed yet (scan cut short by an Immich outage…): rolled back, otherwise the
+            # transaction would stay open and block the dashboard writes until the next cycle.
             self.db.rollback()
             self.progress["error"] = str(e)
             raise
@@ -1144,81 +1286,81 @@ class Worker:
         return self._analyzer is not None
 
     def _soft(self, report: dict, key: str, step) -> None:
-        """Étape du cycle dont la panne (GBIF, Immich) ne prive pas le cycle des suivantes : signalée dans le rapport,
-        retentée au prochain cycle. Seules ses écritures à elle sont annulées, le travail déjà fait est validé avant."""
+        """Cycle stage whose failure (GBIF, Immich) does not deprive the cycle of the following ones: reported in the report,
+        retried at the next cycle. Only its own writes are rolled back, the work already done is committed before."""
         self.db.commit()
         try:
             report[key] = step()
         except Exception as e:
             self.db.rollback()
-            log.exception("étape %s du cycle en échec", key)
+            log.exception("cycle stage %s failed", key)
             report.setdefault("errors", {})[key] = str(e)
 
     def _wait_models(self) -> None:
-        """Chargement des modèles (téléchargement compris) dans un fil à part, que le cycle attend en restant
-        interruptible : un réglage du dashboard n'attend pas la fin d'un téléchargement de plusieurs Go. Un arrêt
-        n'interrompt pas le chargement, repris tel quel au cycle suivant."""
+        """Model loading (download included) in a separate thread, which the cycle waits for while staying
+        interruptible: a dashboard setting does not wait for the end of a multi-GB download. A stop
+        does not interrupt the loading, which is picked up as is at the next cycle."""
         if self._loading is None or not self._loading.is_alive():
             self._load_error = None
 
             def load():
                 try:
                     self.analyzer
-                    if self.analysis_paused:   # pause pendant le chargement : rien ne garde les modèles en mémoire
+                    if self.analysis_paused:   # paused during loading: nothing keeps the models in memory
                         self.unload_models()
                 except BaseException as e:
                     self._load_error = e
 
-            self._loading = threading.Thread(target=load, daemon=True, name="modeles")
+            self._loading = threading.Thread(target=load, daemon=True, name="models")
             self._loading.start()
-        while self._loading.is_alive() and not self.analysis_paused:   # pause : le reste du cycle n'attend pas
+        while self._loading.is_alive() and not self.analysis_paused:   # pause: the rest of the cycle does not wait
             self._checkpoint()
             self._loading.join(1)
         if self._load_error is not None:
             raise self._load_error
 
     def pause_analysis(self, paused: bool) -> None:
-        """Bouton pause/reprise de l'analyse. Pause : le groupe de photos en cours finit, puis les modèles quittent
-        la mémoire (GPU comme processeur). Reprise : l'analyse repart aussitôt, même hors de la fenêtre horaire,
-        comme avec « Synchroniser ». Le reste du cycle (nouvelles photos, tags) continue pendant la pause."""
+        """Analysis pause/resume button. Pause: the current group of photos finishes, then the models leave
+        memory (GPU as well as CPU). Resume: the analysis restarts right away, even outside the time window,
+        as with "Sync". The rest of the cycle (new photos, tags) goes on during the pause."""
         self.analysis_paused = paused
         if paused:
             self.unload_models()
-        elif not self.start_manual():   # cycle en cours : la boucle en relance un, manuel, dès qu'il finit
+        elif not self.start_manual():   # cycle running: the loop starts a manual one as soon as it ends
             self._resume_manual = self._resume_pending = True
             self._wake.set()
 
     def unload_models(self) -> None:
         with self._analyzer_lock:
-            if self._analyzer is None or self._device is None:   # analyseur fourni de l'extérieur (tests)
+            if self._analyzer is None or self._device is None:   # analyser provided from outside (tests)
                 return
             device, self._stages_kept = self._device, {**self._stages_kept, **getattr(self._analyzer, "timings", {})}
             self._analyzer = None
         hardware.release(device)
-        log.info("analyse en pause : modèles retirés de la mémoire")
+        log.info("analysis paused: models removed from memory")
 
     def start_manual(self) -> bool:
-        """Lance un cycle complet en arrière-plan ; False si un cycle tourne déjà."""
+        """Start a full cycle in the background; False if a cycle is already running."""
         if self.cycle_lock.locked():
             return False
         def run():
             try:
                 log.info("synchronisation manuelle : %s", self.run_once(manual=True))
             except Exception:
-                log.exception("synchronisation manuelle en échec")
+                log.exception("manual synchronisation failed")
         threading.Thread(target=run, daemon=True, name="sync-manuelle").start()
         return True
 
     def install_backbone(self) -> None:
-        """Taxonomie GBIF locale : téléchargée et construite si elle manque ou ne correspond plus à la version de
-        l'API (en tâche de fond ; en attendant, l'API sert comme avant)."""
+        """Local GBIF taxonomy: downloaded and built if it is missing or no longer matches the API
+        version (in the background; meanwhile, the API is used as before)."""
         if not self.s.gbif_local:
             return
         try:
             backbone.install(self.s.data_dir, self.s.user_agent, lambda state, version: self.backbone_state.update(state=state, version=version))
         except Exception as e:
             self.backbone_state.update(state="error", error=str(e)[:200])
-            log.exception("taxonomie GBIF locale indisponible, l'API GBIF reste utilisée")
+            log.exception("local GBIF taxonomy unavailable, the GBIF API is still used")
 
     def loop(self) -> None:
         self.loop_started = True
@@ -1227,21 +1369,21 @@ class Worker:
         while True:
             self.last_activity = time.time()
             more = False
-            self._wake.clear()   # avant le cycle : un réveil demandé pendant celui-ci relance aussitôt le suivant
+            self._wake.clear()   # before the cycle: a wake-up requested during it starts the next one right away
             try:
                 manual, self._resume_manual = self._resume_manual, False
                 resume, self._resume_pending = self._resume_pending, False
                 report = self.run_once(manual=manual)
-                # Reprise après un réglage, mais un autre réglage occupe encore le cycle : on réessaie vite, en
-                # gardant le mode manuel.
+                # Resuming after a setting, but another setting still holds the cycle: retry soon,
+                # keeping manual mode.
                 retry = bool(report.get("busy")) and resume
                 if retry:
                     self._resume_manual, self._resume_pending = self._resume_manual or manual, True
-                # Pas encore de connexion à Immich : on revérifie vite, pour démarrer dès qu'elle est saisie.
+                # No Immich connection yet: check again soon, to start as soon as it is entered.
                 more = bool(report.get("more")) or report.get("configured") is False or retry
                 if report.get("configured") is not False and not report.get("busy"):
                     log.info("cycle : %s", report)
             except Exception:
-                log.exception("cycle en échec")
-            # Attente interrompue par _idle : cycle arrêté pour un réglage, relancé aussitôt.
+                log.exception("cycle failed")
+            # Wait interrupted by _idle: cycle stopped for a setting, restarted right away.
             self._wake.wait(5 if more else self.s.interval_minutes * 60)

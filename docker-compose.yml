@@ -1,10 +1,10 @@
-# Déploiement Docker (Linux, Unraid, Synology, Portainer…) : docker compose up -d, avec l'image toute faite de GHCR.
-# Construire l'image soi-même à la place : docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
-# TrueNAS SCALE : voir deploy/truenas/.
-# Totalement séparé d'Immich : il ne lui parle que par son API, avec une clé restreinte.
+# Docker deployment (Linux, Unraid, Synology, Portainer…): docker compose up -d, with the ready-made image from GHCR.
+# Build the image yourself instead: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# TrueNAS SCALE: see deploy/truenas/.
+# Fully separate from Immich: it only talks to it through its API, with a restricted key.
 #
-# Matériel de calcul : variable GPU dans .env, remplie par ./detect-gpu.sh (cuda13, cuda12, rocm, xpu ou cpu).
-# Elle choisit à la fois l'image (taxonero:<version>-<GPU>) et l'accès au matériel (hwaccel.yml).
+# Compute hardware: GPU variable in .env, filled in by ./detect-gpu.sh (cuda13, cuda12, rocm, xpu or cpu).
+# It chooses both the image (taxonero:<version>-<GPU>) and the hardware access (hwaccel.yml).
 
 services:
   taxonero:
@@ -15,21 +15,21 @@ services:
     container_name: taxonero
     env_file: .env
     environment:
-      DASHBOARD_PORT: "8765"      # port dans le conteneur, toujours le même ; DASHBOARD_PORT de .env : port publié
-    # TrueNAS SCALE : les apps tournent souvent en 568:568 ; mettre ici l'uid propriétaire de ./data.
+      DASHBOARD_PORT: "8765"      # port in the container, always the same; DASHBOARD_PORT in .env: published port
+    # TrueNAS SCALE: apps often run as 568:568; put here the uid owning ./data.
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
-      - ./data:/data              # base SQLite, cache GBIF, modèles Hugging Face (~5 Go)
-      # - /chemin/vers/mes/photos:/photos   # SOURCE=local : photos d'un dossier au lieu d'Immich
+      - ./data:/data              # SQLite database, GBIF cache, Hugging Face models (~5 GB)
+      # - /path/to/my/photos:/photos   # SOURCE=local: photos from a folder instead of Immich
     ports:
-      # Dashboard (protégé par DASHBOARD_PASSWORD), en HTTP : mot de passe en clair sur le réseau. Hors réseau de
-      # confiance, passer par un proxy TLS et publier sur "127.0.0.1:${DASHBOARD_PORT:-8765}:8765".
+      # Dashboard (protected by DASHBOARD_PASSWORD), over HTTP: password in clear text on the network. Outside a trusted
+      # network, go through a TLS proxy and publish on "127.0.0.1:${DASHBOARD_PORT:-8765}:8765".
       - "${DASHBOARD_PORT:-8765}:8765"
     restart: unless-stopped
-    mem_limit: ${MEM_LIMIT:-8g}   # au-delà, seul ce conteneur est arrêté, pas Immich ni le reste du serveur
-    # Pour joindre Immich par son nom (http://immich-server:2283), rejoindre son réseau Docker : décommenter
-    # ces lignes et les deux du bas (nom du réseau : docker network ls, souvent immich_default). Sinon,
-    # régler dans le dashboard l'adresse de la machine et le port publié d'Immich (http://192.168.1.10:2283).
+    mem_limit: ${MEM_LIMIT:-8g}   # beyond it, only this container is stopped, not Immich or the rest of the server
+    # To reach Immich by its name (http://immich-server:2283), join its Docker network: uncomment
+    # these lines and the two at the bottom (network name: docker network ls, often immich_default). Otherwise,
+    # set in the dashboard the address of the machine and the published Immich port (http://192.168.1.10:2283).
     # networks: [default, immich]
 
 # networks:

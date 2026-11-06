@@ -13,19 +13,19 @@ data/
 models/
 *.egg-info/
 
-# Notes personnelles
+# Personal notes
 ToDo
 
-# Édition de bureau : sorties de PyInstaller et ExifTool récupéré
+# Desktop edition: PyInstaller outputs and fetched ExifTool
 packaging/build/
 build/
 dist/
 
-# Archives des sources faites à la main
+# Source archives made by hand
 *.tar.gz
 
-# Dossier prêt à publier (dépôt git neuf, poussé par Dan)
+# Folder ready to publish (fresh git repository, pushed by Dan)
 publication/
 
-# Paquets de bureau faits à la main (packaging/linux-packages.sh, ISCC)
+# Desktop packages made by hand (packaging/linux-packages.sh, ISCC)
 out/

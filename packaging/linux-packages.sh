@@ -1,11 +1,11 @@
 #!/bin/sh
-# Paquets Linux du lanceur de bureau : .deb (Debian, Ubuntu, Mint), .rpm (Fedora, openSUSE) et AppImage (toute
-# distribution). Ils contiennent le même lanceur (dist/taxonero, fait par PyInstaller), une entrée de menu et l'icône.
+# Linux packages of the desktop launcher: .deb (Debian, Ubuntu, Mint), .rpm (Fedora, openSUSE) and AppImage (any
+# distribution). They contain the same launcher (dist/taxonero, made by PyInstaller), a menu entry and the icon.
 #
 #   sh packaging/linux-packages.sh dist/taxonero 0.1.0 out/
 #
-# Demande dpkg-deb, rpmbuild et file (Ubuntu : apt install rpm file). L'architecture est celle de la machine (x86_64 ou aarch64).
-# appimagetool et le runtime AppImage sont téléchargés à une version figée, empreintes vérifiées.
+# Needs dpkg-deb, rpmbuild and file (Ubuntu: apt install rpm file). The architecture is that of the machine (x86_64 or aarch64).
+# appimagetool and the AppImage runtime are downloaded at a pinned version, checksums verified.
 set -eu
 bin=$1; version=$2; out=$3
 here=$(cd "$(dirname "$0")" && pwd)
@@ -13,22 +13,22 @@ arch=$(uname -m)
 case "$arch" in
   x86_64)  deb_arch=amd64 ;;
   aarch64) deb_arch=arm64 ;;
-  *) echo "architecture non prise en charge : $arch" >&2; exit 1 ;;
+  *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# Arborescence commune : /usr/bin/taxonero, entrée de menu, icône.
+# Common tree: /usr/bin/taxonero, menu entry, icon.
 root=$work/root
 install -Dm755 "$bin" "$root/usr/bin/taxonero"
 install -Dm644 "$here/icons/taxonero.png" "$root/usr/share/icons/hicolor/512x512/apps/taxonero.png"
 install -Dm644 "$here/icons/taxonero.svg" "$root/usr/share/icons/hicolor/scalable/apps/taxonero.svg"
 install -Dm644 "$here/taxonero.desktop" "$root/usr/share/applications/taxonero.desktop"
 
-# Bibliothèques du système qu'utilise la fenêtre de l'application (Qt WebEngine, installé au premier lancement) et
-# qui manquent parfois sur une installation de bureau : recommandées, pas imposées.
+# System libraries used by the application window (Qt WebEngine, installed at first launch) and
+# sometimes missing on a desktop installation: recommended, not required.
 maintainer="Dan <245003188+adn-dan@users.noreply.github.com>"
 summary="Self-hosted AI species identification for your photos"
 
@@ -80,7 +80,7 @@ cp -a $root/. %{buildroot}/
 /usr/share/icons/hicolor/512x512/apps/taxonero.png
 /usr/share/icons/hicolor/scalable/apps/taxonero.svg
 EOF
-# Lanceur PyInstaller : ne pas le retoucher (strip ou build-id le casseraient).
+# PyInstaller launcher: do not touch it (strip or build-id would break it).
 rpmbuild -bb --quiet --define "_topdir $work/rpm" --define "_build_id_links none" \
   --define "__brp_strip /bin/true" --define "__os_install_post %{nil}" "$work/rpm/SPECS/taxonero.spec"
 cp "$work/rpm/RPMS/$arch/taxonero-$version-1.$arch.rpm" "$out/"
@@ -100,7 +100,7 @@ cp -a "$root/." "$app/"
 cp "$here/taxonero.desktop" "$app/"
 cp "$here/icons/taxonero.png" "$app/taxonero.png"
 ln -s usr/bin/taxonero "$app/AppRun"
-# --appimage-extract-and-run : sans FUSE (conteneurs, machines de construction).
+# --appimage-extract-and-run: without FUSE (containers, build machines).
 ARCH=$arch "$work/appimagetool" --appimage-extract-and-run --no-appstream --runtime-file "$work/runtime" \
   "$app" "$out/Taxonero-$version-$arch.AppImage" >/dev/null 2>&1
 ls -la "$out"

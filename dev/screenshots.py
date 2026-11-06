@@ -1,7 +1,7 @@
-"""Captures d'écran du README (docs/screenshots) et leurs crédits (docs/screenshots/CREDITS.md).
+"""README screenshots (docs/screenshots) and their credits (docs/screenshots/CREDITS.md).
 
-Travaille sur une copie de la base de dev, dont sont retirées les photos sans auteur ni licence connus (absentes de
-dev/photos/truth.csv). Rien n'est écrit dans Immich. Demande l'Immich de dev lancé, et Playwright avec Firefox.
+Works on a copy of the dev database, from which photos without a known author or licence are removed (missing from
+dev/photos/truth.csv). Nothing is written to Immich. Needs the dev Immich running, and Playwright with Firefox.
 
     python dev/screenshots.py
 """
@@ -23,7 +23,7 @@ LICENSES = {"cc-by": ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/
 
 
 def prepare(tmp: Path, truth: dict) -> None:
-    """Copie de la base, réduite aux photos créditées."""
+    """Copy of the database, reduced to the credited photos."""
     src, dst = sqlite3.connect(ROOT / "data" / "dev" / "taxonero.sqlite"), sqlite3.connect(tmp / "taxonero.sqlite")
     src.backup(dst)
     src.close()
@@ -80,7 +80,7 @@ def capture(base: str, browser, lang: str, used: dict, refs: dict) -> None:
     def shot(name: str, extra: tuple = ()) -> None:
         page.wait_for_timeout(1500)
         page.screenshot(path=OUT / lang / f"{name}.jpg", type="jpeg", quality=82)
-        # Visionneuse et comparaison couvrent la grille : seule leur photo se voit.
+        # Viewer and comparison cover the grid: only their photo is visible.
         ids = set(extra) or {m for s in page.evaluate(VISIBLE) for m in UUID.findall(s)}
         used.setdefault(name, set()).update(ids)
 
@@ -92,7 +92,7 @@ def capture(base: str, browser, lang: str, used: dict, refs: dict) -> None:
     page.wait_for_load_state("networkidle")
     shot("photos")
     i = page.evaluate(FIND)
-    assert i >= 0, "aucune photo géolocalisée à relire avec trois candidats"
+    assert i >= 0, "no geotagged photo awaiting review with three candidates"
     page.evaluate(f"openViewer(P.assets, {i})")
     page.wait_for_selector("#viewer.on .cand")
     page.evaluate("V.sel = cur().detections.findIndex(d => d.status === 'pending' && d.candidates?.filter(c => c.gbif_key).length > 2); drawBoxes(); drawInfo()")
@@ -119,7 +119,7 @@ def capture(base: str, browser, lang: str, used: dict, refs: dict) -> None:
     page.wait_for_selector("#v-species .tnode")
     page.wait_for_load_state("networkidle")
     shot("tree")
-    page.click("#v-species [data-mode=grid]")   # vue gardée par le navigateur : la remettre comme avant
+    page.click("#v-species [data-mode=grid]")   # view kept by the browser: set it back as before
     key =page.evaluate("SP.all.slice().sort((a, b) => b.n_photos - a.n_photos)[0]?.taxon_key ?? SP.all[0].taxon_key")
     page.goto(base + f"#species/{key}")
     page.wait_for_selector(".leaflet-container", timeout=20000)
@@ -180,7 +180,7 @@ def main() -> None:
         db.close()
         unknown = {a for ids in used.values() for a in ids if a not in names}
         if unknown:
-            raise SystemExit(f"images sans crédit visibles : {unknown}")
+            raise SystemExit(f"visible images without credit: {unknown}")
         credits(used, refs, truth, names)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

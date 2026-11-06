@@ -1,13 +1,13 @@
-"""Source « darktable » : les photos de la bibliothèque de darktable (library.db, lue sans jamais l'écrire).
+""""darktable" source: the photos of the darktable library (library.db, read without ever writing it).
 
-darktable range chaque photo dans un sidecar photo.nef.xmp, et chaque duplicata dans photo_01.nef.xmp, photo_02…
-(version 0 sans suffixe, voir dt_image_path_append_version_no_db) : les résultats sont écrits dans tous ceux de la
-photo. darktable lit les mots-clés dans Xmp.lr.hierarchicalSubject (à défaut Xmp.dc.subject), séparateur « | ».
+darktable stores each photo in a photo.nef.xmp sidecar, and each duplicate in photo_01.nef.xmp, photo_02…
+(version 0 without suffix, see dt_image_path_append_version_no_db): results are written to all those of the
+photo. darktable reads keywords in Xmp.lr.hierarchicalSubject (failing that Xmp.dc.subject), separator "|".
 
-darktable garde sa propre base et réécrit ses sidecars à partir d'elle : pour qu'il reprenne les mots-clés écrits
-ici, l'option « look for updated XMP files on startup » (Préférences > stockage) doit être active ; il propose
-alors au démarrage de relire les XMP modifiés. Elle est vérifiée dans darktablerc (run_crawler_on_start), comme
-l'écriture des sidecars (write_sidecar_files : jamais = mots-clés des XMP ignorés à l'import).
+darktable keeps its own database and rewrites its sidecars from it: for it to pick up the keywords written
+here, the "look for updated XMP files on startup" option (Preferences > storage) must be enabled; it then
+offers at startup to read the changed XMP files again. It is checked in darktablerc (run_crawler_on_start), like
+the writing of sidecars (write_sidecar_files: never = keywords of the XMP files ignored on import).
 """
 
 import os
@@ -19,7 +19,7 @@ from .files import FileSource, ext_sidecar, first_existing, is_image, open_reado
 
 
 def default_library() -> Path | None:
-    """library.db de l'installation courante (paquet, Flatpak, Windows)."""
+    """library.db of the current installation (package, Flatpak, Windows)."""
     home = Path.home()
     if sys.platform == "win32":
         dirs = [Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local") / "darktable"]
@@ -30,12 +30,12 @@ def default_library() -> Path | None:
 
 
 def version_name(p: Path, version: int) -> Path:
-    """Fichier d'un duplicata : photo.nef, photo_01.nef…"""
+    """File of a duplicate: photo.nef, photo_01.nef…"""
     return p if version == 0 else p.with_name(f"{p.stem}_{version:02d}{p.suffix}")
 
 
 def read_rc(path: Path) -> dict[str, str]:
-    """darktablerc : une ligne clé=valeur par réglage."""
+    """darktablerc: one key=value line per setting."""
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -72,18 +72,18 @@ class Darktable(FileSource):
 
     def _check_source(self) -> bool:
         if not self.root.is_file():
-            self.errors.append(f"bibliothèque darktable introuvable : {self.root}")
+            self.errors.append(f"darktable library not found: {self.root}")
             return False
         try:
             self._query("SELECT 1 FROM images JOIN film_rolls ON film_rolls.id = images.film_id LIMIT 1")
         except sqlite3.Error as e:
-            self.errors.append(f"bibliothèque darktable illisible ({self.root.name}) : {e}")
+            self.errors.append(f"darktable library unreadable ({self.root.name}): {e}")
             return False
         rc = read_rc(self.root.parent / "darktablerc")
         if rc.get("write_sidecar_files") == "never":
-            self.warnings.append("darktable n'utilise pas les fichiers XMP (Préférences > stockage, « write sidecar file "
-                                 "for each image » sur « never ») : les mots-clés écrits ici n'y apparaîtront pas")
+            self.warnings.append("darktable does not use XMP files (Preferences > storage, \"write sidecar file "
+                                 "for each image\" set to \"never\"): the keywords written here will not appear in it")
         if rc.get("run_crawler_on_start") != "true":
-            self.warnings.append("darktable : active « look for updated XMP files on startup » (Préférences > stockage) "
-                                 "pour qu'il relise les mots-clés écrits ici")
+            self.warnings.append("darktable: enable \"look for updated XMP files on startup\" (Preferences > storage) "
+                                 "so that it reads the keywords written here")
         return True

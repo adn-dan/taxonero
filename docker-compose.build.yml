@@ -1,7 +1,7 @@
-# Construire l'image sur cette machine au lieu de télécharger celle de GHCR (modification du code, variante non
-# publiée, machine sans accès à GHCR) :
+# Build the image on this machine instead of downloading the GHCR one (code change, unpublished variant,
+# machine without access to GHCR):
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
-# 15 à 30 min la première fois ; la variante suit GPU dans .env.
+# 15 to 30 min the first time; the variant follows GPU in .env.
 services:
   taxonero:
     build:

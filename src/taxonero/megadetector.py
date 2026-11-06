@@ -1,13 +1,13 @@
-"""MegaDetector v6 (variante RT-DETR « apa », Apache 2.0) dans PyTorch.
+"""MegaDetector v6 (RT-DETR "apa" variant, Apache 2.0) in PyTorch.
 
-Les poids officiels sont téléchargés là où l'amont les publie (Zenodo, comme le fait PytorchWildlife), empreinte
-vérifiée, au premier usage. Le fichier publié (1,2 Go) contient aussi l'état d'entraînement : seuls les poids
-utiles sont gardés (~300 Mo), l'original est supprimé. Le modèle est construit avec le code RT-DETRv2 repris dans
-taxonero/rtdetr (Apache 2.0), sans PytorchWildlife ni ultralytics (AGPL).
+The official weights are downloaded where upstream publishes them (Zenodo, as PytorchWildlife does), checksum
+verified, at first use. The published file (1.2 GB) also contains the training state: only the useful weights
+are kept (~300 MB), the original is deleted. The model is built with the RT-DETRv2 code taken into
+taxonero/rtdetr (Apache 2.0), without PytorchWildlife or ultralytics (AGPL).
 
-Dans PyTorch, MegaDetector tourne sur le même GPU que OWLv2 et BioCLIP, quel qu'il soit (NVIDIA, AMD, Intel,
-Apple), sans variante d'ONNX Runtime par GPU. Un fichier ONNX (DETECTOR_PATH, images Docker d'avant) reste
-utilisé s'il existe.
+In PyTorch, MegaDetector runs on the same GPU as OWLv2 and BioCLIP, whatever it is (NVIDIA, AMD, Intel,
+Apple), without an ONNX Runtime variant per GPU. An ONNX file (DETECTOR_PATH, older Docker images) is still
+used if it exists.
 """
 
 import hashlib
@@ -34,7 +34,7 @@ def _sha256(path: Path) -> str:
 
 
 def weights(models_dir: Path, user_agent: str = "taxonero") -> Path:
-    """Poids utiles de MegaDetector (téléchargés et extraits au premier appel)."""
+    """Useful MegaDetector weights (downloaded and extracted at the first call)."""
     import torch
 
     from .worker import fetch_model
@@ -42,10 +42,10 @@ def weights(models_dir: Path, user_agent: str = "taxonero") -> Path:
     if compact.exists():
         return compact
     full = models_dir / f"{VERSION}.pth"
-    # Le point de contrôle complet se lit avec weights_only=False (pickle : peut exécuter du code) : son empreinte est
-    # vérifiée avant chaque lecture, pas seulement au téléchargement (fichier déposé à la main, ou abîmé).
+    # The full checkpoint is read with weights_only=False (pickle: can run code): its checksum is
+    # verified before every read, not only at download (file dropped by hand, or damaged).
     if full.exists() and _sha256(full) != SHA256:
-        log.warning("MegaDetector : %s ne correspond pas à l'empreinte attendue, téléchargé de nouveau", full.name)
+        log.warning("MegaDetector: %s does not match the expected checksum, downloaded again", full.name)
         full.unlink()
     if not full.exists():
         fetch_model(URL, full, SHA256, user_agent)
@@ -60,13 +60,13 @@ def weights(models_dir: Path, user_agent: str = "taxonero") -> Path:
 
 
 def build(state_path: Path):
-    """Modèle de déploiement (réseau + post-traitement), comme celui exporté en ONNX : (images, tailles d'origine)
-    -> (labels, boîtes xyxy en pixels d'origine, scores)."""
+    """Deployment model (network + post-processing), like the one exported to ONNX: (images, original sizes)
+    -> (labels, xyxy boxes in original pixels, scores)."""
     import torch
     import torch.nn as nn
 
     from .rtdetr.src.core import YAMLConfig
-    # pretrained=False : le backbone n'a pas à télécharger ses poids ImageNet, remplacés par ceux de MegaDetector.
+    # pretrained=False: the backbone does not need to download its ImageNet weights, replaced by those of MegaDetector.
     cfg = YAMLConfig(str(CONFIG), PResNet={"pretrained": False})
     cfg.model.load_state_dict(torch.load(state_path, map_location="cpu", weights_only=True))
 
@@ -83,7 +83,7 @@ def build(state_path: Path):
 
 
 class TorchDetector:
-    """Même interface et mêmes résultats que pipeline.Detector (ONNX)."""
+    """Same interface and same results as pipeline.Detector (ONNX)."""
 
     def __init__(self, state_path: Path, device: str = "cpu", min_score: float = 0.5, min_area: float = 0.005):
         import torch

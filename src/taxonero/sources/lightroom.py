@@ -1,14 +1,14 @@
-"""Source « Lightroom Classic » : les photos d'un catalogue .lrcat (base SQLite, lue sans jamais l'écrire).
+""""Lightroom Classic" source: the photos of a .lrcat catalog (SQLite database, read without ever writing it).
 
-Chemin d'une photo : AgLibraryRootFolder.absolutePath + AgLibraryFolder.pathFromRoot + AgLibraryFile.baseName
-.extension (Adobe_images.rootFile ; les copies virtuelles partagent le même fichier, compté une fois). Lightroom
-verrouille le catalogue tant qu'il est ouvert : il n'est relu qu'une fois Lightroom fermé.
+Path of a photo: AgLibraryRootFolder.absolutePath + AgLibraryFolder.pathFromRoot + AgLibraryFile.baseName
+.extension (Adobe_images.rootFile; virtual copies share the same file, counted once). Lightroom
+locks the catalog while it is open: it is only read once Lightroom is closed.
 
-Écriture : photo.xmp à côté des RAW, le sidecar que Lightroom lit et écrit lui-même. Pour un JPEG, TIFF, PSD, HEIC
-ou DNG, Lightroom ne lit les métadonnées que dans le fichier lui-même, qui n'est jamais modifié ici : le sidecar
-écrit (photo.jpg.xmp) sert aux autres logiciels, pas à Lightroom. Dans Lightroom, Metadata > « Read Metadata from
-Files » reprend les mots-clés ; avec « Automatically write changes into XMP » (Catalog Settings), les sidecars
-contiennent aussi ses réglages et rien n'est perdu à la relecture.
+Writing: photo.xmp next to RAW files, the sidecar Lightroom reads and writes itself. For a JPEG, TIFF, PSD, HEIC
+or DNG, Lightroom only reads metadata in the file itself, which is never modified here: the sidecar
+written (photo.jpg.xmp) is for the other applications, not for Lightroom. In Lightroom, Metadata > "Read Metadata from
+Files" picks up the keywords; with "Automatically write changes into XMP" (Catalog Settings), sidecars
+also contain its settings and nothing is lost when reading them back.
 """
 
 import sqlite3
@@ -17,7 +17,7 @@ from pathlib import Path
 from ..store import RAW_EXT
 from .files import FileSource, ext_sidecar, is_image, open_readonly, std_sidecar
 
-# Fichiers dont Lightroom lit les métadonnées dans un sidecar .xmp (RAW propriétaires ; le DNG les porte en lui).
+# Files whose metadata Lightroom reads in an .xmp sidecar (proprietary RAW files; DNG carries it inside).
 SIDECAR_EXT = RAW_EXT - {"dng"}
 FILES = ("SELECT DISTINCT r.absolutePath || f.pathFromRoot || i.baseName || '.' || i.extension AS path "
          "FROM Adobe_images a JOIN AgLibraryFile i ON i.id_local = a.rootFile "
@@ -25,7 +25,7 @@ FILES = ("SELECT DISTINCT r.absolutePath || f.pathFromRoot || i.baseName || '.' 
 
 
 def default_catalog() -> Path | None:
-    """Catalogue à l'emplacement par défaut (Images/Lightroom), le plus récemment modifié."""
+    """Catalog at the default location (Pictures/Lightroom), the most recently modified."""
     found = sorted((Path.home() / "Pictures" / "Lightroom").glob("*.lrcat"), key=lambda p: p.stat().st_mtime)
     return found[-1] if found else None
 
@@ -47,7 +47,7 @@ class Lightroom(FileSource):
                 db.close()
         except sqlite3.OperationalError as e:
             if "locked" in str(e):
-                raise CatalogLocked("catalogue Lightroom verrouillé : ferme Lightroom Classic pour qu'il soit relu") from e
+                raise CatalogLocked("Lightroom catalog locked: close Lightroom Classic so that it can be read") from e
             raise
 
     def _files(self):
@@ -59,15 +59,15 @@ class Lightroom(FileSource):
         return Path(key)
 
     def _sidecars(self, p: Path) -> list[Path]:
-        # photo.xmp d'un RAW : celui de Lightroom ; le JPEG d'une paire RAW+JPEG a le sien (photo.jpg.xmp).
+        # photo.xmp of a RAW: Lightroom's; the JPEG of a RAW+JPEG pair has its own (photo.jpg.xmp).
         return [std_sidecar(p) if p.suffix.lower().lstrip(".") in SIDECAR_EXT else ext_sidecar(p)]
 
     def _check_source(self) -> bool:
         if not self.root.is_file():
-            self.errors.append(f"catalogue Lightroom introuvable : {self.root}")
+            self.errors.append(f"Lightroom catalog not found: {self.root}")
             return False
         if self.root.with_name(self.root.name + ".lock").exists():
-            self.warnings.append("Lightroom Classic est ouvert : le catalogue sera relu à sa fermeture")
+            self.warnings.append("Lightroom Classic is open: the catalog will be read when it closes")
             return True
         try:
             names = [r["path"].rpartition("/")[2] for r in self._query(FILES)]
@@ -79,6 +79,6 @@ class Lightroom(FileSource):
             return False
         inside = sum(1 for n in names if is_image(n) and n.rpartition(".")[2].lower() not in SIDECAR_EXT)
         if inside:
-            self.warnings.append(f"{inside} photo(s) JPEG, TIFF, HEIC ou DNG : Lightroom lit leurs mots-clés dans le "
-                                 "fichier lui-même, jamais modifié ici ; seuls les RAW les reçoivent dans Lightroom")
+            self.warnings.append(f"{inside} JPEG, TIFF, HEIC or DNG photo(s): Lightroom reads their keywords in the "
+                                 "file itself, never modified here; only RAW files receive them in Lightroom")
         return True

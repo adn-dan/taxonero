@@ -1,10 +1,10 @@
-/* ============================== page espèce ============================== */
+/* ============================== species page ============================== */
 const SPP = { id: 'sp', key: null, assets: [], wsrc: 'wikipedia', wlang: '', map: null };
-/* Fiche d'une espèce : l'espèce et ses chiffres, l'article et la carte, puis la grille de photos commune. scope :
-   mois, pays ou appareil d'où l'on vient, gardés sur la grille (retirables). */
+/* Page of a species: the species and its figures, the article and the map, then the shared photo grid. scope:
+   month, country or camera you came from, kept on the grid (removable). */
 async function loadSpeciesPage(key, scope = {}) {
   const root = $('#sppage'), P_ = SPP;
-  P_.key = key; P_.wlang = LANG;   // langue de l'interface par défaut
+  P_.key = key; P_.wlang = LANG;   // interface language by default
   const notFound = () => { root.innerHTML = `<div class="empty">${tr('species.no_match')}</div>`; setNavTitle(tr('nav.species')); setNavParent('#species', tr('nav.species')); };
   if (!Number.isInteger(key)) { notFound(); return; }
   root.innerHTML = `<div class="empty">${tr('common.loading')}</div>`;
@@ -13,7 +13,7 @@ async function loadSpeciesPage(key, scope = {}) {
   if (!r.taxon && !r.assets.length) { notFound(); return; }
   const t = r.taxon || {}, L = t.lineage || {}, g = groupOf(t);
   P_.assets = r.assets;
-  const missing = Object.values(L).filter(n => n && !(SP.higher || {})[n]);   // noms communs du fil de classification
+  const missing = Object.values(L).filter(n => n && !(SP.higher || {})[n]);   // common names of the classification trail
   if (missing.length) {
     try { SP.higher = { ...(SP.higher || {}), ...await api('/api/higher-taxa', { method: 'POST', body: JSON.stringify({ names: missing }) }) }; } catch (e) {}
   }
@@ -29,8 +29,8 @@ async function loadSpeciesPage(key, scope = {}) {
   const grid = q => `#photos?filter=all&taxon=${key}${q}`, open = a => `#species/${key}?photo=${encodeURIComponent(a.asset_id)}`;
   const kpi = (href, big, small) => `<div><a class="kpilink" href="${href}"><b>${big}</b></a><span>${small}</span></div>`;
   const countryLinks = countries.map(c => `<a href="${grid(`&country=${encodeURIComponent(c)}`)}">${esc(c)}</a>`).join(', ');
-  // En haut : l'espèce et ses chiffres ; dessous, l'article à gauche et la carte à droite, de même hauteur,
-  // séparés par des parois déplaçables (layout.js) ; puis les photos.
+  // At the top: the species and its figures; below, the article on the left and the map on the right, of the same height,
+  // separated by movable dividers (layout.js); then the photos.
   root.innerHTML = `<section class="sphero card" style="--gc:${g.c}">
       <div class="sptext">
         <div class="sphead"><span class="spthumb" title="${esc(tr('cover.open'))}"></span><div>
@@ -63,8 +63,8 @@ async function loadSpeciesPage(key, scope = {}) {
   await embedGrid(root.querySelector('.spphotos'), { taxon: key, ...scope }, assetId => setCover(key, assetId));
   starTiles();
 }
-/* Photo principale : vignette à gauche du titre, et étoile sur chaque photo de l'espèce pour la choisir
-   (étoile pleine : photo principale ; cliquer celle choisie à la main revient au choix automatique). */
+/* Main photo: thumbnail on the left of the title, and a star on each photo of the species to choose it
+   (full star: main photo; clicking the one chosen by hand goes back to the automatic choice). */
 function showCover(P_, root) {
   const c = P_.cover, th = root.querySelector('.spthumb');
   th.innerHTML = c ? `<img src="/api/thumb/${c.asset_id}?size=preview" style="${focus(c.box)}" alt="">` : '';
@@ -81,7 +81,7 @@ function starTiles() {
     b.title = t(on ? (c.chosen ? 'cover.chosen' : 'cover.auto') : 'cover.set');
   });
 }
-/* Choisit la photo principale d'un taxon (depuis la fiche ou la visionneuse) ; la reclique : retour au choix automatique. */
+/* Choose the main photo of a taxon (from the record or the viewer); clicking it again: back to the automatic choice. */
 async function setCover(key, assetId) {
   const onPage = STATE.view === 'sp' && SPP.key === key;
   const reset = onPage && SPP.cover?.chosen && SPP.cover.asset_id === assetId;
@@ -91,8 +91,8 @@ async function setCover(key, assetId) {
     toast(t(reset ? 'cover.reset_done' : 'cover.saved'));
   } catch (e) { fail(e); }
 }
-/* Carte de l'aire de répartition et article (Wikipédia ou Wikispecies) côte à côte : page espèce et page
-   Identifier. P : état du bloc (préfixe des id, taxon, source et langue de l'article, carte Leaflet). */
+/* Range map and article (Wikipedia or Wikispecies) side by side: species page and
+   Identify page. P: state of the block (id prefix, taxon, source and language of the article, Leaflet map). */
 function mapWikiHTML(id, hint) {
   return `<div class="sp2">${mapCardHTML(id, hint)}<section class="card spwiki">${wikiCardHTML(id)}</section></div>`;
 }
@@ -128,7 +128,7 @@ async function loadPanelWiki(P) {
     body.scrollTop = 0;
   } catch (e) { if (P.key === key) body.innerHTML = `<div class="empty">${t('wiki.no_page', { site: label })}</div>`; }
 }
-/* pts : photos à placer sur la carte ({lat, lon}, avec asset_id pour l'aperçu, ou img : image locale). */
+/* pts: photos to place on the map ({lat, lon}, with asset_id for the preview, or img: local image). */
 async function drawRangeMap(P, pts) {
   if (P.map) { P.map.remove(); P.map = null; }
   const m = P.map = L.map(`${P.id}map`, { ...MAP_TOUCH, worldCopyJump: true, scrollWheelZoom: true }).addLayer(baseLayer());
@@ -143,5 +143,5 @@ async function drawRangeMap(P, pts) {
   } catch (e) { if (req === P.mapReq) legend.textContent = t('map.unavailable'); }
   pts.forEach(a => L.circleMarker([a.lat, a.lon], photoIcon(true))
     .bindPopup(`<img src="${a.img || `/api/thumb/${a.asset_id}?size=thumbnail`}" style="width:170px;border-radius:8px">${a.asset_id ? `<br>${esc([a.city, a.country].filter(Boolean).join(', '))}` : ''}`).addTo(m));
-  setTimeout(() => { if (P.map === m && m.getContainer().isConnected) m.invalidateSize(); }, 60);   // carte encore affichée
+  setTimeout(() => { if (P.map === m && m.getContainer().isConnected) m.invalidateSize(); }, 60);   // map still shown
 }

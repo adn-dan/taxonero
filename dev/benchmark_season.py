@@ -1,13 +1,13 @@
-"""Mesure l'effet d'un a priori saisonnier (observations GBIF du mois dans la région) sur le jeu de test,
-à partir des classifications en cache (dev/photos/bench_classif.pkl) : aucune inférence, seulement GBIF.
+"""Measure the effect of a seasonal prior (GBIF observations of the month in the region) on the test set,
+from the cached classifications (dev/photos/bench_classif.pkl): no inference, only GBIF.
 
     python dev/benchmark_season.py
 
-Les dates viennent de dev/photos/dates.json (date d'observation iNaturalist).
+Dates come from dev/photos/dates.json (iNaturalist observation date).
 
-Mesuré le 2026-10-23 sur les 54 photos : top-1 et espèce exacte inchangés (74,1 % / 68,5 %), une
-auto-validation juste de plus mais une erreur de plus selon le plancher. Pas de gain : non intégré au
-pipeline. À refaire sur un jeu riche en migrateurs, insectes et champignons de saison.
+Measured on 2026-10-23 on the 54 photos: top-1 and exact species unchanged (74.1 % / 68.5 %), one more
+correct auto-confirmation but one more error depending on the floor. No gain: not integrated in the
+pipeline. To redo on a set rich in migrants, insects and seasonal fungi.
 """
 
 import csv
@@ -23,8 +23,8 @@ PHOTOS = Path(__file__).parent / "photos"
 
 
 def season_profile(tx: Taxonomy, gbif_key: int, lat: float, lon: float, radius_deg: float = 5.0) -> list[int]:
-    """Observations de terrain du taxon par mois (janvier..décembre) dans la région de la photo
-    (même grille que occurrences_near, donc même cache pour les photos d'un même secteur)."""
+    """Field observations of the taxon per month (January..December) in the region of the photo
+    (same grid as occurrences_near, hence the same cache for photos of the same area)."""
     lat, lon = float(round(lat)), float(round(lon))
     q = {"taxonKey": gbif_key, "limit": 0, "occurrenceStatus": "PRESENT", "facet": "month", "facetLimit": 12,
          "basisOfRecord": ["HUMAN_OBSERVATION", "MACHINE_OBSERVATION", "OBSERVATION"],
@@ -40,10 +40,10 @@ def season_profile(tx: Taxonomy, gbif_key: int, lat: float, lon: float, radius_d
 
 
 def season_weight(profile: list[int], month: int, floor: float = 0.1, power: float = 1.0) -> float:
-    """Poids saisonnier dans 0..1 : part des observations régionales faites ce mois-ci (lissée sur les mois
-    voisins) rapportée à une répartition uniforme, plafonnée à 1. On ne fait que pénaliser une espèce
-    hors saison (migrateur en hiver, champignon en juillet), jamais favoriser une espèce de saison.
-    Sans assez d'observations dans la région pour juger : 1."""
+    """Seasonal weight in 0..1: share of the regional observations made this month (smoothed over the neighbouring
+    months) relative to a uniform distribution, capped at 1. It only penalises a species
+    out of season (migrant in winter, fungus in July), never favours a species in season.
+    Without enough observations in the region to judge: 1."""
     total = sum(profile)
     if total < 30:
         return 1.0
@@ -54,7 +54,7 @@ def season_weight(profile: list[int], month: int, floor: float = 0.1, power: flo
 
 
 def load_dates(rows) -> dict:
-    """Dates d'observation iNaturalist, récupérées une fois puis gardées dans dev/photos/dates.json."""
+    """iNaturalist observation dates, fetched once then kept in dev/photos/dates.json."""
     path = PHOTOS / "dates.json"
     if not path.exists():
         import urllib.request
@@ -76,9 +76,9 @@ def main() -> None:
     rows = list(csv.DictReader(open(PHOTOS / "truth.csv")))[:len(full_c)]
     dates = load_dates(rows)
     truths = [tx.match(r["name"], enrich=False) for r in rows]
-    variants = {"sans saison": None, "plancher 0,3": (0.3, 1.0), "plancher 0,1": (0.1, 1.0),
-                "plancher 0,1, doux": (0.1, 0.5), "plancher 0,03": (0.03, 1.0)}
-    print(f"{'variante':22s} {'top1':>6s} {'exact':>6s} {'faux':>5s}  auto (n / justes)")
+    variants = {"no season": None, "floor 0.3": (0.3, 1.0), "floor 0.1": (0.1, 1.0),
+                "floor 0.1, soft": (0.1, 0.5), "floor 0.03": (0.03, 1.0)}
+    print(f"{'variant':22s} {'top1':>6s} {'exact':>6s} {'wrong':>5s}  auto (n / right)")
     for name, params in variants.items():
         top1 = exact = wrong = auto = auto_ok = 0
         for i, r in enumerate(rows):

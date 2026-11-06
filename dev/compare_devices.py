@@ -1,13 +1,13 @@
-"""Vérifie que le GPU donne les mêmes résultats que le processeur, sur les photos de dev/photos.
+"""Check that the GPU gives the same results as the CPU, on the photos of dev/photos.
 
-À lancer sur la machine qui a le GPU, par exemple dans le conteneur avec quelques photos copiées dans data/ :
+To run on the machine that has the GPU, for instance in the container with a few photos copied into data/:
 
     docker cp dev/compare_devices.py taxonero:/tmp/
     docker exec taxonero python /tmp/compare_devices.py --photos /data/test-photos \
         --detector /models/MDV6-apa-rtdetr-e.onnx --db /data/compare-cache.sqlite
 
-Pour chaque photo : mêmes sujets, même taxon retenu, même rang ; écart maximal des probabilités.
-Les deux passes partagent le cache GBIF : seule l'inférence diffère.
+For each photo: same subjects, same kept taxon, same rank; maximum gap of the probabilities.
+Both passes share the GBIF cache: only the inference differs.
 """
 
 import argparse
@@ -35,14 +35,14 @@ def main() -> None:
 
     gpu, why = hardware.resolve("auto")
     if gpu == "cpu":
-        raise SystemExit(f"pas de GPU : {why}")
+        raise SystemExit(f"no GPU: {why}")
     tx = Taxonomy(store.connect(args.db))
     files = sorted(Path(args.photos).glob("*.jpg"))[:args.limit]
     results = {}
     for device in ("cpu", gpu):
         analyzer, t = build(device, tx, Path(args.detector)), time.time()
         results[device] = [analyzer.analyze(f.read_bytes()) for f in files]
-        print(f"{device} : {(time.time() - t) / len(files):.2f} s par photo")
+        print(f"{device}: {(time.time() - t) / len(files):.2f} s per photo")
         del analyzer
         hardware.release(device)
 
@@ -55,8 +55,8 @@ def main() -> None:
         if da == db:
             same += 1
         else:
-            print(f"  différent : {f.name} cpu={da} gpu={db}")
-    print(f"\n{same}/{len(files)} photos identiques (sujets, taxon, rang) ; écart maximal de confiance {worst:.2e}")
+            print(f"  different: {f.name} cpu={da} gpu={db}")
+    print(f"\n{same}/{len(files)} identical photos (subjects, taxon, rank); maximum confidence gap {worst:.2e}")
 
 
 if __name__ == "__main__":

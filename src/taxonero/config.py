@@ -1,4 +1,4 @@
-"""Configuration par variables d'environnement (voir .env.example)."""
+"""Configuration through environment variables (see .env.example)."""
 
 import json
 import re
@@ -11,70 +11,70 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Vides : à renseigner dans le dashboard (Paramètres > Immich), qui les enregistre dans la base. Définies
-    # dans l'environnement, elles priment et ne sont pas modifiables depuis le dashboard.
+    # Empty: to be filled in the dashboard (Settings > Immich), which saves them in the database. Set
+    # in the environment, they take precedence and cannot be changed from the dashboard.
     immich_url: str = ""
     immich_api_key: str = ""
-    # Source des photos : immich (défaut) ou local (un dossier, monté dans le conteneur sur PHOTOS_DIR ; résultats
-    # écrits dans des fichiers XMP à côté des photos, voir sources/files.py). Sur le bureau, aussi les logiciels
-    # photo : darktable et lightroom (leur bibliothèque, CATALOG_PATH), rawtherapee et rapidraw (un dossier).
+    # Photo source: immich (default) or local (a folder, mounted in the container on PHOTOS_DIR; results
+    # written in XMP files next to the photos, see sources/files.py). On the desktop, also the photo
+    # applications: darktable and lightroom (their library, CATALOG_PATH), rawtherapee and rapidraw (a folder).
     source: str = "immich"
     photos_dir: Path = Path("/photos")
     catalog_path: Path | None = None
 
-    # Sécurité : rien n'est écrit dans Immich tant que DRY_RUN n'est pas explicitement à false.
+    # Safety: nothing is written to Immich until DRY_RUN is explicitly set to false.
     dry_run: bool = True
 
     data_dir: Path = Path("data")
-    # auto (défaut) : GPU s'il y en a un d'utilisable (NVIDIA ou AMD via 'cuda', Intel 'xpu', Apple 'mps'),
-    # sinon processeur. Un GPU demandé mais absent : repli sur le processeur (voir hardware.py).
+    # auto (default): GPU if a usable one exists (NVIDIA or AMD via 'cuda', Intel 'xpu', Apple 'mps'),
+    # otherwise CPU. A GPU requested but absent: falls back to the CPU (see hardware.py).
     device: str = "auto"
-    # MegaDetector en ONNX, s'il existe (images Docker d'avant) ; sinon version PyTorch, poids officiels téléchargés
-    # au premier usage dans DATA_DIR/models (megadetector.py).
+    # MegaDetector in ONNX, if it exists (older Docker images); otherwise the PyTorch version, official weights downloaded
+    # at first use in DATA_DIR/models (megadetector.py).
     detector_path: Path = Path("models/MDV6-apa-rtdetr-e.onnx")
     detector_min_score: float = 0.5
-    # Détecteur à vocabulaire ouvert (plantes, champignons, insectes) : OWLv2, Apache 2.0.
+    # Open-vocabulary detector (plants, fungi, insects): OWLv2, Apache 2.0.
     open_detector: bool = True
     open_detector_model: str = "google/owlv2-base-patch16-ensemble"
     open_detector_min_score: float = 0.3
-    # auto (défaut) : always sur GPU, fallback sur processeur ; always : sur chaque photo ; fallback : seulement
-    # quand MegaDetector ne trouve aucun animal. OPEN_DETECTOR=false désactive OWLv2 dans tous les cas.
+    # auto (default): always on GPU, fallback on CPU; always: on every photo; fallback: only
+    # when MegaDetector finds no animal. OPEN_DETECTOR=false disables OWLv2 in all cases.
     open_detector_mode: str = "auto"
-    # GPU : photos analysées ensemble (recadrages identifiés en un seul passage). Plus grand : plus rapide, plus
-    # de mémoire du GPU. Sans effet sur processeur (une photo à la fois, grouper n'y fait rien gagner).
+    # GPU: photos analysed together (crops identified in a single pass). Larger: faster, more
+    # GPU memory. No effect on the CPU (one photo at a time, grouping gains nothing there).
     gpu_batch: int = 8
-    # GPU : modèles retirés de sa mémoire après ce temps sans analyse, rechargés à la suivante. 0 : toujours gardés.
+    # GPU: models removed from its memory after this time without analysis, reloaded at the next one. 0: always kept.
     models_idle_minutes: int = 5
-    # Animaux domestiques (chiens, chats, chevaux, bétail, poules) : 'skip' = ni détection ni tag Nature.
+    # Domestic animals (dogs, cats, horses, cattle, hens): 'skip' = neither detection nor Nature tag.
     domestic_animals: str = "skip"
-    thumbnail_size: str = "preview"   # preview (1440 px sur le petit côté) | fullsize (seulement si Immich génère les aperçus pleine taille, sinon redirection vers l'original refusée)
-    # Candidats écartés : espèces disparues (connues surtout par des fossiles) et, pour les photos
-    # géolocalisées, espèces jamais observées dans la région (badge rouge).
+    thumbnail_size: str = "preview"   # preview (1440 px on the short side) | fullsize (only if Immich generates full-size previews, otherwise the redirect to the original is refused)
+    # Excluded candidates: extinct species (known mostly from fossils) and, for geotagged
+    # photos, species never observed in the region (red badge).
     exclude_extinct: bool = True
     hide_absent: bool = False
-    # Vidéos : l'image clé générée par Immich est analysée comme une photo (pièges photo, vidéos animalières).
+    # Videos: the key frame generated by Immich is analysed like a photo (camera traps, wildlife videos).
     analyze_videos: bool = True
-    # Photos où Immich a reconnu au moins une personne : pas analysées (portraits, photos de famille).
+    # Photos where Immich recognised at least one person: not analysed (portraits, family photos).
     skip_people: bool = True
-    # RAW accompagné d'un JPG (ou HEIC) du même cliché : pas analysé, il reçoit les tags du JPG.
+    # RAW accompanied by a JPG (or HEIC) of the same shot: not analysed, it receives the tags of the JPG.
     skip_raw_twins: bool = True
-    # Rien de détecté sur la photo : classer l'image entière quand même. Rattrape quelques sujets qu'aucun
-    # détecteur ne cadre (algues, lichens), mais produit surtout des faux positifs sur les photos sans animal
-    # (paysages, intérieurs) et beaucoup de requêtes GBIF. La page Identifier le fait toujours.
+    # Nothing detected in the photo: classify the whole image anyway. Catches a few subjects that no
+    # detector frames (algae, lichens), but mostly produces false positives on photos without animals
+    # (landscapes, interiors) and many GBIF requests. The Identify page always does it.
     full_image_fallback: bool = False
-    # auto : les détecteurs cherchent les sujets sur chaque photo ; manual : aucune détection automatique, les
-    # rectangles sont tracés à la main dans la visionneuse (chacun identifié à la volée).
+    # auto: the detectors look for subjects in every photo; manual: no automatic detection, the
+    # boxes are drawn by hand in the viewer (each one identified on the fly).
     detection: str = "auto"
-    # Groupes recherchés par la détection automatique (animal, plant, fungus ; lichens et algues comptent avec les
-    # champignons et les plantes) : les autres ne sont ni cherchés ni gardés.
+    # Groups searched by automatic detection (animal, plant, fungus; lichens and algae count with
+    # fungi and plants): the others are neither searched nor kept.
     detect_groups: str = "animal,plant,fungus"
-    # Taxonomie GBIF en local (~1 Go dans DATA_DIR, téléchargée et construite une fois au démarrage) : noms, synonymes,
-    # noms communs et UICN sans requête réseau. Seules la présence autour d'un point et les cartes restent en ligne.
+    # Local GBIF taxonomy (~1 GB in DATA_DIR, downloaded and built once at startup): names, synonyms,
+    # common names and IUCN without network requests. Only the presence around a point and the maps stay online.
     gbif_local: bool = True
 
     tag_root: str = "Nature"
-    names_lang: str = "fr"  # langue principale des noms (tags, description) ; pas LANG : variable système
-    # Langues des noms communs affichés dans le dashboard (codes Wikipédia).
+    names_lang: str = "fr"  # main language of the names (tags, description); not LANG: system variable
+    # Languages of the common names shown in the dashboard (Wikipedia codes).
     names_langs: str = "fr,en,de,es,it,nl,pt,ca,br,eu,oc,pl,sv,ja,zh"
 
     @property
@@ -84,39 +84,39 @@ class Settings(BaseSettings):
     write_description: bool = True
     user_agent: str = "taxonero/0.1 (https://github.com/adn-dan/taxonero)"
 
-    # Auto-validation : 'rule' (défaut), 'calibrated', 'fixed' ou 'off'.
-    #   rule       : confiance >= AUTO_CONFIRM_THRESHOLD, espèce observée à proximité (badge vert) et
-    #                aucun autre candidat crédible (second <= AUTO_CONFIRM_MAX_RUNNER_UP). Dès que
-    #                tes relectures suffisent, le seuil calibré remplace le seuil fixe s'il est plus haut.
-    #   calibrated : seulement après calibration sur tes relectures.
+    # Auto-confirmation: 'rule' (default), 'calibrated', 'fixed' or 'off'.
+    #   rule       : confidence >= AUTO_CONFIRM_THRESHOLD, species observed nearby (green badge) and
+    #                no other credible candidate (runner-up <= AUTO_CONFIRM_MAX_RUNNER_UP). As soon as
+    #                your reviews are enough, the calibrated threshold replaces the fixed one if it is higher.
+    #   calibrated : only after calibration on your reviews.
     auto_confirm: str = "rule"
     auto_confirm_threshold: float = 0.85
     auto_confirm_max_runner_up: float = 0.05
     auto_confirm_target_precision: float = 0.98
     auto_confirm_min_reviews: int = 100
-    # Part des détections qui auraient été auto-validées gardées à relire, tirées au hasard : sans elles,
-    # la calibration ne voit jamais la zone de forte confiance (elle n'est faite que de tes relectures).
+    # Share of the detections that would have been auto-confirmed kept for review, drawn at random: without them,
+    # calibration never sees the high-confidence zone (it is made only of your reviews).
     auto_confirm_audit: float = 0.05
 
-    # Boucle du service : intervalle et fenêtre horaire d'analyse (ex. "01:00-07:00", vide = toujours).
+    # Service loop: interval and analysis time window (e.g. "01:00-07:00", empty = always).
     interval_minutes: int = 15
     analysis_window: str = ""
     batch_size: int = 200
-    # Sauvegarde quotidienne de la base (relectures, détections, taxons ; sans les caches réseau) dans
-    # DATA_DIR/backups : nombre de jours gardés, 0 pour désactiver.
+    # Daily backup of the database (reviews, detections, taxa; without the network caches) in
+    # DATA_DIR/backups: number of days kept, 0 to disable.
     backup_keep: int = 7
-    # Durée maximale d'analyse par cycle (le reste attend le cycle suivant, lancé aussitôt) : les tags
-    # des photos déjà validées sont écrits entre-temps.
+    # Maximum analysis time per cycle (the rest waits for the next cycle, started right away): the tags
+    # of the photos already confirmed are written in the meantime.
     analysis_max_minutes: int = 30
 
-    # Édition : server (Docker, NAS : mot de passe obligatoire) ou desktop (taxonero desktop : ordinateur
-    # personnel, accès local seulement, sans identifiant ni mot de passe ; voir desktop.py). Posée par la commande.
+    # Edition: server (Docker, NAS: password required) or desktop (taxonero desktop: personal
+    # computer, local access only, without login or password; see desktop.py). Set by the command.
     edition: str = "server"
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8765
-    dashboard_password: str = Field(default="", description="Mot de passe HTTP Basic (utilisateur 'nature').")
+    dashboard_password: str = Field(default="", description="HTTP Basic password (user 'nature').")
     dashboard_no_auth: bool = False
-    # URL publique d'Immich pour les liens « ouvrir dans Immich » (par défaut immich_url).
+    # Public Immich URL for the "open in Immich" links (immich_url by default).
     immich_public_url: str = ""
 
     @field_validator("device")
@@ -142,18 +142,18 @@ class Settings(BaseSettings):
     def _check_window(cls, v: str) -> str:
         v = v.strip()
         if not window_ok(v):
-            raise ValueError("ANALYSIS_WINDOW : vide ou HH:MM-HH:MM, début et fin différents (ex. 01:00-07:00)")
+            raise ValueError("ANALYSIS_WINDOW: empty or HH:MM-HH:MM, different start and end (e.g. 01:00-07:00)")
         return v
 
     @field_validator("dashboard_password")
     @classmethod
     def _check_password(cls, v: str) -> str:
-        # HTTP Basic : FastAPI décode l'identifiant en ASCII ; un mot de passe accentué ne pourrait jamais être saisi.
+        # HTTP Basic: FastAPI decodes the login as ASCII; a password with accents could never be entered.
         if not v.isascii():
-            raise ValueError("DASHBOARD_PASSWORD : caractères ASCII seulement (pas d'accent)")
-        # Valeur d'exemple des anciens fichiers de déploiement : publique, donc jamais acceptée.
+            raise ValueError("DASHBOARD_PASSWORD: ASCII characters only (no accents)")
+        # Example value from older deployment files: public, hence never accepted.
         if v.strip().lower() in ("change-moi", "changeme", "change-me"):
-            raise ValueError("DASHBOARD_PASSWORD : remplacer la valeur d'exemple par un vrai mot de passe")
+            raise ValueError("DASHBOARD_PASSWORD: replace the example value with a real password")
         return v
 
     @property
@@ -162,7 +162,7 @@ class Settings(BaseSettings):
 
     @property
     def skip_args(self) -> tuple:
-        """Paramètres de worker.SKIPPED_NOT."""
+        """Parameters of worker.SKIPPED_NOT."""
         return (self.analyze_videos, self.skip_raw_twins, self.skip_people)
 
     @property
@@ -175,7 +175,7 @@ class Settings(BaseSettings):
 
 
 def user_data_dir(app: str = "taxonero") -> Path:
-    """Dossier des données de l'édition de bureau, selon les conventions du système."""
+    """Data folder of the desktop edition, following the system conventions."""
     import os
     import sys
     if sys.platform == "win32":
@@ -185,11 +185,11 @@ def user_data_dir(app: str = "taxonero") -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / app
 
 
-# Réglages modifiables depuis le dashboard (page Paramètres). Ils sont enregistrés dans la base et
-# priment sur l'environnement. Les réglages de sécurité (DRY_RUN, clé API, mot de passe) restent
-# dans l'environnement uniquement, comme NAMES_LANG (en changer renomme tous les tags dans Immich).
-# device : depuis le dashboard, GPU (auto : GPU s'il y en a un, sinon processeur) ou processeur. Les valeurs
-# fines (cuda, xpu, mps) restent possibles dans l'environnement.
+# Settings that can be changed from the dashboard (Settings page). They are saved in the database and
+# take precedence over the environment. Security settings (DRY_RUN, API key, password) stay
+# in the environment only, like NAMES_LANG (changing it renames all the tags in Immich).
+# device: from the dashboard, GPU (auto: GPU if there is one, otherwise CPU) or CPU. The finer
+# values (cuda, xpu, mps) are still possible in the environment.
 CHOICES = {"detection": ("auto", "manual"), "domestic_animals": ("skip", "keep"), "auto_confirm": ("rule", "calibrated", "fixed", "off"),
            "device": ("auto", "cpu"),
            "open_detector_mode": ("auto", "always", "fallback")}
@@ -202,21 +202,21 @@ WINDOW = re.compile(r"^$|^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$")
 
 
 def window_ok(v: str) -> bool:
-    """Plage horaire valide : vide (toujours) ou HH:MM-HH:MM. Début = fin refusé : la plage serait vide et l'analyse
-    automatique ne démarrerait jamais (worker.in_window)."""
+    """Valid time range: empty (always) or HH:MM-HH:MM. Start = end refused: the range would be empty and the automatic
+    analysis would never start (worker.in_window)."""
     return bool(WINDOW.match(v)) and (not v or v[:5] != v[6:])
 
 
 def validate_overrides(s: Settings, values: dict) -> dict:
-    """Valeurs converties et vérifiées ; ValueError avec un message lisible sinon."""
+    """Values converted and checked; otherwise ValueError with a readable message."""
     out = {}
     for k, v in values.items():
         if k not in EDITABLE:
-            raise ValueError(f"réglage inconnu : {k}")
+            raise ValueError(f"unknown setting: {k}")
         kind = type(getattr(s, k))
         if kind is bool:
             if not isinstance(v, bool):
-                raise ValueError(f"{k} : oui ou non attendu")
+                raise ValueError(f"{k}: yes or no expected")
         elif kind in (int, float):
             try:
                 v = kind(v)
@@ -224,7 +224,7 @@ def validate_overrides(s: Settings, values: dict) -> dict:
                 raise ValueError(f"{k} : nombre attendu") from None
             lo, hi = BOUNDS[k]
             if not lo <= v <= hi:
-                raise ValueError(f"{k} : entre {lo} et {hi}")
+                raise ValueError(f"{k}: between {lo} and {hi}")
         else:
             v = str(v).strip()
         if k in CHOICES and v not in CHOICES[k]:
@@ -232,16 +232,16 @@ def validate_overrides(s: Settings, values: dict) -> dict:
         if k == "detect_groups":
             chosen = {g.strip() for g in v.split(",") if g.strip()}
             if not chosen or chosen - set(GROUPS):
-                raise ValueError(f"detect_groups : au moins un parmi {', '.join(GROUPS)}")
+                raise ValueError(f"detect_groups: at least one of {', '.join(GROUPS)}")
             v = ",".join(g for g in GROUPS if g in chosen)
         if k == "analysis_window" and not window_ok(v):
-            raise ValueError("analysis_window : vide ou HH:MM-HH:MM, début et fin différents")
+            raise ValueError("analysis_window: empty or HH:MM-HH:MM, different start and end")
         out[k] = v
     return out
 
 
 def apply_overrides(s: Settings, raw: str | None) -> dict:
-    """Applique les réglages enregistrés (JSON) sur s, en place. Les valeurs devenues invalides sont ignorées."""
+    """Apply the saved settings (JSON) to s, in place. Values that became invalid are ignored."""
     applied = {}
     for k, v in (json.loads(raw) if raw else {}).items():
         try:

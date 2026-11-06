@@ -1,10 +1,10 @@
-# Accès au matériel de calcul, une variante par valeur de GPU dans .env (même principe que hwaccel.ml.yml
-# d'Immich). ./detect-gpu.sh choisit la bonne pour cette machine.
+# Access to the compute hardware, one variant per GPU value in .env (same principle as Immich's
+# hwaccel.ml.yml). ./detect-gpu.sh picks the right one for this machine.
 services:
-  # Sans GPU : rien à donner au conteneur.
+  # No GPU: nothing to give the container.
   cpu: {}
 
-  # NVIDIA : nécessite le NVIDIA Container Toolkit sur l'hôte (TrueNAS : GPU attribué à l'app).
+  # NVIDIA: needs the NVIDIA Container Toolkit on the host (TrueNAS: GPU assigned to the app).
   cuda12: &nvidia
     deploy:
       resources:
@@ -15,8 +15,8 @@ services:
               capabilities: [gpu]
   cuda13: *nvidia
 
-  # AMD (ROCm) : non testé. Le conteneur ne tourne pas en root : RENDER_GID (rempli par detect-gpu.sh) est le
-  # groupe propriétaire de /dev/dri/renderD* et /dev/kfd sur l'hôte.
+  # AMD (ROCm): untested. The container does not run as root: RENDER_GID (filled in by detect-gpu.sh) is the
+  # group owning /dev/dri/renderD* and /dev/kfd on the host.
   rocm:
     devices:
       - /dev/kfd
@@ -25,7 +25,7 @@ services:
       - video
       - "${RENDER_GID:-video}"
 
-  # Intel (Arc, Core Ultra) : non testé. Même groupe que pour AMD.
+  # Intel (Arc, Core Ultra): untested. Same group as for AMD.
   xpu:
     devices:
       - /dev/dri

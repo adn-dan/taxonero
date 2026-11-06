@@ -41,7 +41,7 @@ def _c(name, score, plaus="green", genus=None, key=None):
 def test_rerank_geo_demotes_implausible_species():
     cands = [_c("Canis latrans", 0.6, "amber"), _c("Canis lupus", 0.3, "green")]
     cands[0].geo_weight, cands[1].geo_weight = 0.02 * (0 + 0.05 * 1 + 0.5) ** 0.1, (1613 + 0.05 * 61776 + 0.5) ** 0.1
-    ranked = rerank(cands, None, None, None)  # tx=None : poids déjà fixés, pas de réseau
+    ranked = rerank(cands, None, None, None)  # tx=None: weights already set, no network
     assert ranked[0].name == "Canis lupus" and ranked[0].posterior > 0.9
 
 
@@ -58,7 +58,7 @@ def test_decide_falls_back_to_genus():
 def test_nms():
     a, b, c = Box(0, 0, .5, .5, .9, "animal"), Box(.02, .02, .5, .5, .8, "animal"), Box(.6, .6, .3, .3, .7, "animal")
     assert _nms([a, b, c]) == [a, c]
-    whole, part = Box(0, 0, 1, 1, .6, "animal"), Box(.2, .2, .4, .4, .5, "animal")   # contenu dans l'autre
+    whole, part = Box(0, 0, 1, 1, .6, "animal"), Box(.2, .2, .4, .4, .5, "animal")   # contained in the other one
     assert _nms([whole, part]) == [whole]
     swan1, swan2 = Box(.1, .1, .2, .2, .9, "animal"), Box(.5, .5, .2, .2, .4, "animal")  # deux individus
     assert _nms([swan1, swan2]) == [swan1, swan2]
@@ -83,7 +83,7 @@ def test_contract_detects_missing_and_deprecated():
     assert any("/server/version" in e for e in errors)
 
 
-# -- détections superposées, fusion des détecteurs, auto-validation, nettoyage HTML ---------
+# -- overlapping detections, detector merging, auto-confirmation, HTML cleanup ---------
 
 from taxonero.pipeline import Analysis, Decision, dedupe, merge_boxes
 from taxonero.wiki import sanitize
@@ -98,8 +98,8 @@ def _an(box, key, conf, genus="G", runner_up=0.0, plaus="green", rank="species")
 
 def test_dedupe_same_subject_overlapping():
     big, inner = Box(.1, .1, .6, .6, .9, "animal"), Box(.2, .2, .3, .3, .5, "animal")
-    assert len(dedupe([_an(big, 1, .9), _an(inner, 1, .8)])) == 1             # même espèce, imbriquées
-    assert len(dedupe([_an(big, 1, .9), _an(inner, 2, .8, genus="H")])) == 2  # papillon sur une fleur
+    assert len(dedupe([_an(big, 1, .9), _an(inner, 1, .8)])) == 1             # same species, nested
+    assert len(dedupe([_an(big, 1, .9), _an(inner, 2, .8, genus="H")])) == 2  # butterfly on a flower
     far = Box(.8, .8, .15, .15, .9, "animal")
     assert len(dedupe([_an(big, 1, .9), _an(far, 1, .9)])) == 2              # deux individus distincts
 
@@ -108,18 +108,18 @@ def test_merge_boxes_prefers_megadetector_and_full_frame():
     md = [Box(.1, .1, .3, .3, .9, "animal", "Animalia", "md")]
     ov = [Box(.12, .12, .28, .28, .6, "animal", "Animalia", "owl"),   # doublon de MD
           Box(.6, .6, .3, .3, .5, "plant", "Plantae", "owl"),
-          Box(0, 0, .95, .95, .4, "plant", "Plantae", "owl")]        # couvre tout : scène
+          Box(0, 0, .95, .95, .4, "plant", "Plantae", "owl")]        # covers everything: scene
     out = merge_boxes(md, ov)
-    assert [b.source for b in out] == ["md", "owl"]                  # le plein cadre recouvre MD : écarté
+    assert [b.source for b in out] == ["md", "owl"]                  # the full frame overlaps MD: dropped
     assert merge_boxes([], [Box(0, 0, .95, .95, .4, "plant", "Plantae", "owl")])[0].area == 1.0
 
 
 def test_auto_confirm_rule():
     b = Box(.1, .1, .3, .3, .9, "animal", "Animalia", "md")
     assert should_auto_confirm(_an(b, 1, .9), .85, .05)
-    assert not should_auto_confirm(_an(b, 1, .9, runner_up=.08), .85, .05)       # autre candidat crédible
-    assert not should_auto_confirm(_an(b, 1, .9, plaus="amber"), .85, .05)       # pas observé à proximité
-    assert not should_auto_confirm(_an(b, 1, .8), .85, .05)                      # sous le seuil
+    assert not should_auto_confirm(_an(b, 1, .9, runner_up=.08), .85, .05)       # other credible candidate
+    assert not should_auto_confirm(_an(b, 1, .9, plaus="amber"), .85, .05)       # not observed nearby
+    assert not should_auto_confirm(_an(b, 1, .8), .85, .05)                      # below the threshold
     assert not should_auto_confirm(_an(Box(0, 0, 1, 1, 0, "image", None, "image"), 1, .99), .85, .05)
     assert not should_auto_confirm(_an(b, 1, .9, rank="genus"), .85, .05)
     assert not should_auto_confirm(_an(b, 1, .99), None, .05)                    # mode off
@@ -135,15 +135,15 @@ def test_merge_drops_unsure_md_box_on_flower():
     md = [Box(.2, .2, .4, .4, .55, "animal", None, "md")]
     flower = [Box(.18, .18, .45, .45, .6, "plant", "Plantae", "owl")]
     assert [b.label for b in merge_boxes(md, flower)] == ["plant"]
-    md[0].score = .95  # animal sûr (ex. papillon sur la fleur) : gardé
+    md[0].score = .95  # confident animal (e.g. butterfly on the flower): kept
     assert [b.label for b in merge_boxes(md, flower)][0] == "animal"
 
 
 def test_dedupe_merges_fragments_but_not_neighbours():
     head = Box(.69, .39, .12, .21, .88, "animal", None, "md")
-    tail = Box(.70, .62, .11, .26, .43, "animal", "Animalia", "owl")       # même serpent, peu sûr
+    tail = Box(.70, .62, .11, .26, .43, "animal", "Animalia", "owl")       # same snake, unsure
     out = dedupe([_an(head, 1, .99, genus="Natrix"), _an(tail, 2, .64, genus="Natrix")])
-    assert len(out) == 1 and out[0].box.y + out[0].box.h >= .87              # boîte englobante
+    assert len(out) == 1 and out[0].box.y + out[0].box.h >= .87              # enclosing box
     toad1, toad2 = Box(.65, .28, .33, .25, .91, "animal"), Box(.05, .28, .32, .27, .95, "animal")
     assert len(dedupe([_an(toad1, 1, .85, genus="Bufo"), _an(toad2, 1, .85, genus="Bufo")])) == 2
 
@@ -154,8 +154,8 @@ def test_image_quality_prefers_sharp_colour_over_grey():
     from taxonero.pipeline import image_quality
     rng = np.random.default_rng(0)
     colour = Image.fromarray((rng.random((128, 128, 3)) * 255).astype("uint8"))
-    grey = colour.convert("L").convert("RGB")                    # même netteté, sans couleur (infrarouge)
-    flat = Image.new("RGB", (128, 128), (120, 120, 120))          # ni couleur ni détail
+    grey = colour.convert("L").convert("RGB")                    # same sharpness, without colour (infrared)
+    flat = Image.new("RGB", (128, 128), (120, 120, 120))          # neither colour nor detail
     assert image_quality(colour) > image_quality(grey) > image_quality(flat)
 
 
@@ -166,13 +166,13 @@ def test_range_legacy_entries_are_dropped():
     db.execute("CREATE TABLE http_cache (url TEXT PRIMARY KEY, body TEXT, fetched REAL)")
     db.execute("INSERT INTO http_cache VALUES ('range:2:123', '{}', 1e12)")
     db.execute("INSERT INTO http_cache VALUES ('https://api.gbif.org/x', '{}', 1e12)")
-    assert ranges.migrate_legacy(db) == 1                                   # retéléchargée au nouveau format
+    assert ranges.migrate_legacy(db) == 1                                   # downloaded again in the new format
     assert db.execute("SELECT url FROM http_cache").fetchall() == [("https://api.gbif.org/x",)]
 
 
 def test_range_cells_snap_to_exact_gbif_grid():
-    """Centres mesurés (sommets arrondis par GBIF : ±0,45 unité) -> colonne et demi-ligne exactes, et origine
-    verticale de la tuile, même quand elle tombe près d'une demi-ligne."""
+    """Measured centres (vertices rounded by GBIF: ±0.45 unit) -> exact column and half-row, and vertical
+    origin of the tile, even when it falls near a half-row."""
     import random
     from taxonero import ranges
     sx, hy = ranges.grid(400)
@@ -181,7 +181,7 @@ def test_range_cells_snap_to_exact_gbif_grid():
         truth = [(i, h) for i in range(0, 300, 7) for h in range(i % 2, 600, 2 * 3)]
         noisy = [(i * sx + rng.uniform(-.45, .45), y0 + h * hy + rng.uniform(-.45, .45)) for i, h in truth]
         got_y0, idx = ranges.snap(noisy, 400)
-        shift = round((got_y0 - y0) / hy)                                    # origine équivalente à un pas près
+        shift = round((got_y0 - y0) / hy)                                    # origin equivalent up to one step
         assert abs(got_y0 - shift * hy - y0) < 0.1
         assert idx == [(i, h - shift) for i, h in truth]
 
@@ -192,12 +192,12 @@ def test_domestic_detection():
     dog_hint = Box(.22, .2, .5, .52, .6, "domestic", "Canidae", "owl")
     wolf = _an(b, 1, .9, genus="Canis")
     wolf.decision.candidates[0].lineage["family"] = "Canidae"
-    assert is_domestic(wolf, [dog_hint])                    # Canis + « a dog » sur le sujet : chien
-    assert not is_domestic(wolf, [])                        # Canis sans indice : loup sauvage
+    assert is_domestic(wolf, [dog_hint])                    # Canis + "a dog" on the subject: dog
+    assert not is_domestic(wolf, [])                        # Canis without a hint: wild wolf
     far = Box(.8, .8, .15, .15, .6, "domestic", "Canidae", "owl")
-    assert not is_domestic(wolf, [far])                     # indice ailleurs dans l'image
+    assert not is_domestic(wolf, [far])                     # hint elsewhere in the image
     cat = _an(b, 2, .9, genus="Felis"); cat.decision.name = "Felis catus"
-    assert is_domestic(cat, [])                             # espèce uniquement domestique
+    assert is_domestic(cat, [])                             # species that is only domestic
 
 
 def test_no_auto_confirm_for_species_confused_with_domestic():
@@ -215,7 +215,7 @@ def test_settings_overrides_are_validated(monkeypatch):
                 {"analysis_window": "1h-7h"}, {"exclude_extinct": "oui"}):
         with pytest.raises(ValueError):
             validate_overrides(s, bad)
-    # Une valeur enregistrée devenue invalide est ignorée, les autres s'appliquent.
+    # A saved value that became invalid is ignored, the others apply.
     assert apply_overrides(s, '{"auto_confirm": "always", "interval_minutes": 30}') == {"interval_minutes": 30}
     assert s.interval_minutes == 30 and s.auto_confirm == "rule"
 
@@ -227,7 +227,7 @@ def test_prune_pending_drops_extinct_and_redecides(tmp_path):
     from taxonero.curation import prune_pending
 
     class FakeTx:
-        def fossil_only(self, key):
+        def fossil_only(self, key, lat=None, lon=None):
             return key == 2
         def match(self, *a, **k):
             return None
@@ -251,14 +251,14 @@ def test_prune_pending_drops_extinct_and_redecides(tmp_path):
 
 
 def test_prune_is_reversible(tmp_path):
-    """Un candidat écarté par un réglage revient quand on désactive le réglage."""
+    """A candidate excluded by a setting comes back when the setting is disabled."""
     import json
     from taxonero import store
     from taxonero.config import Settings
     from taxonero.curation import prune_pending
 
     class FakeTx:
-        def fossil_only(self, key):
+        def fossil_only(self, key, lat=None, lon=None):
             return False
         def match(self, *a, **k):
             return None
@@ -281,7 +281,7 @@ def test_prune_is_reversible(tmp_path):
 
 
 def _down_gbif(status=500):
-    """Client HTTP de Taxonomy qui répond toujours status, et compte les appels."""
+    """Taxonomy HTTP client that always answers status, and counts the calls."""
     import httpx
 
     class Http:
@@ -302,12 +302,12 @@ def test_fail_fast_stops_at_first_error_and_remembers_outage(monkeypatch):
     for _ in range(3):
         with pytest.raises(httpx.HTTPError):
             tx.occurrences_near(1, 45.0, 5.0, 5.0)
-    assert tx.http.calls == 1                              # une seule requête : la panne est retenue
+    assert tx.http.calls == 1                              # a single request: the outage is remembered
     tx.http = _down_gbif(404)
     with pytest.raises(httpx.HTTPError):
-        tx.get("https://api.gbif.org/v1/species/1")        # les autres services restent interrogés
+        tx.get("https://api.gbif.org/v1/species/1")        # the other services are still queried
     assert tx.http.calls == 1
-    slow = Taxonomy(store.connect(":memory:"))             # analyse automatique : relances inchangées
+    slow = Taxonomy(store.connect(":memory:"))             # automatic analysis: retries unchanged
     slow.min_interval, slow.http = 0, _down_gbif()
     with pytest.raises(httpx.HTTPError):
         slow.occurrences_near(1, 45.0, 5.0, 5.0)
@@ -327,7 +327,7 @@ def test_rerank_tolerant_keeps_candidates_when_gbif_is_down():
     def drop(c): raise boom
     cands = [Candidate("A a", .9, {"genus": "A"})]
     with pytest.raises(httpx.HTTPError):
-        rerank(cands, Tx(), 45.0, 5.0)                     # analyse automatique : l'erreur remonte, photo réessayée
+        rerank(cands, Tx(), 45.0, 5.0)                     # automatic analysis: the error goes up, photo retried
     out = rerank([Candidate("A a", .9, {"genus": "A"})], Tx(), 45.0, 5.0, drop=drop, tolerant=True)
     assert out[0].plausibility == "unverified" and out[0].posterior == 1.0
     assert decide(out, Tx(), tolerant=True).plausibility == "unverified"
@@ -354,7 +354,7 @@ def test_analysis_window_rejects_impossible_hours():
 
 
 class FakeImmich:
-    """Immich en mémoire, pour Syncer : photos, tags, et une photo supprimée."""
+    """In-memory Immich, for Syncer: photos, tags, and a deleted photo."""
     dry_run = False
 
     def __init__(self, ids, gone=()):
@@ -423,13 +423,13 @@ def test_sync_survives_deleted_photo_and_is_incremental(tmp_path):
     st = sy.sync_all(full=False)
     assert st.assets == 2 and sy.missing == ["gone"]
     assert all(t["value"] == "Nature/Aves/Paridae/Parus/Parus major" for a in ("a", "b") for t in im.assets[a]["tags"])
-    # Rien n'a changé : le passage suivant ne relit aucune photo (hors la disparue, que le worker masque).
+    # Nothing changed: the next pass reads no photo (except the missing one, which the worker hides).
     db.execute("UPDATE asset SET missing_at = 1 WHERE asset_id = 'gone'")
     im.gets = 0
     assert Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False).assets == 0 and im.gets == 0
-    # Une correction : seule la photo concernée est relue.
+    # A correction: only the photo concerned is read again.
     db.execute("UPDATE detection SET taxon_key = 2 WHERE asset_id = 'a'")
-    assert Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False).assets == 1 and im.gets == 2   # lecture + relecture avant la description
+    assert Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False).assets == 1 and im.gets == 2   # read + read again before the description
 
 
 def test_sync_deletes_tags_that_became_useless(tmp_path):
@@ -438,9 +438,9 @@ def test_sync_deletes_tags_that_became_useless(tmp_path):
     im = FakeImmich(["a", "b"])
     Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all()
     im.upsert_tags(["Perso/Vacances"])   # tag de l'utilisateur : intouchable
-    db.execute("UPDATE detection SET taxon_key = 2")   # mauvaise espèce corrigée sur toutes les photos
+    db.execute("UPDATE detection SET taxon_key = 2")   # wrong species corrected on all photos
     st = Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False)
-    assert st.tags_deleted >= 2   # l'espèce et son genre, devenus vides
+    assert st.tags_deleted >= 2   # the species and its genus, now empty
     assert not any("Parus" in v for v in im.tags) and "Perso/Vacances" in im.tags
     assert any("Cyanistes" in v for v in im.tags) and "Nature/Aves/Paridae" in im.tags
 
@@ -482,7 +482,7 @@ def test_device_falls_back_to_cpu_instead_of_crashing():
     hardware.resolve.cache_clear()
     import torch
     if torch.cuda.is_available():
-        pytest.skip("GPU présent")
+        pytest.skip("GPU present")
     assert hardware.resolve("auto")[0] == "cpu" and hardware.resolve("cuda")[0] == "cpu"
     assert hardware.onnx_providers("cpu") == ["CPUExecutionProvider"]
     assert Settings(immich_url="http://x", immich_api_key="k").device == "auto"
@@ -491,11 +491,11 @@ def test_device_falls_back_to_cpu_instead_of_crashing():
 
 
 def test_gpu_that_crashes_on_first_use_falls_back_to_cpu(monkeypatch):
-    """Un GPU qui se dit disponible mais plante au premier calcul (Iris Xe avec PyTorch XPU) : processeur, et le
-    processus du programme survit (le calcul d'essai tourne à part)."""
+    """A GPU that says it is available but crashes at the first computation (Iris Xe with PyTorch XPU): CPU, and the
+    program's process survives (the test computation runs separately)."""
     from taxonero import hardware
-    assert hardware._works("cpu")                       # le calcul d'essai lui-même est juste
-    monkeypatch.setattr(hardware, "PROBE", "import os; os.abort()")   # plantage brutal du processus d'essai
+    assert hardware._works("cpu")                       # the test computation itself is right
+    monkeypatch.setattr(hardware, "PROBE", "import os; os.abort()")   # abrupt crash of the test process
     monkeypatch.setattr(hardware, "_available", lambda d: d == "xpu")
     hardware.resolve.cache_clear()
     try:
@@ -506,7 +506,7 @@ def test_gpu_that_crashes_on_first_use_falls_back_to_cpu(monkeypatch):
 
 
 def test_full_precision_on_every_device():
-    """Mêmes résultats sur GPU et processeur : pas de TF32, ni côté PyTorch ni côté ONNX Runtime."""
+    """Same results on GPU and CPU: no TF32, neither on the PyTorch side nor on the ONNX Runtime side."""
     import torch
     from taxonero import hardware
     torch.backends.cudnn.allow_tf32 = True
@@ -525,7 +525,7 @@ def test_device_choice_reloads_models(tmp_path, monkeypatch):
             self.device = device
     monkeypatch.setattr(worker, "Classifier", Fake)
     monkeypatch.setattr(worker, "OpenVocabDetector", Fake)
-    from taxonero import megadetector   # pas d'ONNX : MegaDetector dans PyTorch, sans téléchargement ici
+    from taxonero import megadetector   # no ONNX: MegaDetector in PyTorch, without download here
     monkeypatch.setattr(megadetector, "weights", lambda *a, **k: tmp_path / "w.pt")
     monkeypatch.setattr(megadetector, "TorchDetector", lambda *a, **k: type("D", (), {"providers": ["PyTorch"]})())
     monkeypatch.setattr(hardware, "resolve", lambda wanted: ("cuda", "gpu_found") if wanted == "auto" else ("cpu", "cpu_chosen"))
@@ -533,16 +533,16 @@ def test_device_choice_reloads_models(tmp_path, monkeypatch):
     monkeypatch.setattr(hardware, "release", lambda d: None)
     s = Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path, detector_path=tmp_path / "absent.onnx")
     w = worker.Worker(s)
-    assert s.device == "auto" and w.analyzer.classifier.device == "cuda"   # GPU par défaut
+    assert s.device == "auto" and w.analyzer.classifier.device == "cuda"   # GPU by default
     first = w.analyzer
-    assert w.analyzer is first                                             # pas de rechargement inutile
+    assert w.analyzer is first                                             # no useless reload
     s.device = validate_overrides(s, {"device": "cpu"})["device"]
     assert w.analyzer is not first and w.analyzer.classifier.device == "cpu"
 
 
 def test_ui_catalogs_match_french():
-    """Chaque catalogue de langue : mêmes clés que le français, mêmes variables {x}, mêmes balises HTML,
-    et les formes plurielles de la langue (CLDR)."""
+    """Each language catalogue: same keys as French, same {x} variables, same HTML tags,
+    and the plural forms of the language (CLDR)."""
     import json
     import re
     from pathlib import Path
@@ -573,7 +573,7 @@ def test_tidy_name_fixes_all_caps():
     assert tidy_name("DOGS") == "Dogs"                     # GBIF, famille Canidae
     assert tidy_name("ÉCUREUIL ROUX") == "Écureuil roux"
     assert tidy_name("Old World flycatchers") == "Old World flycatchers"
-    assert tidy_name("UK") == "UK"                         # sigle court : laissé tel quel
+    assert tidy_name("UK") == "UK"                         # short acronym: left as is
     assert tidy_name(" renard roux ") == "Renard roux"
 
 
@@ -602,7 +602,7 @@ def test_open_detector_fallback_runs_only_without_animal():
         assert ov.calls == expected
     ov = Fixed([])
     Analyzer(Fixed([Box(.1, .1, .3, .3, .9, "animal", None, "md")]), NoClassifier(), None, open_detector=ov).analyze(image)
-    assert ov.calls == 1                                   # 'always' par défaut
+    assert ov.calls == 1                                   # 'always' by default
 
 
 def test_group_reliability_blocks_weak_groups_until_reviewed():
@@ -615,11 +615,11 @@ def test_group_reliability_blocks_weak_groups_until_reviewed():
     assert group_of({"class": "Arachnida"}) == "arachnida"
     s = Settings(immich_url="", immich_api_key="")
     db = store.connect(":memory:")
-    assert blocked_groups(db, s) == {"arachnida", "pisces"}       # par défaut : mesurés faibles sur le jeu de dev
+    assert blocked_groups(db, s) == {"arachnida", "pisces"}       # by default: measured weak on the dev set
     spider = {"scientific_name": "Araneus diadematus", "lineage": {"class": "Arachnida", "kingdom": "Animalia"}}
     store.save_taxon(db, 1, _json.dumps(spider))
     db.execute("INSERT INTO asset (asset_id) VALUES ('a')")
-    for i in range(GROUP_MIN_REVIEWS):                            # relectures toutes justes : le groupe est débloqué
+    for i in range(GROUP_MIN_REVIEWS):                            # all reviews right: the group is unblocked
         db.execute("INSERT INTO detection (asset_id, x, y, w, h, source, status, confirmed_by, taxon_key, taxon_rank, "
                    "model_key, model_rank, model_conf, created_at) VALUES ('a', 0, 0, 1, 1, 'auto', 'confirmed', 'user', "
                    "1, 'species', 1, 'species', 0.95, 0)")
@@ -629,8 +629,8 @@ def test_group_reliability_blocks_weak_groups_until_reviewed():
 
 
 def test_batched_analysis_isolates_a_broken_photo(tmp_path, monkeypatch):
-    """Sur GPU, les photos passent par lots : une photo illisible fait échouer le lot, qui est alors repris
-    photo par photo ; seules les illisibles sont comptées en échec."""
+    """On GPU, photos go in batches: an unreadable photo makes the batch fail, which is then retried
+    photo by photo; only the unreadable ones are counted as failed."""
     from taxonero import hardware
     from taxonero.config import Settings
     from taxonero.worker import Worker
@@ -655,12 +655,12 @@ def test_batched_analysis_isolates_a_broken_photo(tmp_path, monkeypatch):
     for i in range(10):
         w.db.execute("INSERT INTO asset (asset_id, file_name) VALUES (?, ?)", (f"p{i}", f"p{i}.jpg"))
     w.db.commit()
-    assert w.analyze() == 10 and Batching.calls == 2               # 8 + 2 (GPU_BATCH par défaut)
+    assert w.analyze() == 10 and Batching.calls == 2               # 8 + 2 (GPU_BATCH by default)
     r = {x["asset_id"]: x for x in w.db.execute("SELECT * FROM asset")}
     assert r["p3"]["fail_count"] == 1 and r["p3"]["analyzed_at"] is None
     assert all(r[f"p{i}"]["analyzed_at"] for i in range(10) if i != 3)
     assert w.progress["done"] == 10
-    s.gpu_batch = 4                                                  # réglable dans les Paramètres
+    s.gpu_batch = 4                                                  # adjustable in Settings
     w.db.execute("UPDATE asset SET analyzed_at = NULL, fail_count = 0")
     w.db.commit()
     Batching.calls = 0
@@ -668,8 +668,8 @@ def test_batched_analysis_isolates_a_broken_photo(tmp_path, monkeypatch):
 
 
 def test_higher_ranks_take_gbif_plural_names():
-    """Rang supérieur en cache : les noms GBIF (pluriel : « Oiseaux ») remplacent les libellés Wikidata
-    (titres d'articles au singulier : « Oiseau ») ; les langues sans nom GBIF gardent le leur."""
+    """Cached higher rank: GBIF names (plural: "Oiseaux") replace Wikidata labels
+    (article titles in the singular: "Oiseau"); languages without a GBIF name keep theirs."""
     from taxonero.taxonomy import HIGHER, NAMES_VERSION, Taxonomy
     tx = Taxonomy.__new__(Taxonomy)
     tx._vernacular = lambda key: {"fr": "Oiseaux", "en": "Birds"}
@@ -689,19 +689,19 @@ def test_raw_paired_with_jpg_is_skipped_and_gets_its_tags(tmp_path):
     for aid, name, taken in (("jpg", "IMG_1.JPG", t + ".000Z"), ("raw", "IMG_1.CR3", t + ".500Z"),
                              ("alone", "IMG_2.NEF", t + ".000Z"), ("other", "IMG_1.ARW", "2024-06-01T10:00:00.000Z")):
         w.db.execute("INSERT INTO asset (asset_id, file_name, taken_at, people) VALUES (?, ?, ?, 0)", (aid, name, taken))
-    # RAW analysé avant la règle : sa détection automatique en attente est retirée, il sort de la file.
+    # RAW analysed before the rule: its pending automatic detection is removed, it leaves the queue.
     w.db.execute("INSERT INTO detection (asset_id, source, status, created_at) VALUES ('raw', 'auto', 'pending', 0)")
     w.db.execute("UPDATE asset SET analyzed_at = 1 WHERE asset_id = 'raw'")
     w.db.commit()
     assert w.apply_skips() == 1
     twins = {r["asset_id"]: r["twin_of"] for r in w.db.execute("SELECT asset_id, twin_of FROM asset")}
-    assert twins == {"jpg": None, "raw": "jpg", "alone": None, "other": None}   # RAW seul ou d'un autre cliché : analysé
+    assert twins == {"jpg": None, "raw": "jpg", "alone": None, "other": None}   # RAW alone or from another shot: analysed
     queued = {r["asset_id"] for r in w.db.execute(f"SELECT asset_id FROM asset WHERE {w.queue_sql()[0]}", w.queue_sql()[1])}
     assert queued == {"jpg", "alone", "other"} and w.pending_analysis() == 3
-    s.skip_raw_twins = False                    # option désactivée : le RAW est analysé lui aussi
+    s.skip_raw_twins = False                    # option disabled: the RAW is analysed too
     assert w.pending_analysis() == 4
     s.skip_raw_twins = True
-    # Le JPG validé : le RAW reçoit les mêmes tags dans Immich.
+    # The JPG confirmed: the RAW receives the same tags in Immich.
     import json
     store.save_taxon(w.db, 1, json.dumps({"scientific_name": "Parus major", "rank": "species", "vernacular": {},
                                           "lineage": {"class": "Aves", "family": "Paridae", "genus": "Parus"}}))
@@ -719,7 +719,7 @@ def test_photos_with_people_are_skipped_unless_disabled(tmp_path):
     from taxonero.worker import Worker
 
     class Client:
-        """Immich : 'family' a une personne (reconnue après l'import), 'bird' aucune."""
+        """Immich: 'family' has one person (recognised after import), 'bird' none."""
         def iter_assets(self, updated_after=None, size=250, with_exif=True, kind="IMAGE", with_people=False):
             for aid, n in (("family", 1), ("bird", 0)):
                 yield {"id": aid, "type": "IMAGE", "people": [{"id": "p"}] * n if with_people else []}
@@ -730,8 +730,8 @@ def test_photos_with_people_are_skipped_unless_disabled(tmp_path):
     for aid in ("family", "bird"):
         w.db.execute("INSERT INTO asset (asset_id, kind) VALUES (?, 'IMAGE')", (aid,))   # base d'avant : people inconnu
     w.db.commit()
-    assert w.reconcile() is not None   # personnes inconnues : relu tout de suite, sans attendre le lendemain
-    assert w.reconcile() is None       # puis une fois par jour seulement
+    assert w.reconcile() is not None   # people unknown: read again right away, without waiting for the next day
+    assert w.reconcile() is None       # then only once a day
     assert dict(w.db.execute("SELECT asset_id, people FROM asset").fetchall()) == {"family": 1, "bird": 0}
     w.apply_skips()
     assert w.pending_analysis() == 1
@@ -764,9 +764,9 @@ def test_whole_image_only_when_asked():
     clf = Clf()
     an = Analyzer(Nothing(), clf, None)
     an.analyze(Image.new("RGB", (64, 48)), fallback=False)
-    assert clf.seen == 0                      # analyse automatique : rien de détecté, rien de classé
+    assert clf.seen == 0                      # automatic analysis: nothing detected, nothing classified
     an.analyze(Image.new("RGB", (64, 48)))
-    assert clf.seen == 1                      # page Identifier : l'image entière
+    assert clf.seen == 1                      # Identify page: the whole image
 
 
 def test_pending_whole_image_detections_are_dropped(tmp_path):
@@ -803,8 +803,8 @@ def test_gbif_throttling_does_not_count_as_photo_failure(tmp_path):
 
 
 def test_rerank_prefetch_covers_sequential_path():
-    """rerank prépare en parallèle exactement ce que le chemin normal demande ensuite (aucune requête de plus),
-    et ignore les candidats sous MIN_CANDIDATE_SCORE (au moins MIN_CANDIDATES gardés)."""
+    """rerank prepares in parallel exactly what the normal path asks next (no extra request),
+    and ignores the candidates below MIN_CANDIDATE_SCORE (at least MIN_CANDIDATES kept)."""
     import json as _json
     import threading
     import httpx
@@ -832,22 +832,22 @@ def test_rerank_prefetch_covers_sequential_path():
 
     tx = Taxonomy(store.connect(":memory:"))
     tx.http, tx.min_interval = httpx.Client(transport=httpx.MockTransport(handler)), 0.0
-    drop = lambda c: False
+    drop = lambda c, lat=None, lon=None: False   # like curation.candidate_filter
     drop.fossils = True
     scores = [0.6, 0.2, 0.15, 0.03, 0.005]
     cands = [Candidate(n, s, {"kingdom": "Animalia"}) for n, s in zip(keys, scores)]
     after = []
     tx.prefetch_candidates = (lambda f: lambda *a, **k: (f(*a, **k), after.append(len(seen))))(tx.prefetch_candidates)
     out = rerank(cands, tx, 45.2, 5.7, drop=drop)
-    assert {c.name for c in out} == set(list(keys)[:4])          # Felis catus (0,5 %) ignoré
-    assert len(seen) == after[0], seen[after[0]:]                # rien de plus après le prefetch
-    assert len(seen) == len(set(seen))                           # aucune requête en double
+    assert {c.name for c in out} == set(list(keys)[:4])          # Felis catus (0.5 %) ignored
+    assert len(seen) == after[0], seen[after[0]:]                # nothing more after the prefetch
+    assert len(seen) == len(set(seen))                           # no duplicate request
 
 
 def test_local_backbone(tmp_path):
-    """Taxonomie GBIF locale construite depuis une mini-archive au format de GBIF : mêmes réponses que l'API
-    (synonyme -> nom accepté, règne, fiche), recherche par nom commun, et Taxonomy ne demande plus au réseau que
-    ce qui reste à l'API (noms communs, UICN)."""
+    """Local GBIF taxonomy built from a mini archive in the GBIF format: same responses as the API
+    (synonym -> accepted name, kingdom, record), search by common name, and Taxonomy only asks the network for
+    what stays with the API (common names, IUCN)."""
     import zipfile
     import httpx
     from taxonero import store
@@ -877,7 +877,7 @@ def test_local_backbone(tmp_path):
     path = build(archive, tmp_path / "gbif-backbone.sqlite", "2023-08-28")
     bb = Backbone(path)
 
-    assert bb.match("vulpes VULPES")["usageKey"] == 5219243                       # casse ignorée
+    assert bb.match("vulpes VULPES")["usageKey"] == 5219243                       # case ignored
     m = bb.match("Canis vulpes", kingdom="Animalia")
     assert m["usageKey"] == 9999001 and m["acceptedUsageKey"] == 5219243 and m["status"] == "SYNONYM"
     assert bb.match("Morus") is None                                              # homonymes : l'API tranche
@@ -887,7 +887,7 @@ def test_local_backbone(tmp_path):
     assert sp["canonicalName"] == "Vulpes vulpes" and sp["authorship"] == "(Linnaeus, 1758)" and sp["species"] == "Vulpes vulpes"
     assert sp["family"] == "Canidae" and sp["rank"] == "SPECIES"
     assert [h["gbif_key"] for h in bb.search("renard")] == [5219243] and bb.search("renard")[0]["common"] == "Renard roux"
-    assert bb.search("Vulp")[0]["gbif_key"] == 5219243                           # espèce avant genre
+    assert bb.search("Vulp")[0]["gbif_key"] == 5219243                           # species before genus
 
     asked = []
     def api(req):
@@ -905,8 +905,8 @@ def test_local_backbone(tmp_path):
 
 
 def test_detect_groups_filter_boxes_and_results():
-    """Groupes cherchés : MegaDetector sauté sans les animaux, boîtes OWLv2 des groupes décochés ignorées,
-    sujet identifié dans un groupe décoché écarté avant la vérification GBIF (taxonomy None ici)."""
+    """Searched groups: MegaDetector skipped without animals, OWLv2 boxes of unticked groups ignored,
+    subject identified in an unticked group dropped before the GBIF check (taxonomy None here)."""
     from PIL import Image
     from taxonero.pipeline import Analyzer, Candidate
 
@@ -914,7 +914,7 @@ def test_detect_groups_filter_boxes_and_results():
         def __init__(self, boxes): self.boxes, self.calls = boxes, 0
         def detect(self, image): self.calls += 1; return list(self.boxes)
 
-    class Clf:   # chaque recadrage : un renard, sauf les boîtes plantes (une fleur)
+    class Clf:   # each crop: a fox, except the plant boxes (a flower)
         def classify(self, images):
             return [[Candidate("Vulpes vulpes", .9, {"kingdom": "Animalia"})] if im.size[0] < 40 else
                     [Candidate("Bellis perennis", .9, {"kingdom": "Plantae"})] for im in images]
@@ -928,14 +928,14 @@ def test_detect_groups_filter_boxes_and_results():
     assert labels(an.analyze(image, groups=frozenset({"animal"}))) == ["Vulpes vulpes", "Vulpes vulpes"]
     md.calls = 0
     assert labels(an.analyze(image, groups=frozenset({"plant"}))) == ["Bellis perennis"] and md.calls == 0
-    # boîte MegaDetector reconnue comme plante, plantes non cherchées : écartée
+    # MegaDetector box recognised as a plant, plants not searched: dropped
     md2 = Fixed([Box(.5, .5, .4, .4, .95, "animal", None, "md")])
     assert Analyzer(md2, Clf(), None).analyze(image, groups=frozenset({"animal"})) == []
 
 
 def test_microbe_group_same_in_python_and_sql_and_off_by_default(tmp_path):
-    """Bactéries et protistes microscopiques : groupe à part, non cherché par défaut ; algues brunes et myxomycètes
-    restent avec les plantes. La règle SQL (détections en base) suit la règle Python (analyse)."""
+    """Bacteria and microscopic protists: a separate group, not searched by default; brown algae and slime moulds
+    stay with plants. The SQL rule (detections in the database) follows the Python rule (analysis)."""
     import json
     from taxonero.config import Settings
     from taxonero.curation import DETECTION_GROUP, drop_unwanted
@@ -997,7 +997,7 @@ def test_detect_groups_setting_and_manual_mode(tmp_path):
     w.db.executemany("INSERT INTO detection (asset_id, source, status, candidates, box_label, created_at) VALUES ('a', ?, ?, ?, ?, 0)", rows)
     left = lambda: sorted((r[0], r[1], r[2]) for r in w.db.execute("SELECT source, status, box_label FROM detection"))
     s.detect_groups = "animal"
-    assert drop_unwanted(w.db, s) == 2                                  # plante et champignon à relire
+    assert drop_unwanted(w.db, s) == 2                                  # plant and fungus awaiting review
     assert left() == [("auto", "confirmed", "plant"), ("auto", "pending", "animal"), ("manual", "pending", "plant")]
     s.detection = "manual"
     assert drop_unwanted(w.db, s) == 1 and w.pending_analysis() == 0    # plus d'analyse automatique
@@ -1006,8 +1006,8 @@ def test_detect_groups_setting_and_manual_mode(tmp_path):
 
 @pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
 def test_local_folder_source_end_to_end(tmp_path):
-    """Source « dossier local » : photos lues (date, GPS), vignettes, puis tags et description écrits dans un
-    fichier XMP à côté de la photo, et retirés quand la détection est rejetée. La photo n'est jamais modifiée."""
+    """"Local folder" source: photos read (date, GPS), thumbnails, then tags and description written in an
+    XMP file next to the photo, and removed when the detection is rejected. The photo is never modified."""
     import json
     import shutil
     from pathlib import Path
@@ -1017,15 +1017,15 @@ def test_local_folder_source_end_to_end(tmp_path):
     from taxonero.worker import Worker
 
     photos = Path(__file__).parent.parent / "dev" / "photos"
-    src = photos / "inat_141438356.jpg"                    # GPS à l'ouest de Greenwich : longitude négative
+    src = photos / "inat_141438356.jpg"                    # GPS west of Greenwich: negative longitude
     root = tmp_path / "photos"
     (root / "2024" / "sortie").mkdir(parents=True)
     shutil.copy(src, root / "2024" / "sortie" / "busard.jpg")
     (root / "@eaDir").mkdir()
-    shutil.copy(src, root / "@eaDir" / "ignore.jpg")       # dossier technique Synology : ignoré
+    shutil.copy(src, root / "@eaDir" / "ignore.jpg")       # Synology technical folder: ignored
     before = (root / "2024" / "sortie" / "busard.jpg").read_bytes()
     import os, time as _time
-    old = _time.time() - 3600   # photo modifiée il y a une heure (sinon laissée tranquille 10 min, comme avec Immich)
+    old = _time.time() - 3600   # photo changed an hour ago (otherwise left alone for 10 min, as with Immich)
     os.utime(root / "2024" / "sortie" / "busard.jpg", (old, old))
 
     class Fake:
@@ -1041,7 +1041,7 @@ def test_local_folder_source_end_to_end(tmp_path):
     a = dict(w.db.execute("SELECT * FROM asset").fetchone())
     assert a["file_name"] == "busard.jpg" and abs(a["lon"] + 5.0918) < 1e-3 and a["taken_at"].startswith("20")
     aid = a["asset_id"]
-    assert w.scan() == 0                                   # rien de changé : rien de relu
+    assert w.scan() == 0                                   # nothing changed: nothing read again
     thumb = w.client.thumbnail(aid, "thumbnail")
     from PIL import Image
     import io as _io
@@ -1058,7 +1058,7 @@ def test_local_folder_source_end_to_end(tmp_path):
     got = w.client.get_asset(aid)
     assert side.exists() and [t["value"] for t in got["tags"]] == ["Nature/Aves/Accipitridae/Circus/Busard d'Amérique (Circus hudsonius)"]
     assert "Busard d'Amérique" in got["exifInfo"]["description"]
-    assert (root / "2024" / "sortie" / "busard.jpg").read_bytes() == before   # photo intacte
+    assert (root / "2024" / "sortie" / "busard.jpg").read_bytes() == before   # photo untouched
     w.db.execute("UPDATE detection SET status = 'rejected'")
     w.db.commit()
     w.sync()
@@ -1067,12 +1067,12 @@ def test_local_folder_source_end_to_end(tmp_path):
     shutil.copy(src, root / "autre.jpg")
     (root / "2024" / "sortie" / "busard.jpg").unlink()
     w.reconcile(force=True)
-    assert w.db.execute("SELECT missing_at FROM asset WHERE asset_id = ?", (aid,)).fetchone()[0] is not None   # supprimé : masqué
+    assert w.db.execute("SELECT missing_at FROM asset WHERE asset_id = ?", (aid,)).fetchone()[0] is not None   # deleted: hidden
     w.client.close()
 
 
 def _darktable_library(path, images):
-    """library.db réduite aux tables lues (film_rolls, images) : [(dossier, fichier, version)]."""
+    """library.db reduced to the tables read (film_rolls, images): [(folder, file, version)]."""
     import sqlite3
     db = sqlite3.connect(path)
     db.executescript("CREATE TABLE film_rolls (id INTEGER PRIMARY KEY, access_timestamp INTEGER, folder VARCHAR(1024) NOT NULL);"
@@ -1086,8 +1086,8 @@ def _darktable_library(path, images):
 
 
 def _lightroom_catalog(path, images):
-    """Catalogue .lrcat réduit aux tables lues : [(racine, sous-dossier, nom, extension)], une ligne par image
-    (une copie virtuelle répète le même fichier)."""
+    """.lrcat catalog reduced to the tables read: [(root, subfolder, name, extension)], one row per image
+    (a virtual copy repeats the same file)."""
     import sqlite3
     db = sqlite3.connect(path)
     db.executescript("CREATE TABLE AgLibraryRootFolder (id_local INTEGER PRIMARY KEY, absolutePath UNIQUE NOT NULL DEFAULT '');"
@@ -1107,7 +1107,7 @@ def _lightroom_catalog(path, images):
 
 
 def _tag_roundtrip(src, file_name):
-    """Pose puis retire un tag sur la photo file_name de la source ; renvoie les sidecars écrits."""
+    """Set then remove a tag on the photo file_name of the source; return the sidecars written."""
     before = {p: p.read_bytes() for _, p in src._files() if p.exists()}
     assets = {a["originalFileName"]: a for a in src.iter_assets()}
     aid = assets[file_name]["id"]
@@ -1120,14 +1120,14 @@ def _tag_roundtrip(src, file_name):
     assert all(k["Subject"] in ("Busard Saint-Martin (Circus cyaneus)", ["Busard Saint-Martin (Circus cyaneus)"]) for k in keywords)
     src.untag_assets(tag, [aid])
     assert src.get_asset(aid)["tags"] == []
-    assert all(p.read_bytes() == b for p, b in before.items())   # photos intactes
+    assert all(p.read_bytes() == b for p, b in before.items())   # photos untouched
     return [p.name for p in written]
 
 
 @pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
 def test_darktable_source(tmp_path):
-    """darktable : photos de library.db (base jamais modifiée), sidecars photo.jpg.xmp et photo_01.jpg.xmp d'un
-    duplicata, réglages de darktablerc vérifiés."""
+    """darktable: photos of library.db (database never modified), sidecars photo.jpg.xmp and photo_01.jpg.xmp of a
+    duplicate, darktablerc settings checked."""
     import shutil
     from pathlib import Path
     from taxonero.sources.darktable import Darktable
@@ -1135,7 +1135,7 @@ def test_darktable_source(tmp_path):
     photos = tmp_path / "photos"
     photos.mkdir()
     shutil.copy(src_photo, photos / "busard.jpg")
-    shutil.copy(src_photo, photos / "autre.jpg")   # dans le dossier, pas dans la bibliothèque : ignorée
+    shutil.copy(src_photo, photos / "autre.jpg")   # in the folder, not in the library: ignored
     conf = tmp_path / "darktable"
     conf.mkdir()
     _darktable_library(conf / "library.db", [(photos, "busard.jpg", 0), (photos, "busard.jpg", 1), (tmp_path / "parti", "x.jpg", 0)])
@@ -1146,7 +1146,7 @@ def test_darktable_source(tmp_path):
     assert src.check() and any("look for updated XMP" in w for w in src.warnings)
     (conf / "darktablerc").write_text("write_sidecar_files=on import\nrun_crawler_on_start=true\n")
     assert src.check() and src.warnings == []
-    assert [a["originalFileName"] for a in src.iter_assets()] == ["busard.jpg"]   # fichier absent : ignoré
+    assert [a["originalFileName"] for a in src.iter_assets()] == ["busard.jpg"]   # missing file: ignored
     assert _tag_roundtrip(src, "busard.jpg") == ["busard.jpg.xmp", "busard_01.jpg.xmp"]
     assert (conf / "library.db").read_bytes() == library
     src.close()
@@ -1155,8 +1155,8 @@ def test_darktable_source(tmp_path):
 
 @pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
 def test_lightroom_source(tmp_path):
-    """Lightroom Classic : photos du catalogue (copie virtuelle comptée une fois), photo.xmp à côté d'un RAW,
-    photo.jpg.xmp pour un JPEG (signalé : Lightroom ne le lit pas), catalogue verrouillé par Lightroom ouvert."""
+    """Lightroom Classic: photos of the catalog (virtual copy counted once), photo.xmp next to a RAW,
+    photo.jpg.xmp for a JPEG (reported: Lightroom does not read it), catalog locked by an open Lightroom."""
     import shutil
     import sqlite3
     from pathlib import Path
@@ -1164,32 +1164,32 @@ def test_lightroom_source(tmp_path):
     src_photo = Path(__file__).parent.parent / "dev" / "photos" / "inat_141438356.jpg"
     photos = tmp_path / "Photos"
     (photos / "2024").mkdir(parents=True)
-    shutil.copy(src_photo, photos / "2024" / "busard.nef")   # JPEG nommé .nef : ExifTool lit son contenu
+    shutil.copy(src_photo, photos / "2024" / "busard.nef")   # JPEG named .nef: ExifTool reads its content
     shutil.copy(src_photo, photos / "2024" / "busard.jpg")
     catalog = tmp_path / "Lightroom Catalog.lrcat"
     root = photos.as_posix() + "/"
     _lightroom_catalog(catalog, [(root, "2024/", "busard", "nef"), (root, "2024/", "busard", "nef"), (root, "2024/", "busard", "jpg")])
     (tmp_path / "data").mkdir()
     src = Lightroom(catalog, tmp_path / "data", dry_run=False)
-    assert src.check() and src.warnings == ["1 photo(s) JPEG, TIFF, HEIC ou DNG : Lightroom lit leurs mots-clés dans le "
-                                            "fichier lui-même, jamais modifié ici ; seuls les RAW les reçoivent dans Lightroom"]
+    assert src.check() and src.warnings == ["1 JPEG, TIFF, HEIC or DNG photo(s): Lightroom reads their keywords in the "
+                                            "file itself, never modified here; only RAW files receive them in Lightroom"]
     assert sorted(a["originalFileName"] for a in src.iter_assets()) == ["busard.jpg", "busard.nef"]
     assert _tag_roundtrip(src, "busard.nef") == ["busard.xmp"]
     assert _tag_roundtrip(src, "busard.jpg") == ["busard.jpg.xmp"]
-    lock = sqlite3.connect(catalog)   # Lightroom ouvert : catalogue verrouillé en écriture exclusive
+    lock = sqlite3.connect(catalog)   # Lightroom open: catalog locked for exclusive writing
     lock.execute("PRAGMA locking_mode = EXCLUSIVE")
     lock.execute("BEGIN EXCLUSIVE")
     with pytest.raises(CatalogLocked):
         list(src.iter_assets())
-    assert src.check() and "ferme Lightroom" in src.warnings[0]
+    assert src.check() and "close Lightroom" in src.warnings[0]
     lock.close()
     src.close()
 
 
 @pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
 def test_rawtherapee_and_rapidraw_sources(tmp_path):
-    """RawTherapee : nom du sidecar et synchronisation XMP lus dans son fichier options. RapidRAW : photo.xmp (ou
-    photo.XMP existant), synchronisation lue dans settings.json."""
+    """RawTherapee: sidecar name and XMP sync read in its options file. RapidRAW: photo.xmp (or
+    existing photo.XMP), sync read in settings.json."""
     import json
     import shutil
     from pathlib import Path
@@ -1215,7 +1215,7 @@ def test_rawtherapee_and_rapidraw_sources(tmp_path):
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"enableXmpSync": False}))
     rr = RapidRaw(photos, tmp_path / "data", dry_run=False, settings=settings)
-    assert rr.check() and any("synchronisation XMP" in w for w in rr.warnings)
+    assert rr.check() and any("XMP sync" in w for w in rr.warnings)
     settings.write_text(json.dumps({"enableXmpSync": True}))
     assert rr.check() and rr.warnings == []
     assert _tag_roundtrip(rr, "busard.jpg") == ["busard.xmp"]
@@ -1225,8 +1225,8 @@ def test_rawtherapee_and_rapidraw_sources(tmp_path):
 
 
 def test_sources_by_edition():
-    """Logiciels photo : sur le bureau seulement ; Lightroom Classic sur Windows et macOS (sur Linux : ses
-    chemins de catalogue ne pourraient pas être ouverts)."""
+    """Photo applications: on the desktop only; Lightroom Classic on Windows and macOS (on Linux: its
+    catalog paths could not be opened)."""
     import sys
     from taxonero.sources import available
     srv = {o["id"]: o for o in available("server")}
@@ -1237,8 +1237,8 @@ def test_sources_by_edition():
 
 
 def test_manual_location_reranks_pending_and_survives_rescan(tmp_path):
-    """Lieu indiqué à la main : gardé tant que la source n'a pas de GPS (un vrai GPS le remplace), et les détections
-    à relire sont reclassées avec ce lieu à partir des scores du modèle enregistrés."""
+    """Place entered by hand: kept as long as the source has no GPS (a real GPS replaces it), and the detections
+    awaiting review are reclassified with this place from the saved model scores."""
     import json
     from taxonero import store
     from taxonero.config import Settings
@@ -1249,12 +1249,12 @@ def test_manual_location_reranks_pending_and_survives_rescan(tmp_path):
     w = Worker(s)
     store.upsert_asset(w.db, {"id": "a", "checksum": "c", "exifInfo": {}})
     w.db.execute("UPDATE asset SET lat = 45.2, lon = 5.7, geo_user = 1 WHERE asset_id = 'a'")
-    store.upsert_asset(w.db, {"id": "a", "checksum": "c", "exifInfo": {"city": "x"}})        # rescan sans GPS : gardé
+    store.upsert_asset(w.db, {"id": "a", "checksum": "c", "exifInfo": {"city": "x"}})        # rescan without GPS: kept
     assert tuple(w.db.execute("SELECT lat, lon, geo_user FROM asset").fetchone()) == (45.2, 5.7, 1)
     store.upsert_asset(w.db, {"id": "a", "checksum": "c", "exifInfo": {"latitude": 48.0, "longitude": 2.0}})
     assert tuple(w.db.execute("SELECT lat, lon, geo_user FROM asset").fetchone()) == (48.0, 2.0, None)   # vrai GPS
 
-    # Reclassement : le modèle hésite (renard roux 0,5, renard véloce 0,5) ; seul le roux est présent près du point.
+    # Reclassification: the model hesitates (red fox 0.5, swift fox 0.5); only the red one is present near the point.
     seen = []
     class Tx:
         def match(self, name, kingdom=None, enrich=True, rank=None):
@@ -1264,7 +1264,7 @@ def test_manual_location_reranks_pending_and_survives_rescan(tmp_path):
             seen.append((lat, lon))
             return ("green", 1.0) if key == 1 else ("red", 0.02)
         def prefetch_candidates(self, *a, **k): pass
-        def fossil_only(self, key): return False
+        def fossil_only(self, key, lat=None, lon=None): return False
     cands = [{"name": n, "gbif_key": k, "p": .5, "p0": .5, "model_score": .5, "plausibility": "unknown",
               "lineage": {"kingdom": "Animalia"}} for n, k in (("Vulpes velox", 2), ("Vulpes vulpes", 1))]
     w.db.execute("INSERT INTO detection (asset_id, source, status, candidates, candidates_out, created_at) "
@@ -1273,16 +1273,16 @@ def test_manual_location_reranks_pending_and_survives_rescan(tmp_path):
                  "VALUES ('a', 'auto', 'confirmed', 2, ?, 0)", (json.dumps(cands),))
     store.save_taxon(w.db, 1, json.dumps({"scientific_name": "Vulpes vulpes", "rank": "species", "lineage": {}, "v": 99}))
     w.db.commit()
-    assert relocate(w.db, Tx(), s, ["a"]) == 1                                  # la validée ne bouge pas
+    assert relocate(w.db, Tx(), s, ["a"]) == 1                                  # the confirmed one does not move
     d = w.db.execute("SELECT taxon_key, plausibility FROM detection WHERE status = 'pending'").fetchone()
     assert tuple(d) == (1, "green") and seen and seen[0] == (48.0, 2.0)
     assert w.db.execute("SELECT taxon_key FROM detection WHERE status = 'confirmed'").fetchone()[0] == 2
 
 
 def test_pipelined_analysis_overlaps_models_and_saving(tmp_path):
-    """Chemin en chaîne (infer_many dans le fil « gpu », decide_many et enregistrement dans le fil principal) :
-    toutes les photos analysées, une photo illisible écartée sans bloquer les autres, modèles jamais appelés
-    depuis le fil principal, temps par étape relevé."""
+    """Pipelined path (infer_many in the "gpu" thread, decide_many and saving in the main thread):
+    all photos analysed, an unreadable photo dropped without blocking the others, models never called
+    from the main thread, time per stage recorded."""
     import io as _io
     import threading
     from PIL import Image
@@ -1321,14 +1321,14 @@ def test_pipelined_analysis_overlaps_models_and_saving(tmp_path):
     assert done == {"p0", "p1", "p2", "p4", "p5"}
     assert w.db.execute("SELECT fail_count FROM asset WHERE asset_id = 'p3'").fetchone()[0] == 1
     assert w.db.execute("SELECT count(*) FROM detection").fetchone()[0] == 5
-    assert threads and all(t.startswith("gpu") for t in threads)          # modèles : fil « gpu » seulement
+    assert threads and all(t.startswith("gpu") for t in threads)          # models: "gpu" thread only
     stages = w.models_info()["stages"]
     assert {"download", "decode", "megadetector", "bioclip", "geo", "save"} <= stages.keys()
 
 
 def test_desktop_edition_session_and_source(tmp_path):
-    """Édition de bureau : pas de mot de passe, mais un jeton par lancement (cookie posé par /?t=…), hôte local
-    seulement ; source et écriture réglables depuis le dashboard, chemins vérifiés. Édition serveur inchangée."""
+    """Desktop edition: no password, but one token per launch (cookie set by /?t=…), local host
+    only; source and writing adjustable from the dashboard, paths checked. Server edition unchanged."""
     from fastapi.testclient import TestClient
     from taxonero.config import Settings
     from taxonero.desktop import prepare
@@ -1337,21 +1337,21 @@ def test_desktop_edition_session_and_source(tmp_path):
 
     s = prepare(Settings(data_dir=tmp_path))
     assert s.edition == "desktop" and s.dashboard_host == "127.0.0.1" and s.detector_path.parent == tmp_path / "models"
-    app = create_app(s, Worker(s), token="jeton-du-lancement")
+    app = create_app(s, Worker(s), token="launch-token")
     c = TestClient(app, base_url="http://127.0.0.1:8765")
     assert c.get("/api/status").status_code == 401
     assert c.get("/?t=faux", follow_redirects=False).status_code == 401
-    r = c.get("/?t=jeton-du-lancement", follow_redirects=False)
+    r = c.get("/?t=launch-token", follow_redirects=False)
     assert r.status_code == 303 and "httponly" in r.headers["set-cookie"].lower() and "samesite=strict" in r.headers["set-cookie"].lower()
-    assert c.get("/api/status").status_code == 200                                   # cookie gardé par le client
+    assert c.get("/api/status").status_code == 200                                   # cookie kept by the client
     assert c.get("/api/status", headers={"host": "evil.example"}).status_code == 403  # DNS rebinding
     photos = tmp_path / "photos"
     photos.mkdir()
     r = c.put("/api/source", json={"source": "local", "path": str(photos), "dry_run": False})
     assert r.status_code == 200 and r.json()["current"] == "local" and r.json()["dry_run"] is False
-    assert c.put("/api/source", json={"source": "local", "path": "pas/absolu"}).status_code == 422
+    assert c.put("/api/source", json={"source": "local", "path": "not/absolute"}).status_code == 422
     assert c.put("/api/source", json={"source": "picasa"}).status_code == 422
-    assert c.put("/api/source", json={"source": "darktable", "path": str(photos)}).status_code == 422   # pas un library.db
+    assert c.put("/api/source", json={"source": "darktable", "path": str(photos)}).status_code == 422   # not a library.db
     library = tmp_path / "library.db"
     _darktable_library(library, [])
     r = c.put("/api/source", json={"source": "darktable", "path": str(library)})
@@ -1363,14 +1363,14 @@ def test_desktop_edition_session_and_source(tmp_path):
     srv = Settings(data_dir=tmp_path / "srv", dashboard_password="secret")
     srv.data_dir.mkdir()
     cs = TestClient(create_app(srv, Worker(srv)))
-    assert cs.get("/api/status").status_code == 401                                   # mot de passe toujours exigé
+    assert cs.get("/api/status").status_code == 401                                   # password still required
     assert cs.put("/api/source", json={"dry_run": False}, auth=("nature", "secret")).status_code == 422   # DRY_RUN : environnement
-    assert cs.put("/api/source", json={"source": "darktable", "path": str(library)}, auth=("nature", "secret")).status_code == 422   # bureau seulement
+    assert cs.put("/api/source", json={"source": "darktable", "path": str(library)}, auth=("nature", "secret")).status_code == 422   # desktop only
 
 
 def test_desktop_bootstrap_gpu_detection(monkeypatch):
-    """Lanceur de bureau : variante de PyTorch choisie selon le GPU (NVIDIA selon le pilote, AMD, Intel Arc,
-    Apple Silicon), choix imposé par TAXONERO_GPU, processeur sinon."""
+    """Desktop launcher: PyTorch variant chosen according to the GPU (NVIDIA depending on the driver, AMD, Intel Arc,
+    Apple Silicon), choice forced by TAXONERO_GPU, CPU otherwise."""
     import importlib.util
     from pathlib import Path
     spec = importlib.util.spec_from_file_location("bootstrap", Path(__file__).parent.parent / "packaging" / "bootstrap.py")
@@ -1389,22 +1389,22 @@ def test_desktop_bootstrap_gpu_detection(monkeypatch):
     assert case("linux", "x86_64", driver=580.95) == "cu130"
     assert case("win32", "AMD64", driver=566.3) == "cu128"
     assert case("linux", "x86_64", names=["AMD (amdgpu)"], kfd=True) == "rocm"
-    assert case("linux", "x86_64", names=["AMD (amdgpu)"], kfd=False) == "cpu"     # pas de calcul ROCm possible
+    assert case("linux", "x86_64", names=["AMD (amdgpu)"], kfd=False) == "cpu"     # no ROCm compute possible
     assert case("win32", "AMD64", names=["AMD Radeon RX 7800 XT"]) == "amd-win"
     assert case("win32", "AMD64", names=["Intel(R) Arc(TM) B580 Graphics"]) == "xpu"
     assert case("linux", "x86_64", names=["Intel (xe)"]) == "xpu"
-    assert case("linux", "x86_64", names=["Intel (i915)"]) == "cpu"                # ancien iGPU : pas de XPU
+    assert case("linux", "x86_64", names=["Intel (i915)"]) == "cpu"                # old iGPU: no XPU
     assert case("darwin", "arm64") == "mps" and case("darwin", "x86_64") == "cpu"
     assert case("linux", "aarch64", driver=580.0) == "cu130"                       # NVIDIA Grace, DGX Spark
-    assert case("linux", "aarch64", driver=550.0) == "cpu"                         # pas de CUDA 12 pour ARM
+    assert case("linux", "aarch64", driver=550.0) == "cpu"                         # no CUDA 12 for ARM
     assert case("win32", "AMD64", driver=580.0, forced="cpu") == "cpu"
     assert set(b.TORCH) == {"cu130", "cu128", "rocm", "xpu", "cpu", "mps", "amd-win"}
 
 
 def test_series_assign_and_smoothing(tmp_path):
-    """Séries : appareil connu, moins de 2 min de proche en proche ; lissage à la MegaDetector sur les détections à
-    relire seulement : espèce isolée -> dominante (>= 4 photos, parmi ses candidats), genre -> espèce dominante de
-    ce genre (>= 2), jamais un règne ; validées intactes."""
+    """Series: known camera, less than 2 min step by step; MegaDetector-style smoothing on the detections awaiting
+    review only: isolated species -> dominant one (>= 4 photos, among its candidates), genus -> dominant species of
+    that genus (>= 2), never a kingdom; confirmed ones untouched."""
     import json
     from taxonero import series, store
     db = store.connect(tmp_path / "s.sqlite")
@@ -1416,8 +1416,8 @@ def test_series_assign_and_smoothing(tmp_path):
     db.commit()
     series.assign(db)
     sid = dict(db.execute("SELECT asset_id, series_id FROM asset").fetchall())
-    assert {sid[f"a{i}"] for i in range(1, 7)} == {"a1"} and sid["b1"] is None   # 20 min plus tard : seule
-    assert sid["c1"] is None and sid["c2"] is None                                  # appareil inconnu : jamais en série
+    assert {sid[f"a{i}"] for i in range(1, 7)} == {"a1"} and sid["b1"] is None   # 20 min later: alone
+    assert sid["c1"] is None and sid["c2"] is None                                  # unknown camera: never in a series
 
     TAX = {1: ("Parus major", "species", {"genus": "Parus"}), 2: ("Cyanistes caeruleus", "species", {}),
            3: ("Parus", "genus", {}), 4: ("Animalia", "kingdom", {})}
@@ -1430,16 +1430,16 @@ def test_series_assign_and_smoothing(tmp_path):
     for aid in ("a1", "a2", "a3"):
         det(aid, 1, "species")
     det("a4", 1, "species", status="confirmed")
-    det("a5", 2, "species")                  # isolée, la dominante (Parus major, 4 photos) parmi ses candidats
-    det("a6", 3, "genus", c=(3,))            # genre Parus : précisé en Parus major
-    det("a6", 4, "kingdom", c=(4, 1))        # règne : jamais précisé (une poule ne devient pas un chat)
+    det("a5", 2, "species")                  # isolated, the dominant one (Parus major, 4 photos) among its candidates
+    det("a6", 3, "genus", c=(3,))            # genus Parus: refined to Parus major
+    det("a6", 4, "kingdom", c=(4, 1))        # kingdom: never refined (a hen does not become a cat)
     db.commit()
     assert series.smooth(db, lambda k: store.load_taxon(db, k)) == 2
     got = {(r["asset_id"], r["model_key"]): (r["taxon_key"], r["series_n"]) for r in db.execute("SELECT * FROM detection")}
     assert got[("a5", 2)] == (1, 4) and got[("a6", 3)] == (1, 4) and got[("a6", 4)][0] == 4
-    assert {r[0] for r in db.execute("SELECT model_key FROM detection WHERE smoothed = 1")} == {2, 3}   # trace du lissage
-    assert got[("a4", 1)] == (1, 4)          # validée : inchangée, son nombre de photos noté
-    # 3 photos seulement : pas assez pour remplacer une espèce isolée
+    assert {r[0] for r in db.execute("SELECT model_key FROM detection WHERE smoothed = 1")} == {2, 3}   # record of the smoothing
+    assert got[("a4", 1)] == (1, 4)          # confirmed: unchanged, its number of photos noted
+    # Only 3 photos: not enough to replace an isolated species
     db.execute("UPDATE detection SET taxon_key = model_key, taxon_rank = CASE model_key WHEN 3 THEN 'genus' ELSE taxon_rank END")
     db.execute("UPDATE detection SET status = 'rejected' WHERE asset_id = 'a4'")
     db.commit()
@@ -1448,8 +1448,8 @@ def test_series_assign_and_smoothing(tmp_path):
 
 
 def test_frame_support_flags_box_beside_subject():
-    """Sujet seul : l'espèce retenue presque absente du recadrage (vue sur la photo entière seulement) bloque la
-    validation automatique ; le signal suit le taxon (effacé si la décision change d'espèce)."""
+    """Single subject: the kept species almost absent from the crop (seen on the whole photo only) blocks
+    auto-confirmation; the signal follows the taxon (cleared if the decision changes species)."""
     import sqlite3
     from taxonero.autoconfirm import auto_blockers
     from taxonero.curation import UPDATE_DECISION
@@ -1470,7 +1470,7 @@ def test_frame_support_flags_box_beside_subject():
                "candidates_out, frame_support, smoothed, presmooth)")
     db.execute("INSERT INTO detection VALUES (1, 10, 'species', 0.5, 0, 'green', '[]', '[]', 0.02, NULL, NULL)")
     db.execute(UPDATE_DECISION, (10, "species", 0.6, 0, "green", "[]", "[]", 1))
-    assert db.execute("SELECT frame_support FROM detection").fetchone()[0] == 0.02      # même taxon : gardé
+    assert db.execute("SELECT frame_support FROM detection").fetchone()[0] == 0.02      # same taxon: kept
     db.execute(UPDATE_DECISION, (11, "species", 0.6, 0, "green", "[]", "[]", 1))
     assert db.execute("SELECT frame_support, taxon_key FROM detection").fetchone() == (None, 11)
 
@@ -1558,8 +1558,8 @@ def test_sync_one_refused_photo_does_not_stop_the_others(tmp_path):
     im = Refuses(["a", "b"])
     stats = Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False)
     assert stats.failed == 1 and stats.assets == 2
-    assert {r[0] for r in db.execute("SELECT asset_id FROM asset_sync")} == {"a", "b"}   # « bad » sera retentée
-    for code in (401, 503):   # clé refusée, serveur en panne : inutile d'insister sur chaque photo
+    assert {r[0] for r in db.execute("SELECT asset_id FROM asset_sync")} == {"a", "b"}   # "bad" will be retried
+    for code in (401, 503):   # key refused, server down: no point insisting on every photo
         im.error = refusal(code)
         db.execute("DELETE FROM asset_sync")
         with pytest.raises(httpx.HTTPStatusError):
@@ -1600,7 +1600,7 @@ def test_settings_unchanged_when_source_unreachable(tmp_path, monkeypatch):
     r = _web(s, w).put("/api/source", json={"source": "immich"})
     assert r.status_code == 502 and r.json()["detail"]["code"] == "source_unreachable"
     assert s.source == "local" and w.client is client and down.closed and not store.get_state(w.db, "source")
-    # Écriture : réglage de bureau, resté désactivé si la source ne répond pas.
+    # Writing: desktop setting, left disabled if the source does not answer.
     s.edition, s.dry_run, client.dry_run = "desktop", True, True
     def boom():
         raise httpx.ConnectError("injoignable")
@@ -1631,7 +1631,7 @@ def test_database_is_private(tmp_path):
     for suffix in ("", "-wal", "-shm"):
         assert Path(f"{path}{suffix}").stat().st_mode & 0o777 == 0o600
     db.close()
-    path.chmod(0o644)     # base créée avant cette règle
+    path.chmod(0o644)     # database created before this rule
     store.connect(path).close()
     assert path.stat().st_mode & 0o777 == 0o600
 
@@ -1668,13 +1668,13 @@ def test_failed_relocation_leaves_no_open_transaction(tmp_path, monkeypatch):
     w.db.execute("UPDATE asset SET lat = NULL, lon = NULL WHERE asset_id = ?", (aid,))
     w.db.commit()
     def half_written(db, *a):
-        store.save_taxon(db, 1, "{}")   # écrit sans valider, puis panne réseau
+        store.save_taxon(db, 1, "{}")   # written without committing, then network outage
         raise OSError("GBIF en panne")
     monkeypatch.setattr(review, "relocate", half_written)
     with _web(s, w) as c:
         r = c.post("/api/assets/location", json={"asset_ids": [aid], "lat": 3, "lon": 4})
     assert r.status_code == 200 and r.json()["reclassified"] == 0
-    w.db.execute("INSERT OR REPLACE INTO state VALUES ('x', '1')")   # un autre écrivain passe
+    w.db.execute("INSERT OR REPLACE INTO state VALUES ('x', '1')")   # another writer comes by
     w.db.commit()
 
 
@@ -1710,23 +1710,23 @@ def test_idle_models_leave_gpu_memory(tmp_path, monkeypatch):
     ref = weakref.ref(models)
     w._analyzer, w._device, w._models_used = models, "cuda", time.monotonic()
     del models
-    assert not w.unload_idle() and w.models_loaded                  # utilisés il y a moins de 5 min
+    assert not w.unload_idle() and w.models_loaded                  # used less than 5 min ago
     w._models_used -= 299
     assert not w.unload_idle()
     w._models_used -= 2
     s.models_idle_minutes = 0
-    assert not w.unload_idle()                                      # 0 : toujours gardés
+    assert not w.unload_idle()                                      # 0: always kept
     s.models_idle_minutes = 5
     w._device = "cpu"
-    assert not w.unload_idle()                                      # pas de mémoire de GPU à rendre
+    assert not w.unload_idle()                                      # no GPU memory to give back
     w._device = "cuda"
     assert w.unload_idle() and not w.models_loaded and released == ["cuda"] and ref() is None
-    assert w.models_info()["stages"]["detection"] == 1000           # temps mesurés toujours affichés
+    assert w.models_info()["stages"]["detection"] == 1000           # measured times always shown
 
 
 def test_wikipedia_found_through_name_or_synonym():
-    """Fiche Wikidata de la clé GBIF sans article : article cherché sur le synonyme (Ardea modesta / Ardea alba
-    modesta), sans reprendre le nom latin du synonyme comme nom commun. Un nom ambigu (deux fiches) est ignoré."""
+    """Wikidata item of the GBIF key without an article: article searched on the synonym (Ardea modesta / Ardea alba
+    modesta), without taking the Latin name of the synonym as a common name. An ambiguous name (two items) is ignored."""
     import httpx
     from taxonero import store
     from taxonero.taxonomy import Taxon, Taxonomy
@@ -1757,7 +1757,7 @@ def test_wikipedia_found_through_name_or_synonym():
 
 
 def test_wikidata_overload_is_not_cached(monkeypatch):
-    """Surcharge de Wikidata (200 et {"error": …}) : relance, et jamais mise en cache comme une réponse vide."""
+    """Wikidata overload (200 and {"error": …}): retry, and never cached like an empty response."""
     import httpx
     from taxonero import store
     from taxonero.taxonomy import WIKIDATA, Taxonomy
@@ -1793,36 +1793,36 @@ def test_log_buffer_keeps_warnings_apart_and_across_restarts(tmp_path):
     buf = LogBuffer(capacity=3, keep=4)
     buf.bind(s)
     line(buf, logging.ERROR, "panne cle-secrete")
-    for k in range(10):                                          # les lignes d'information ne chassent pas l'erreur
+    for k in range(10):                                          # information lines do not push out the error
         line(buf, logging.INFO, f"info {k}")
     assert [e["msg"] for e in buf.read()] == ["panne ***", "info 7", "info 8", "info 9"]
     assert "cle-secrete" not in (tmp_path / FILENAME).read_text()
     assert (tmp_path / FILENAME).stat().st_mode & 0o077 == 0
 
-    for k in range(10):                                          # les 4 derniers avertissements, fichier réduit en route
+    for k in range(10):                                          # the last 4 warnings, file shrunk along the way
         line(buf, logging.WARNING, f"alerte {k}")
         line(buf, logging.INFO, f"info {k}")
     assert [e["msg"] for e in buf.read() if e["level"] != "INFO"] == [f"alerte {k}" for k in range(6, 10)]
     assert len((tmp_path / FILENAME).read_text().splitlines()) <= 8
     last = buf.kept[-1]["id"]
     with (tmp_path / FILENAME).open("a") as f:
-        f.write('{"id": 1, "coup')                               # arrêt brutal au milieu d'une écriture
+        f.write('{"id": 1, "cut')                                # abrupt stop in the middle of a write
 
-    again = LogBuffer(capacity=3, keep=4)                        # redémarrage : conservées, numérotation qui continue
+    again = LogBuffer(capacity=3, keep=4)                        # restart: kept, numbering goes on
     again.bind(s)
     assert [e["msg"] for e in again.read()] == [f"alerte {k}" for k in range(6, 10)]
     line(again, logging.ERROR, "nouvelle")
     assert again.read()[-1]["id"] > last
 
-    cleared = again.read()[-1]["id"]                            # bouton « Effacer » : tout, fichier compris
+    cleared = again.read()[-1]["id"]                            # "Clear" button: everything, file included
     again.clear()
     assert again.read() == [] and not (tmp_path / FILENAME).exists()
-    line(again, logging.WARNING, "après")
-    assert [e["msg"] for e in again.read(cleared)] == ["après"]
+    line(again, logging.WARNING, "after")
+    assert [e["msg"] for e in again.read(cleared)] == ["after"]
 
 
 class _UndoClient:
-    """Immich simulé pour le retrait : photos en mémoire, écritures perdues ou refusées à la demande."""
+    """Simulated Immich for the removal: photos in memory, writes lost or refused on demand."""
     dry_run = False
 
     def __init__(self, assets):
@@ -1869,14 +1869,14 @@ def test_uninstall_rereads_lost_writes_and_leaves_user_text_alone(tmp_path):
     from taxonero.sync import BLOCK_END, BLOCK_START, Syncer
     block = f"{BLOCK_START}\nx\n{BLOCK_END}"
     c = _UndoClient({"a": {"tags": ["t1", "perso"], "desc": f"Mon texte\n\n{block}"},
-                     "b": {"tags": [], "desc": "  texte sans bloc  "}})   # bloc déjà retiré à la main
-    c.lose = 1                                                             # Immich perd la première écriture
+                     "b": {"tags": [], "desc": "  text without block  "}})   # block already removed by hand
+    c.lose = 1                                                             # Immich loses the first write
     db = _undo_db(tmp_path, [("tag", "t1", "", "Nature"), ("tag_asset", "t1", "a", "Nature"),
                              ("description", "a", "a", None), ("description", "b", "b", None)])
     s = Syncer(db, c, write_gap=0)
     s.uninstall()
     assert c.assets["a"] == {"tags": ["perso"], "desc": "Mon texte"}
-    assert c.assets["b"]["desc"] == "  texte sans bloc  "                  # pas récrit
+    assert c.assets["b"]["desc"] == "  text without block  "               # not rewritten
     assert not any(w[0] == "desc" and w[1] == "b" for w in c.writes)
     assert s.remaining == 0 and db.execute("SELECT count(*) FROM written").fetchone()[0] == 0
     assert ("delete", "t1") in c.writes
@@ -1890,11 +1890,11 @@ def test_uninstall_stops_on_outage_and_keeps_traces(tmp_path):
     c = _UndoClient({f"p{k}": {"tags": ["t1"], "desc": ""} for k in range(n)})
     c.down = True
     db = _undo_db(tmp_path, [("tag", "t1", "", "Nature")] + [("tag_asset", "t1", f"p{k}", "Nature") for k in range(n)])
-    with pytest.raises(RuntimeError, match="échecs de suite"):
+    with pytest.raises(RuntimeError, match="failures in a row"):
         Syncer(db, c, write_gap=0).uninstall()
-    assert not c.writes                                                    # le tag n'est pas supprimé
+    assert not c.writes                                                    # the tag is not deleted
     assert db.execute("SELECT count(*) FROM written").fetchone()[0] == n + 1
-    assert store.get_state(db, store.WRITES_PAUSED) == "1"                 # le cycle ne repose rien entre-temps
+    assert store.get_state(db, store.WRITES_PAUSED) == "1"                 # the cycle sets nothing back in the meantime
     c.down = False
     s = Syncer(db, c, write_gap=0)                                         # relancer reprend
     s.uninstall()
@@ -1913,8 +1913,8 @@ def test_uninstall_keeps_tag_while_a_photo_resists(tmp_path):
 
 
 def test_interrupted_sync_keeps_the_photos_already_written(tmp_path):
-    """Une première synchronisation longue coupée en route (réglage du dashboard, redémarrage) ne repart pas de zéro :
-    chaque photo est notée dès qu'elle est écrite."""
+    """A long first synchronisation cut short (dashboard setting, restart) does not start from scratch:
+    each photo is recorded as soon as it is written."""
     from taxonero.sync import Syncer
 
     class Stop(BaseException):
@@ -1924,7 +1924,7 @@ def test_interrupted_sync_keeps_the_photos_already_written(tmp_path):
     im = FakeImmich(["a", "b", "c"])
     calls = []
 
-    def checkpoint():   # 3 lectures, 3 tags, puis arrêt avant la description de la 2e photo
+    def checkpoint():   # 3 reads, 3 tags, then stop before the description of the 2nd photo
         calls.append(1)
         if len(calls) == 8:
             raise Stop()
@@ -1938,7 +1938,7 @@ def test_interrupted_sync_keeps_the_photos_already_written(tmp_path):
 
 
 def test_sync_refused_in_a_later_round_is_retried(tmp_path):
-    """Photo notée synchronisée au premier tour puis refusée à la relecture : reprise au cycle suivant."""
+    """Photo marked as synchronised in the first round then refused on re-reading: picked up at the next cycle."""
     import httpx
     from taxonero.sync import Syncer
 
@@ -1955,7 +1955,7 @@ def test_sync_refused_in_a_later_round_is_retried(tmp_path):
 
 
 def test_checkpoints_count_as_activity_for_healthz(tmp_path):
-    """Une longue synchronisation passe par des points d'arrêt sans « tick » : /healthz ne doit pas la croire figée."""
+    """A long synchronisation goes through stopping points without a "tick": /healthz must not think it frozen."""
     s, w = _local_worker(tmp_path)
     w.loop_started, w.last_activity = True, 0.0
     w._checkpoint()
@@ -1964,7 +1964,7 @@ def test_checkpoints_count_as_activity_for_healthz(tmp_path):
 
 
 def test_megadetector_checkpoint_hash_checked_before_loading(tmp_path, monkeypatch):
-    """Le point de contrôle complet est lu par pickle : un fichier présent mais d'une autre empreinte n'est jamais chargé."""
+    """The full checkpoint is read with pickle: a file present but with another checksum is never loaded."""
     import hashlib
     import types
     from taxonero import megadetector, worker
@@ -1984,18 +1984,18 @@ def test_megadetector_checkpoint_hash_checked_before_loading(tmp_path, monkeypat
 
 
 def test_a_long_walk_is_not_one_burst(tmp_path):
-    """Une balade photographiée toutes les minutes pendant 3 h n'est pas une seule série : 10 min au plus par série.
-    Et même dans une vraie rafale, une espèce sûre (92 %) n'est pas remplacée par une dominante qu'elle donne à 3 %."""
+    """A walk photographed every minute for 3 h is not a single series: 10 min at most per series.
+    And even in a real burst, a confident species (92 %) is not replaced by a dominant one it gives at 3 %."""
     import json
     from taxonero import series, store
     db = store.connect(tmp_path / "s.sqlite")
-    for i in range(180):   # une photo par minute, ~50 m entre deux
+    for i in range(180):   # one photo per minute, ~50 m apart
         db.execute("INSERT INTO asset (asset_id, taken_at, lat, lon, make, model) VALUES (?, ?, ?, ?, 'OM', 'OM-1')",
                    (f"p{i:03d}", f"2026-05-01T{8 + i // 60:02d}:{i % 60:02d}:00", 45 + i * 0.00045, 5.0))
     db.commit()
     series.assign(db)
     spans = db.execute("SELECT series_id, min(taken_at), max(taken_at), count(*) FROM asset GROUP BY series_id").fetchall()
-    assert len(spans) == 17 and max(r[3] for r in spans) == 11   # 10 min au plus : 11 photos (de 0 à 600 s)
+    assert len(spans) == 17 and max(r[3] for r in spans) == 11   # 10 min at most: 11 photos (from 0 to 600 s)
 
     MERLE, ROUGEGORGE = 1, 2
     det = lambda aid, key, score, cands: db.execute(
@@ -2003,12 +2003,12 @@ def test_a_long_walk_is_not_one_burst(tmp_path):
         "VALUES (?, 'auto', 'pending', ?, 'species', ?, ?, ?, 0)", (aid, key, score, json.dumps(cands), key))
     for aid in ("p000", "p001", "p002", "p003"):
         det(aid, MERLE, 0.9, [{"gbif_key": MERLE, "p": 0.9}])
-    det("p170", ROUGEGORGE, 0.92, [{"gbif_key": ROUGEGORGE, "p": 0.92}, {"gbif_key": MERLE, "p": 0.03}])   # 2 h 50 plus tard
-    det("p005", ROUGEGORGE, 0.92, [{"gbif_key": ROUGEGORGE, "p": 0.92}, {"gbif_key": MERLE, "p": 0.03}])   # même série
+    det("p170", ROUGEGORGE, 0.92, [{"gbif_key": ROUGEGORGE, "p": 0.92}, {"gbif_key": MERLE, "p": 0.03}])   # 2 h 50 later
+    det("p005", ROUGEGORGE, 0.92, [{"gbif_key": ROUGEGORGE, "p": 0.92}, {"gbif_key": MERLE, "p": 0.03}])   # same series
     db.commit()
     assert series.smooth(db, lambda k: {"lineage": {}}) == 0
     assert {r[0] for r in db.execute("SELECT taxon_key FROM detection WHERE asset_id IN ('p005', 'p170')")} == {ROUGEGORGE}
-    # Candidat crédible (le modèle hésitait) : le lissage s'applique toujours.
+    # Credible candidate (the model hesitated): smoothing still applies.
     db.execute("UPDATE detection SET score = 0.55, candidates = ? WHERE asset_id = 'p005'",
                (json.dumps([{"gbif_key": ROUGEGORGE, "p": 0.55}, {"gbif_key": MERLE, "p": 0.35}]),))
     db.commit()
@@ -2017,8 +2017,8 @@ def test_a_long_walk_is_not_one_burst(tmp_path):
 
 
 def test_wrong_smoothing_from_before_is_undone(tmp_path):
-    """Lissage fait par l'ancienne règle (balade de 3 h prise pour une rafale, sans presmooth) : la proposition du
-    modèle est rétablie, même si la photo n'est plus dans aucune série ; un lissage encore justifié reste."""
+    """Smoothing done by the old rule (3 h walk taken for a burst, without presmooth): the model
+    proposal is restored, even if the photo is no longer in any series; a smoothing still justified stays."""
     import json
     from taxonero import series, store
     db = store.connect(tmp_path / "s.sqlite")
@@ -2033,11 +2033,11 @@ def test_wrong_smoothing_from_before_is_undone(tmp_path):
                                    kw.get("model_conf", score), kw.get("smoothed"), kw.get("series_n")))
     for aid in ("p000", "p001", "p002", "p003"):
         det(aid, MERLE, 0.9, [{"gbif_key": MERLE, "p": 0.9, "plausibility": "green"}])
-    # Lissées à tort autrefois : 2 h 50 plus tard (p170), et dans une autre rafale avec un merle marginal (p030).
+    # Wrongly smoothed in the past: 2 h 50 later (p170), and in another burst with a marginal blackbird (p030).
     for aid in ("p170", "p030"):
         det(aid, MERLE, 0.03, [{"gbif_key": ROUGEGORGE, "p": 0.92, "plausibility": "amber"}, {"gbif_key": MERLE, "p": 0.03}],
             model=ROUGEGORGE, model_conf=0.92, smoothed=1, series_n=4, plaus="green")
-    # Lissée à juste titre (le modèle hésitait) : gardée.
+    # Rightly smoothed (the model hesitated): kept.
     det("p005", MERLE, 0.35, [{"gbif_key": ROUGEGORGE, "p": 0.55}, {"gbif_key": MERLE, "p": 0.35}],
         model=ROUGEGORGE, model_conf=0.55, smoothed=1, series_n=4)
     db.commit()
@@ -2046,18 +2046,18 @@ def test_wrong_smoothing_from_before_is_undone(tmp_path):
     for aid in ("p031", "p032", "p033", "p034"):   # rafale de p030 : quatre merles
         det(aid, MERLE, 0.9, [{"gbif_key": MERLE, "p": 0.9}])
     db.commit()
-    assert series.smooth(db, lambda k: {"lineage": {}}) == 3   # 2 rétablies + p005 notée avec sa proposition d'avant
+    assert series.smooth(db, lambda k: {"lineage": {}}) == 3   # 2 restored + p005 recorded with its previous proposal
     got = {r["asset_id"]: dict(r) for r in db.execute("SELECT * FROM detection WHERE asset_id IN ('p005', 'p030', 'p170')")}
     for aid in ("p030", "p170"):
         assert (got[aid]["taxon_key"], got[aid]["score"], got[aid]["plausibility"], got[aid]["smoothed"]) == (ROUGEGORGE, 0.92, "amber", None)
     assert (got["p005"]["taxon_key"], got["p005"]["smoothed"]) == (MERLE, 1)
     assert json.loads(got["p005"]["presmooth"])["taxon_key"] == ROUGEGORGE
-    assert series.smooth(db, lambda k: {"lineage": {}}) == 0   # stable d'un cycle à l'autre
+    assert series.smooth(db, lambda k: {"lineage": {}}) == 0   # stable from one cycle to the next
 
 
 def test_analysis_pause_stops_after_current_group_and_survives_restart(tmp_path, monkeypatch):
-    """Bouton pause : le groupe en cours finit, les suivants attendent ; run_once n'analyse plus ; l'état est gardé
-    d'un lancement à l'autre ; la reprise relance un cycle."""
+    """Pause button: the current group finishes, the next ones wait; run_once no longer analyses; the state is kept
+    from one launch to the next; resuming starts a cycle."""
     from fastapi.testclient import TestClient
     from taxonero import hardware
     from taxonero.config import Settings
@@ -2073,7 +2073,7 @@ def test_analysis_pause_stops_after_current_group_and_survives_restart(tmp_path,
 
         def analyze_many(self, items, fallback=None, groups=None):
             Pausing.calls += 1
-            w.analysis_paused = True                                  # pause demandée pendant le premier groupe
+            w.analysis_paused = True                                  # pause requested during the first group
             return [[] for _ in items]
 
     s = Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path, auto_confirm="off", gpu_batch=4)
@@ -2090,7 +2090,7 @@ def test_analysis_pause_stops_after_current_group_and_survives_restart(tmp_path,
     for step in ("check", "scan", "reconcile", "apply_skips", "refresh_taxa", "refresh_places"):
         monkeypatch.setattr(w, step, lambda: 0)
     monkeypatch.setattr(w, "check", lambda: True)
-    report = w.run_once(manual=True)                                 # en pause : rien d'analysé, même à la main
+    report = w.run_once(manual=True)                                 # paused: nothing analysed, even by hand
     assert report["analyzed"] == 0 and Pausing.calls == 1
 
     d = prepare(Settings(data_dir=tmp_path / "bureau"))
@@ -2101,14 +2101,14 @@ def test_analysis_pause_stops_after_current_group_and_survives_restart(tmp_path,
     c.get("/?t=t", follow_redirects=False)
     assert c.post("/api/analysis/pause", json={"paused": True}).json() == {"paused": True}
     assert c.get("/api/sync/status").json()["analysis_paused"] is True
-    assert Worker(d).analysis_paused                                 # redémarrage : toujours en pause
+    assert Worker(d).analysis_paused                                 # restart: still paused
     assert c.post("/api/analysis/pause", json={"paused": False}).json() == {"paused": False} and started == [1]
     assert not Worker(d).analysis_paused
 
 
 def test_pause_and_resume_in_the_running_loop(tmp_path, monkeypatch):
-    """Boucle réelle : la pause arrête l'analyse en cours de file (le reste attend), la reprise relance aussitôt un
-    cycle qui finit la file, même hors de la fenêtre horaire."""
+    """Real loop: the pause stops the analysis in the middle of the queue (the rest waits), resuming starts right away a
+    cycle that finishes the queue, even outside the time window."""
     import threading
     import time as _time
     from taxonero.config import Settings
@@ -2133,7 +2133,7 @@ def test_pause_and_resume_in_the_running_loop(tmp_path, monkeypatch):
     done = lambda: w.db.execute("SELECT count(*) FROM asset WHERE analyzed_at IS NOT NULL").fetchone()[0]
     threading.Thread(target=w.loop, daemon=True).start()
     _time.sleep(0.3)
-    assert done() == 0                                   # hors de la fenêtre horaire : la boucle n'analyse pas
+    assert done() == 0                                   # outside the time window: the loop does not analyse
     assert w.start_manual()
     for _ in range(500):
         if done() >= 5:
@@ -2143,8 +2143,8 @@ def test_pause_and_resume_in_the_running_loop(tmp_path, monkeypatch):
     _time.sleep(0.5)
     paused_at = done()
     _time.sleep(0.5)
-    assert 0 < paused_at < 60 and done() == paused_at    # plus rien ne s'analyse
-    w.pause_analysis(False)                              # cycle peut-être encore en cours : relancé à sa fin
+    assert 0 < paused_at < 60 and done() == paused_at    # nothing gets analysed any more
+    w.pause_analysis(False)                              # cycle perhaps still running: restarted when it ends
     for _ in range(300):
         if done() == 60:
             break
@@ -2153,8 +2153,8 @@ def test_pause_and_resume_in_the_running_loop(tmp_path, monkeypatch):
 
 
 def test_prefetch_stops_on_network_outage_with_one_line(tmp_path, monkeypatch, caplog):
-    """Réseau coupé pendant la mise en local : une ligne d'avertissement, sans trace, et le reste au cycle suivant
-    (avant : une trace complète par taxon)."""
+    """Network down while storing locally: one warning line, without a trace, and the rest at the next cycle
+    (before: a full trace per taxon)."""
     import logging
     import httpx
     from taxonero import ranges
@@ -2172,14 +2172,15 @@ def test_prefetch_stops_on_network_outage_with_one_line(tmp_path, monkeypatch, c
     monkeypatch.setattr(ranges, "fetch", lambda tx, key: calls.append(key) or (_ for _ in ()).throw(httpx.ConnectError("Name or service not known")))
     with caplog.at_level(logging.WARNING):
         w.prefetch()
-    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    # Only the lines of this prefetch: a dev server left by the browser tests may log in the meantime.
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING and "local data" in r.getMessage()]
     assert len(calls) == 1 and len(warnings) == 1 and not warnings[0].exc_info
-    assert "reprise au prochain cycle" in warnings[0].getMessage()
+    assert "resumed at the next cycle" in warnings[0].getMessage()
 
 
 def test_desktop_folder_picker_goes_through_the_server(tmp_path):
-    """Bureau : « Parcourir… » passe par /api/desktop/pick (window.pywebview.api, créé avec new Function, est refusé
-    par la CSP) ; jeton de session exigé ; ailleurs, pas de bouton et 404."""
+    """Desktop: "Browse…" goes through /api/desktop/pick (window.pywebview.api, created with new Function, is refused
+    by the CSP); session token required; elsewhere, no button and 404."""
     from fastapi.testclient import TestClient
     from taxonero.config import Settings
     from taxonero.desktop import prepare
@@ -2195,7 +2196,7 @@ def test_desktop_folder_picker_goes_through_the_server(tmp_path):
 
     d = prepare(Settings(data_dir=tmp_path / "bureau"))
     c = TestClient(create_app(d, Worker(d), token="t", picker=Picker()), base_url="http://127.0.0.1:8765")
-    assert c.post("/api/desktop/pick", json={"kind": "folder"}).status_code == 401   # sans le jeton
+    assert c.post("/api/desktop/pick", json={"kind": "folder"}).status_code == 401   # without the token
     c.get("/?t=t", follow_redirects=False)
     assert c.get("/api/status").json()["can_pick"] is True
     assert c.post("/api/desktop/pick", json={"kind": "folder"}).json() == {"path": "/home/moi/Photos"}
@@ -2208,8 +2209,8 @@ def test_desktop_folder_picker_goes_through_the_server(tmp_path):
 
 
 def test_pause_while_models_load_frees_them(tmp_path, monkeypatch):
-    """Pause pendant le chargement des modèles (téléchargement de plusieurs Go) : le cycle n'attend pas la fin du
-    chargement, et les modèles ne restent pas en mémoire une fois chargés (avant : gardés jusqu'à la reprise)."""
+    """Pause during model loading (download of several GB): the cycle does not wait for the end of the
+    loading, and the models do not stay in memory once loaded (before: kept until resuming)."""
     import time as _time
     from taxonero import worker as wm
     from taxonero.config import Settings
@@ -2240,19 +2241,19 @@ def test_pause_while_models_load_frees_them(tmp_path, monkeypatch):
     assert w.progress["step"] == "models"
     w.pause_analysis(True)
     _time.sleep(1.5)
-    assert not w.progress["running"]          # le cycle a fini sans attendre le chargement
+    assert not w.progress["running"]          # the cycle finished without waiting for the loading
     _time.sleep(2.0)
-    assert not w.models_loaded                # chargés puis retirés aussitôt
+    assert not w.models_loaded                # loaded then removed right away
 
 
 
 def test_local_folder_metadata_found_with_windows_paths(tmp_path, monkeypatch):
-    """Sous Windows, ExifTool renvoie SourceFile avec des / au lieu des \\ : date, appareil et GPS doivent quand même
-    être rattachés à la photo (sinon ni tri par date, ni séries, ni contrôle géographique)."""
+    """On Windows, ExifTool returns SourceFile with / instead of \\: date, camera and GPS must still
+    be attached to the photo (otherwise no sorting by date, no series, no geographic check)."""
     from taxonero.sources import files
     from taxonero.sources.local import LocalFolder
 
-    root = tmp_path / "C:\\Photos"          # chemin « Windows » simulé : des \\ dans le nom du dossier
+    root = tmp_path / "C:\\Photos"          # simulated "Windows" path: \\ in the folder name
     (root / "sortie").mkdir(parents=True)
     (root / "sortie" / "a.jpg").write_bytes(b"x")
     monkeypatch.setattr(files, "WINDOWS", True)
@@ -2269,9 +2270,211 @@ def test_local_folder_metadata_found_with_windows_paths(tmp_path, monkeypatch):
     data.mkdir()
     src = LocalFolder(root, data)
     src.et = FakeExifTool()
-    src.db.execute("INSERT INTO file VALUES (?, 'sortie/a.jpg', ?, ?, '{}')",   # lue avant la correction : vide
+    src.db.execute("INSERT INTO file VALUES (?, 'sortie/a.jpg', ?, ?, '{}')",   # read before the fix: empty
                    (src.asset_id("sortie/a.jpg"), *(lambda st: (st.st_size, st.st_mtime_ns))((root / "sortie" / "a.jpg").stat())))
-    (a,) = list(src.iter_assets(updated_after="2000-01-01"))   # fichier inchangé, mais relu
+    (a,) = list(src.iter_assets(updated_after="2000-01-01"))   # unchanged file, but read again
     assert a["exifInfo"]["dateTimeOriginal"] == "2024-05-01T08:30:00"
     assert (a["exifInfo"]["make"], a["exifInfo"]["latitude"]) == ("OM", 45.5)
     src.close()
+
+
+def test_progress_of_tag_writing_and_folder_scan(tmp_path):
+    """Dashboard progress: tag writing goes from 0 to 3 units per photo (read, tags, description), deleted photos
+    included; a folder scan counts every file walked, unchanged ones too, against a total known in advance."""
+    from taxonero.sources.local import LocalFolder
+    from taxonero.sync import Syncer
+    db = _sync_db(tmp_path, ["a", "b", "gone"])
+    seen = []
+    Syncer(db, FakeImmich(["a", "b"], gone=["gone"]), write_gap=0, settle_seconds=0, verify_rounds=1,
+           progress=lambda done, total, phases: seen.append((done, total, phases))).sync_all(full=False)
+    assert seen[0] == (0, 9, 3) and seen[-1] == (9, 9, 3)
+    assert [d for d, _, _ in seen] == sorted(d for d, _, _ in seen)   # never goes back (second round not counted)
+
+    root = tmp_path / "photos"
+    (root / "sub").mkdir(parents=True)
+    for name in ("a.jpg", "sub/b.jpg", "sub/notes.txt"):
+        (root / name).write_bytes(b"x")
+    data = tmp_path / "data"
+    data.mkdir()
+    src = LocalFolder(root, data)
+    ticks = []
+    src.on_file = lambda: ticks.append(1)
+    assert src.count_files() == 2
+    list(src.iter_assets(with_exif=False))
+    assert len(ticks) == 2
+    src.close()
+
+
+def test_presence_from_one_faceted_search_per_area():
+    """Presence around a point: one faceted GBIF search per area answers every candidate (absent = 0), for every
+    photo of the area; a rank without a facet (subspecies) still uses the per-taxon search."""
+    import httpx
+    from taxonero import store
+    from taxonero.taxonomy import Taxonomy
+
+    class Http:
+        calls: list = []
+        def get(self, url, params=None):
+            u = httpx.URL(str(url))
+            Http.calls.append(u)
+            if u.path.startswith("/v1/species/"):
+                key = int(u.path.rsplit("/", 1)[1])
+                body = {"key": key, "rank": "SUBSPECIES" if key == 3 else "SPECIES"}
+            elif "facet" in u.params:
+                body = {"count": 99, "facets": [{"field": "SPECIES_KEY", "counts": [{"name": "1", "count": 50}]},
+                                                {"field": "GENUS_KEY", "counts": [{"name": "10", "count": 80}]}]}
+            else:
+                body = {"count": 7}
+            return httpx.Response(200, json=body, request=httpx.Request("GET", str(u)))
+
+    tx = Taxonomy(store.connect(":memory:"))
+    tx.min_interval, tx.http = 0, Http()
+    for k in (1, 2, 3):
+        tx.get(f"https://api.gbif.org/v1/species/{k}")
+    Http.calls.clear()
+    assert tx.occurrences_near(1, 45.2, 5.1, 5.0) == 50
+    assert tx.occurrences_near(2, 45.0, 4.8, 5.0) == 0             # absent from the area: no request of its own
+    assert len(Http.calls) == 1 and "facet" in Http.calls[0].params
+    assert tx.occurrences_near(3, 45.0, 5.0, 5.0) == 7             # subspecies: per-taxon search
+    assert "taxonKey" in Http.calls[-1].params and len(Http.calls) == 2
+    tx._areas.clear()
+    assert tx.occurrences_near(1, 45.0, 5.0, 5.0) == 50 and len(Http.calls) == 2   # cached in the database
+
+
+def test_two_phase_analysis_frees_the_gpu_before_the_geographic_check(tmp_path, monkeypatch):
+    """run_once: the AI part runs for the whole queue first (results stored), the models are released, then the
+    geographic check saves the photos: same detections as the analysis in one go, two progress counters, nothing
+    left waiting. An AI result kept across a restart is checked without running the models again."""
+    import io as _io
+    from PIL import Image
+    from taxonero.config import Settings
+    from taxonero.pipeline import Analyzer, Candidate
+    from taxonero.worker import Worker
+
+    class Det:
+        providers = ["CPUExecutionProvider"]
+        def detect(self, image):
+            return [Box(.1, .1, .5, .5, .95, "animal", None, "md")]
+    class Clf:
+        calls = 0
+        def classify(self, images):
+            Clf.calls += 1
+            return [[Candidate("Vulpes vulpes", .7, {"kingdom": "Animalia", "genus": "Vulpes"}),
+                     Candidate("Vulpes velox", .2, {"kingdom": "Animalia", "genus": "Vulpes"})] for _ in images]
+    def jpeg():
+        b = _io.BytesIO(); Image.new("RGB", (300, 200), (90, 120, 60)).save(b, "JPEG"); return b.getvalue()
+
+    def worker(name):
+        s = Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path / name, auto_confirm="off",
+                     gbif_local=False, open_detector=False)
+        s.data_dir.mkdir()
+        w = Worker(s, analyzer=Analyzer(Det(), Clf(), None))
+        w.client.thumbnail = lambda aid, size="preview": jpeg()
+        w.client.original = lambda aid: None   # no original: the subject is identified on the preview
+        for i in range(5):
+            w.db.execute("INSERT INTO asset (asset_id, file_name, taken_at, kind, people) VALUES (?, ?, ?, 'IMAGE', 0)",
+                         (f"p{i}", f"p{i}.jpg", f"2024-01-0{i + 1}"))
+        w.db.commit()
+        return w
+    dets = lambda w: sorted(tuple(r) for r in w.db.execute("SELECT asset_id, taxon_rank, round(score, 6), status FROM detection"))
+
+    one = worker("one")
+    assert one.analyze() == 5
+
+    two = worker("two")
+    for step in ("check", "scan", "reconcile", "apply_skips", "refresh_taxa", "refresh_places", "prune", "sync", "prefetch", "backup"):
+        monkeypatch.setattr(two, step, lambda *a, **k: 0)
+    monkeypatch.setattr(two, "check", lambda: True)
+    order, seen = [], []
+    monkeypatch.setattr(two, "unload_models", lambda: order.append("unload"))
+    real_decide, real_tick = two.decide, two._tick
+    monkeypatch.setattr(two, "decide", lambda *a: order.append("geo") or real_decide(*a))
+    monkeypatch.setattr(two, "_tick", lambda: real_tick() or seen.append({k: list(v) for k, v in (two.progress["phases"] or {}).items()}))
+    report = two.run_once(manual=True)
+    assert (report["inferred"], report["analyzed"]) == (5, 5) and order[:2] == ["unload", "geo"]
+    assert dets(two) == dets(one) and dets(two)
+    assert two.db.execute("SELECT count(*) FROM inferred").fetchone()[0] == 0 and two.pending_analysis() == 0
+    assert seen[4] == {"analyze": [5, 5], "geo": [0, 5]} and seen[-1]["geo"] == [5, 5]
+
+    # AI result stored, then a restart: only the geographic check is left.
+    calls = Clf.calls
+    two.db.execute("UPDATE asset SET analyzed_at = NULL WHERE asset_id = 'p0'")
+    two.db.execute("INSERT INTO inferred VALUES ('p0', ?, 0)", (Analyzer.pack(two._analyzer.infer_many([(jpeg(), None, None, None)])[0]),))
+    two.db.commit()
+    calls = Clf.calls
+    assert Worker(two.s, analyzer=two._analyzer).pending_geo() == 1
+    assert two.decide() == 1 and Clf.calls == calls and two.pending_analysis() == 0
+
+
+def test_fossil_test_from_the_world_list_and_the_area():
+    """Extinct species: fossils from one world list (no request per species); a living species with a few fossils
+    is settled by its field observations around the photo; only a species with fossils and almost no observation
+    nearby costs a worldwide search. Same verdicts as the per-taxon rule."""
+    import httpx
+    from taxonero import store
+    from taxonero.taxonomy import Taxonomy
+
+    class Http:
+        calls: list = []
+        def get(self, url, params=None):
+            u = httpx.URL(str(url))
+            Http.calls.append(u)
+            if u.path.startswith("/v1/species/"):
+                body = {"key": int(u.path.rsplit("/", 1)[1]), "rank": "SPECIES"}
+            elif u.params.get("basisOfRecord") == "FOSSIL_SPECIMEN" and "facet" in u.params:   # world list
+                body = {"facets": [{"field": "SPECIES_KEY", "counts": [{"name": "2", "count": 917}, {"name": "3", "count": 28}]}]}
+            elif "facet" in u.params:   # area: the fox (2) is common there, the goose (3) absent
+                body = {"facets": [{"field": "SPECIES_KEY", "counts": [{"name": "1", "count": 40}, {"name": "2", "count": 5000}]}]}
+            else:   # worldwide field observations of the goose
+                body = {"count": 0}
+            return httpx.Response(200, json=body, request=httpx.Request("GET", str(u)))
+
+    tx = Taxonomy(store.connect(":memory:"))
+    tx.min_interval, tx.http = 0, Http()
+    for k in (1, 2, 3):
+        tx.get(f"https://api.gbif.org/v1/species/{k}")
+    Http.calls.clear()
+    assert not tx.fossil_only(1, 45.0, 5.0)          # no fossil
+    assert not tx.fossil_only(2, 45.0, 5.0)          # 917 fossils, 5,000 observations nearby: living
+    assert len(Http.calls) == 2                      # the world list and the area, once
+    assert tx.fossil_only(3, 45.0, 5.0)              # 28 fossils, none observed: extinct
+    assert len(Http.calls) == 3 and "taxonKey" in Http.calls[-1].params
+    assert not tx.fossil_only(1) and len(Http.calls) == 3   # without a place: still no request for no fossil
+
+
+def test_grouped_searches_refused_by_gbif_fall_back_to_per_taxon():
+    """A permanent refusal of the area search or of the fossil list (4xx, e.g. after a change of the GBIF API) does
+    not make the photos fail: noted once, then the per-taxon searches answer as before."""
+    import httpx
+    from taxonero import store
+    from taxonero.taxonomy import Taxonomy
+
+    class Http:
+        calls: list = []
+        def get(self, url, params=None):
+            u = httpx.URL(str(url))
+            Http.calls.append(u)
+            if u.path.startswith("/v1/species/"):
+                return httpx.Response(200, json={"key": 1, "rank": "SPECIES"}, request=httpx.Request("GET", str(u)))
+            if "facet" in u.params:
+                return httpx.Response(400, text="Facets paging is only supported up to 1200000 elements", request=httpx.Request("GET", str(u)))
+            return httpx.Response(200, json={"count": 0 if u.params.get("basisOfRecord") == "FOSSIL_SPECIMEN" else 12},
+                                  request=httpx.Request("GET", str(u)))
+
+    tx = Taxonomy(store.connect(":memory:"))
+    tx.min_interval, tx.http = 0, Http()
+    tx.get("https://api.gbif.org/v1/species/1")
+    assert tx.occurrences_near(1, 45.0, 5.0, 5.0) == 12 and not tx.fossil_only(1, 45.0, 5.0)
+    n = len(Http.calls)
+    assert tx.occurrences_near(1, 46.0, 5.0, 5.0) == 12          # refusal remembered: no new grouped search
+    assert len(Http.calls) == n + 1 and "facet" not in Http.calls[-1].params
+
+
+def test_requeue_failed_drops_their_waiting_ai_results(tmp_path):
+    from taxonero.config import Settings
+    from taxonero.worker import MAX_FAILURES, Worker, requeue
+    w = Worker(Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path, gbif_local=False))
+    w.db.execute("INSERT INTO asset (asset_id, file_name, fail_count) VALUES ('a', 'a.jpg', ?), ('b', 'b.jpg', 0)", (MAX_FAILURES,))
+    w.db.execute("INSERT INTO inferred VALUES ('a', x'00', 0), ('b', x'00', 0)")
+    assert requeue(w.db, "failed") == 1
+    assert [r[0] for r in w.db.execute("SELECT asset_id FROM inferred")] == ["b"]

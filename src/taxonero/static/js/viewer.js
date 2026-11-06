@@ -1,4 +1,4 @@
-/* ============================== visionneuse ============================== */
+/* ============================== viewer ============================== */
 const V = { open: false, list: [], i: 0, sel: 0, info: true, touched: new Set() };
 const cur = () => V.list[V.i];
 const curDet = () => cur()?.detections[V.sel];
@@ -11,13 +11,13 @@ function openViewer(list, i) {
   $('#viewer').focus();
   photoInHash(true);
   drawViewer();
-  fitPhoto();   // la fenêtre a pu changer de taille depuis la dernière ouverture
-  // Visionneuse cachée jusqu'ici : Annotorious ne relit la taille de l'image qu'un peu après (sinon NaN, Infinity) ;
-  // les rectangles attendent.
+  fitPhoto();   // the window may have changed size since the last opening
+  // Viewer hidden until now: Annotorious only reads the image size a little later (otherwise NaN, Infinity);
+  // the boxes wait.
   V.opening = true;
   setTimeout(() => { V.opening = false; if (V.open) drawBoxes(); }, 150);
 }
-/* Photo ouverte dans l'adresse : à l'ouverture une étape d'historique (Retour ferme la visionneuse), ensuite non. */
+/* Photo opened in the address: on opening, one history step (Back closes the viewer), then none. */
 function photoInHash(push) {
   const a = cur(), { path, q } = parseHash(location.hash);
   if (!a || q.get('photo') === a.asset_id) return;
@@ -25,7 +25,7 @@ function photoInHash(push) {
   q.set('photo', a.asset_id);
   location.hash = hashOf(path, q);
 }
-/* Fermeture demandée (bouton, Échap) : comme le Retour de la barre du haut, sans quitter la page d'en dessous. */
+/* Close requested (button, Escape): like the Back button of the top bar, without leaving the page below. */
 function leaveViewer() {
   const prev = NAV.stack[NAV.idx - 1];
   if (prev && baseOf(prev.hash) === baseOf(location.hash) && !parseHash(prev.hash).q.get('photo')) { history.back(); return; }
@@ -33,19 +33,19 @@ function leaveViewer() {
   closeViewer();
 }
 function closeViewer(silent) {
-  // Rectangles retirés avant de cacher l'image : Annotorious les recalculerait à la taille 0 (NaN, Infinity).
+  // Boxes removed before hiding the image: Annotorious would recompute them at size 0 (NaN, Infinity).
   anno.clearAnnotations();
   V.open = false; $('#viewer').classList.remove('on'); document.body.style.overflow = '';
   $('#vdone').hidden = true;
   V.opener?.focus?.({ preventScroll: true });
   resetZoom();
   if (silent) return;
-  if (V.list === P.assets && gridActive()) {   // la grille montre la dernière photo vue
+  if (V.list === P.assets && gridActive()) {   // the grid shows the last photo seen
     const lead = [...P.members].find(([, mem]) => mem.includes(V.i))?.[0] ?? V.i;
     $(`#pgrid .tile[data-i="${lead}"]`)?.scrollIntoView({ block: 'nearest' });
   }
   if (!V.touched.size) return;
-  // Photos : statuts à jour sans recharger la grille ; fiche : ses chiffres et ses photos ont pu changer.
+  // Photos: statuses up to date without reloading the grid; record: its figures and photos may have changed.
   if (STATE.view === 'photos' && V.list === P.assets) refreshTiles(V.touched);
   else if (gridActive()) reloadPage();
 }
@@ -68,9 +68,9 @@ function drawViewer() {
   drawBoxes(); drawInfo();
 }
 
-/* Affichage de la photo, comme la visionneuse d'Immich : la vignette (déjà en cache depuis la grille) tout de
-   suite, à la taille de l'écran, puis l'aperçu dès qu'il est chargé ; les photos voisines sont préchargées.
-   Jamais l'image précédente sous le titre et les rectangles de la nouvelle. */
+/* Display of the photo, like the Immich viewer: the thumbnail (already cached from the grid) right
+   away, at the size of the screen, then the preview as soon as it is loaded; neighbouring photos are preloaded.
+   Never the previous image under the title and the boxes of the new one. */
 function showPhoto(a) {
   const img = $('#photo'), f = $('#frame'), id = a.asset_id;
   if (img.dataset.id === id) return;
@@ -79,7 +79,7 @@ function showPhoto(a) {
   f.classList.add('swap');
   const small = new Image(), full = new Image();
   const put = el => {
-    if (img.dataset.id !== id || !el.naturalWidth || img.dataset.full === id) return;   // l'original du zoom est déjà là
+    if (img.dataset.id !== id || !el.naturalWidth || img.dataset.full === id) return;   // the zoom original is already there
     V.ar = el.naturalWidth / el.naturalHeight;
     img.onload = () => { if (img.dataset.id === id) f.classList.remove('swap'); };
     img.src = el.src; fitPhoto();
@@ -90,8 +90,8 @@ function showPhoto(a) {
   small.src = `/api/thumb/${id}?size=thumbnail`;
   full.src = `/api/thumb/${id}`;
 }
-/* Taille de l'image : la plus grande qui tient dans la zone (max-width / max-height du CSS), même pour une
-   vignette ou une petite photo, pour que les rectangles ne sautent pas au passage vignette -> aperçu. */
+/* Image size: the largest that fits in the area (max-width / max-height of the CSS), even for a
+   thumbnail or a small photo, so that the boxes do not jump when going from thumbnail to preview. */
 function fitPhoto() {
   const img = $('#photo'); if (!V.ar) return;
   img.style.width = img.style.height = '';
@@ -107,7 +107,7 @@ function preloadAround() {
   [V.i + 1, V.i - 1, V.i + 2].forEach(k => { const a = V.list[k]; if (a) { const im = new Image(); im.src = `/api/thumb/${a.asset_id}`; PRELOADED.push(im); } });
 }
 
-/* Série (rafale) : la même espèce sur plusieurs photos, ou proposition corrigée par la série (series.py). */
+/* Series (burst): the same species on several photos, or proposal corrected by the series (series.py). */
 function seriesLine(d) {
   if (!d.series_n || d.series_n < 2) return '';
   if (d.model_taxon) return `<div class="locline">🎞 ${tr('series.smoothed', { n: d.series_n, model: esc(shortName(d.model_taxon)) })}</div>`;
@@ -120,7 +120,7 @@ function statusBadge(d) {
   return `<span class="badge2 pending">${t('det.pending')}</span>`;
 }
 
-/* Date, lieu et appareil : chacun mène aux photos qui les partagent. */
+/* Date, place and camera: each leads to the photos that share them. */
 function metaLine(a) {
   const link = (q, label) => `<a href="#photos?filter=all&${q}">${esc(label)}</a>`, cam = [a.make, a.model].filter(Boolean).join(' ');
   const items = [
@@ -134,7 +134,7 @@ function metaLine(a) {
 function drawInfo() {
   const a = cur(), d = curDet();
   $('#vi-mapsec').hidden = !d;
-  // Photo principale : seulement une photo validée pour ce taxon.
+  // Main photo: only a photo confirmed for this taxon.
   $('#v-cover').hidden = !(d?.status === 'confirmed' && d.taxon_key);
   $('#v-del').hidden = !d;
   if (!d) {
@@ -145,7 +145,7 @@ function drawInfo() {
     return;
   }
   const t = d.taxon, n = a.detections.length;
-  // Un seul accès par fonction : la fiche complète (page de l'espèce) ou l'article Wikipédia en lecture rapide.
+  // A single access per function: the full record (species page) or the Wikipedia article for quick reading.
   let h = `<section class="taxon">
     <div class="sectit">${esc(rankName(d.taxon_rank))}${n > 1 ? ` · ${tr('det.subject_of', { i: V.sel + 1, n })} <span style="text-transform:none;letter-spacing:0">(${tr('det.subject_hint')})</span>` : ''}</div>
     <h2>${subjectIcon(d)} ${esc(shortName(t))}</h2>
@@ -158,7 +158,7 @@ function drawInfo() {
     ${locLine(a)}
     ${t ? `<div class="links"><button class="btn" id="l-sp">${ic('paw')} ${tr('det.species_page')}</button>${hasWiki(t) ? `<button class="btn" id="l-wp">${ic('book')} ${tr('wiki.wikipedia')}</button>` : ''}</div>` : ''}
   </section>`;
-  // Actions selon l'état : jamais deux boutons pour la même chose. Supprimer et Ré-analyser : barre du haut.
+  // Actions according to the state: never two buttons for the same thing. Delete and Analyse again: top bar.
   const acts = { pending: ['ok', 'no'], confirmed: ['no', 'reset'], rejected: ['ok', 'reset'] }[d.status] || ['ok', 'no'];
   const label = { ok: `${ic('check')} ${tr('action.confirm')}`, no: tr('action.reject'), reset: tr('action.reset') };
   h += `<section><div class="actions">${acts.map(k => `<button class="btn${k === 'ok' ? ' primary' : ''}" id="b-${k}">${label[k]}</button>`).join('')}
@@ -168,7 +168,7 @@ function drawInfo() {
     <div class="sub" style="font-size:12px;margin-top:8px">${tr('det.edit_hint')}</div></section>`;
   if (d.candidates.length) {
     const maxp = Math.max(...d.candidates.map(c => c.p), 0.01);
-    // Les candidats à moins de 1 % ne sont que du bruit ; on en garde au moins 3 pour comparer.
+    // Candidates below 1 % are only noise; at least 3 are kept for comparison.
     const shownC = V.shownC = d.candidates.filter((c, k) => k < 3 || c.p >= 0.01).length;
     h += `<section><div class="sectit">${tr('cand.title')} <span style="text-transform:none;letter-spacing:0">· ${tr('cand.hint')}</span></div>
       ${d.candidates.slice(0, shownC).map((c, k) => `<div class="cand${c.gbif_key === d.taxon_key ? ' top' : ''}" data-k="${k}" role="button" tabindex="0" title="${esc(tr('cmp.hint'))}">
@@ -177,7 +177,7 @@ function drawInfo() {
   }
   $('#vi-body').innerHTML = h;
   $('#vi-mapcap').innerHTML = tr('map.caption', { pin: '<span style="color:#dc2626">●</span>', gps: a.lat == null ? ` (${tr('plaus.unknown')})` : '' });
-  // Clic sur un candidat : comparaison en images ; survol : son aire sur la mini-carte (aucune validation).
+  // Click on a candidate: image comparison; hover: its range on the mini map (no confirmation).
   const shownKey = () => d.taxon_key || d.candidates[0]?.gbif_key;
   $$('#vinfo .cand').forEach(el => {
     const c = d.candidates[+el.dataset.k];
@@ -188,7 +188,7 @@ function drawInfo() {
   drawMini(shownKey(), a);
   loadCandNames(d);
   if (d.status === 'confirmed' && d.taxon_key) loadSeries(d);
-  $('#l-sp') && ($('#l-sp').onclick = () => { location.hash = `species/${d.taxon_key}`; });   // route() ferme la visionneuse
+  $('#l-sp') && ($('#l-sp').onclick = () => { location.hash = `species/${d.taxon_key}`; });   // route() closes the viewer
   $('#l-wp') && ($('#l-wp').onclick = () => openWiki(d.taxon_key, 'wikipedia'));
   $('#b-ok') && ($('#b-ok').onclick = () => act('confirm'));
   $('#b-no') && ($('#b-no').onclick = () => act('reject'));
@@ -196,7 +196,7 @@ function drawInfo() {
   $('#b-taxon').onclick = chooseTaxon;
   $('#b-loc') && ($('#b-loc').onclick = editLocation);
 }
-/* Noms communs des candidats (cache local ; le serveur récupère en arrière-plan ceux qui manquent). */
+/* Common names of the candidates (local cache; the server fetches the missing ones in the background). */
 const NAMES = new Map();
 function candName(c) {
   const t = NAMES.get(c.gbif_key), com = t && (t.vernacular?.[LANG] || t.vernacular?.en || t.vernacular?.fr);
@@ -212,14 +212,14 @@ async function loadCandNames(d, tries = 0) {
   $$('#vinfo .cn').forEach(el => { const c = d.candidates.find(x => String(x.gbif_key) === el.dataset.ck); if (c) el.innerHTML = candName(c); });
   if (r.pending && tries < 6) setTimeout(() => loadCandNames(d, tries + 1), 2500);
 }
-/* Comparaison en images (compare.js) : le sujet sélectionné et les candidats affichés. */
+/* Image comparison (compare.js): the selected subject and the candidates shown. */
 function compareCurrent(focus) {
   const d = curDet(); if (!d) return;
   const a = cur(), img = $('#photo');
   openCompare({ img, box: d, candidates: d.candidates.slice(0, V.shownC ?? 3), focus, asset: a?.asset_id,
                 full: a && a.kind !== 'VIDEO' && img.dataset.full !== a.asset_id ? `/api/full/${a.asset_id}` : null,
                 place: a && { lat: a.lat, lon: a.lon, user: !!a.geo_user },
-                onLocate: async () => {   // candidats reclassés avec le nouveau lieu : comparaison rouverte à jour
+                onLocate: async () => {   // candidates reclassified with the new place: comparison reopened up to date
                   if (await editLocation() && CMP.open) { if (curDet()) compareCurrent(focus); else closeCompare(); }
                 },
                 onPick: c => act('confirm', { gbif_key: c.gbif_key, name: c.name }) });
@@ -229,7 +229,7 @@ function toggleInfo() {
   if (V.info) drawInfo();
 }
 
-/* Une espèce pour le sujet affiché ; une photo sans sujet reçoit l'espèce sur l'image entière (comme en lot). */
+/* A species for the displayed subject; a photo without a subject gets the species on the whole image (as in bulk). */
 async function chooseTaxon() {
   const tx = await pickTaxon(t('bulk.taxon')); if (!tx) return;
   if (curDet()) { act('confirm', { gbif_key: tx.gbif_key }); return; }
@@ -248,9 +248,9 @@ async function refreshAsset() {
 const snapshot = d => ({ status: d.status, confirmed_by: d.confirmed_by, taxon_key: d.taxon_key, taxon_rank: d.taxon_rank,
   reviewed_at: d.reviewed_at, x: d.x, y: d.y, w: d.w, h: d.h, score: d.score, margin: d.margin, plausibility: d.plausibility,
   candidates: d.candidates, candidates_out: d.candidates_out });
-// Relecture de la file « À relire » : la photo terminée, on passe toute seule à la suivante.
+// Review of the "To review" queue: once the photo is done, it moves on to the next one by itself.
 const autoNext = () => V.list === P.assets && ['pending', 'audit'].includes(P.filter);
-/* Fin de la file à relire : ce qu'il reste, plutôt qu'une photo qui ne bouge plus. */
+/* End of the review queue: what remains, rather than a photo that no longer moves. */
 function queueEnd() {
   const left = V.list.findIndex(a => a.detections.some(d => d.status === 'pending')), n = V.list.filter(a => a.detections.some(d => d.status === 'pending')).length;
   const box = $('#vdone');
@@ -272,11 +272,11 @@ async function act(kind, body) {
   pushUndo(entry);
   await refreshAsset();
   if (kind === 'reset') return;
-  // reste sur la photo et sélectionne le prochain sujet à relire s'il y en a un
+  // stays on the photo and selects the next subject to review if there is one
   const next = cur().detections.findIndex(x => x.status === 'pending');
   if (next >= 0) { V.sel = next; drawBoxes(); drawInfo(); return; }
   const done = cur().detections.find(x => x.id === d.id);
-  // Série à valider d'un coup : on reste pour proposer le bouton ; sinon photo suivante.
+  // Series to confirm at once: stay to offer the button; otherwise next photo.
   const inSeries = kind === 'confirm' && done?.taxon_key ? await loadSeries(done) : 0;
   if (!inSeries) setTimeout(() => nextInQueue(from), 250);
 }
@@ -288,10 +288,10 @@ async function deleteDet() {
   V.sel = 0; await refreshAsset();
   toast(t('toast.deleted', { key: '<kbd style="color:inherit">U</kbd>' }));
 }
-// Touches 1 à 8 : seulement les candidats affichés (les autres sont sous 1 %).
+// Keys 1 to 8: only the displayed candidates (the others are below 1 %).
 function pick(k) { const c = k < (V.shownC ?? 8) ? curDet()?.candidates[k] : null; if (c) act('confirm', { gbif_key: c.gbif_key, name: c.name }); }
-/* Série (rafale) : après validation, propose le même taxon pour les autres photos de la série où il est proposé.
-   Renvoie le nombre de photos concernées. */
+/* Series (burst): after confirmation, offer the same taxon for the other photos of the series where it is proposed.
+   Return the number of photos concerned. */
 const SERIES = new Map();
 async function loadSeries(d) {
   const a = cur(), k = `${a.asset_id}:${d.id}:${d.taxon_key}`;
@@ -318,7 +318,7 @@ async function loadSeries(d) {
 async function refreshList(ids) {
   await Promise.all(V.list.map(async (x, j) => { if (ids.has(x.asset_id)) { V.list[j] = { ...x, ...(await api(`/api/assets/${x.asset_id}`)) }; V.touched.add(j); } }));
 }
-/* Annulation : un seul historique pour toute la session, à l'unité comme en lot, visionneuse ouverte ou non. */
+/* Undo: a single history for the whole session, one at a time as in bulk, viewer open or not. */
 const UNDO = [];
 function drawUndo() { $('#b-undo').hidden = !UNDO.length; $('#v-undo').disabled = !UNDO.length; }
 function pushUndo(entry) { UNDO.push(entry); drawUndo(); }
@@ -356,7 +356,7 @@ async function rescan() {
   btn.disabled = true; toast(t('rescan.running'));
   try {
     await api(`/api/assets/${a.asset_id}/reanalyze`, { method: 'POST' });
-    // Les propositions à relire ont été remplacées : leur annulation n'a plus d'objet.
+    // The proposals awaiting review have been replaced: undoing them no longer makes sense.
     for (let k = UNDO.length - 1; k >= 0; k--) if (UNDO[k].asset === a.asset_id) UNDO.splice(k, 1);
     drawUndo();
     V.sel = 0; await refreshAsset();

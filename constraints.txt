@@ -1,5 +1,5 @@
-# Versions testées (pip freeze du venv de dev), hors torch / onnxruntime qui dépendent de la cible (CPU, CUDA).
-# Utilisé par le Dockerfile : pip install -c constraints.txt .
+# Tested versions (pip freeze of the dev venv), except torch / onnxruntime which depend on the target (CPU, CUDA).
+# Used by the Dockerfile: pip install -c constraints.txt .
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

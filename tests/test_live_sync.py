@@ -1,12 +1,12 @@
-"""Test d'intégration contre l'Immich de dev (dev/docker-compose.yml + dev/bootstrap.sh).
+"""Integration test against the dev Immich (dev/docker-compose.yml + dev/bootstrap.sh).
 
-Vérifie que sync est idempotent et que uninstall restaure exactement l'état utilisateur.
-Ignoré si dev/.env.dev est absent.
+Checks that sync is idempotent and that uninstall restores exactly the user state.
+Skipped if dev/.env.dev is missing.
 
-Immich 3.3.5 peut perdre une écriture si la suivante arrive pendant la tâche d'écriture du sidecar XMP de la
-précédente (voir README, « Limites connues »). L'écart fixe WRITE_GAP suffit d'habitude, pas sur une machine
-chargée : le test attend donc en plus que les files de tâches d'Immich soient vides avant chaque écriture et
-chaque vérification (endpoint /queues, réservé aux admins et encore « Alpha » : utilisé ici seulement).
+Immich 3.3.5 can lose a write if the next one arrives during the XMP sidecar write job of the
+previous one (see README, "Known limitations"). The fixed WRITE_GAP is usually enough, not on a loaded
+machine: the test therefore also waits for Immich's job queues to be empty before each write and
+each check (/queues endpoint, admin only and still "Alpha": used here only).
 """
 
 import json
@@ -21,7 +21,7 @@ from taxonero.immich.client import ImmichClient
 from taxonero.sync import BLOCK_START, WRITE_GAP, Syncer
 
 ENV = Path(__file__).parent.parent / "dev" / ".env.dev"
-pytestmark = pytest.mark.skipif(not ENV.exists(), reason="Immich de dev non initialisé")
+pytestmark = pytest.mark.skipif(not ENV.exists(), reason="dev Immich not initialised")
 
 PARUS = {"gbif_key": 9705453, "scientific_name": "Parus major", "rank": "species",
          "lineage": {"kingdom": "Animalia", "class": "Aves", "order": "Passeriformes", "family": "Paridae",
@@ -34,7 +34,7 @@ QUEUES = ("sidecar", "metadataExtraction")
 
 
 def _idle(c: httpx.Client, timeout: float = 60) -> None:
-    """Attend que les tâches sidecar et métadonnées d'Immich soient terminées (deux lectures vides de suite)."""
+    """Wait for Immich's sidecar and metadata jobs to finish (two empty reads in a row)."""
     end, calm = time.monotonic() + timeout, 0
     while time.monotonic() < end:
         busy = sum(q["statistics"][k] for q in c.get("/queues").json() if q["name"] in QUEUES
@@ -43,11 +43,11 @@ def _idle(c: httpx.Client, timeout: float = 60) -> None:
         if calm >= 2:
             return
         time.sleep(0.25)
-    raise TimeoutError("files de tâches Immich toujours occupées")
+    raise TimeoutError("Immich job queues still busy")
 
 
 class PatientSyncer(Syncer):
-    """Syncer qui attend, avant chaque écriture, que la précédente soit entièrement traitée par Immich."""
+    """Syncer that waits, before each write, for the previous one to be fully processed by Immich."""
 
     def __init__(self, *args, admin: httpx.Client, **kwargs):
         super().__init__(*args, **kwargs)
@@ -64,7 +64,7 @@ def _env() -> dict:
 
 @pytest.fixture
 def admin():
-    """Session admin de dev, pour simuler les actions manuelles de l'utilisateur."""
+    """Dev admin session, to simulate the user's manual actions."""
     env = _env()
     url = env["IMMICH_URL"] + "/api"
     tok = httpx.post(f"{url}/auth/login", json={"email": "dev@example.invalid", "password": "dev-password"}).json()["accessToken"]
@@ -75,7 +75,7 @@ def admin():
 
 
 def _reset(c: httpx.Client) -> None:
-    """Supprime les tags racines de test (et leurs enfants) ; vide la description du premier asset."""
+    """Delete the test root tags (and their children); clear the description of the first asset."""
     for t in c.get("/tags").json():
         if t["value"] in ("Nature", "Perso"):
             c.delete(f"/tags/{t['id']}")
@@ -92,14 +92,14 @@ def test_sync_idempotent_and_uninstall_restores(admin, tmp_path):
     asset = next(client.iter_assets())
     aid = asset["id"]
 
-    # État « utilisateur » : description perso + tag perso.
+    # "User" state: personal description + personal tag.
     admin.put(f"/assets/{aid}", json={"description": "Ma photo du jardin"}).raise_for_status()
     _idle(admin)
     user_tag = admin.put("/tags", json={"tags": ["Perso/Jardin"]}).raise_for_status().json()
     user_tag_id = next(t["id"] for t in user_tag if t["value"] == "Perso/Jardin")
     admin.put(f"/tags/{user_tag_id}/assets", json={"ids": [aid]}).raise_for_status()
-    # En prod, SETTLE_SECONDS empêche d'écrire juste après une modification de l'utilisateur
-    # (course Immich) ; ici on la désactive et on respecte seulement l'écart minimal.
+    # In production, SETTLE_SECONDS prevents writing right after a change by the user
+    # (Immich race); here it is disabled and only the minimum gap is respected.
     time.sleep(WRITE_GAP)
     _idle(admin)
 
@@ -132,8 +132,8 @@ def test_sync_idempotent_and_uninstall_restores(admin, tmp_path):
 
 
 def test_dashboard_undo_keeps_user_data_and_stops_writes(admin, dev_app):
-    """Retrait depuis le dashboard, contre un vrai Immich : tout ce qui a été posé part, rien de l'utilisateur, et le
-    cycle suivant ne repose rien tant qu'on ne reprend pas."""
+    """Removal from the dashboard, against a real Immich: everything that was set goes, nothing of the user's, and the
+    next cycle sets nothing back until writes are resumed."""
     from fastapi.testclient import TestClient
     from taxonero.web import create_app
     s, w = dev_app
@@ -157,9 +157,9 @@ def test_dashboard_undo_keeps_user_data_and_stops_writes(admin, dev_app):
     assert BLOCK_START in admin.get(f"/assets/{aid}").json()["exifInfo"]["description"]
     c = TestClient(create_app(s, w))
 
-    assert c.post("/api/immich/uninstall", json={}).status_code == 400            # sans confirmation : rien
+    assert c.post("/api/immich/uninstall", json={}).status_code == 400            # without confirmation: nothing
     s.dry_run = True
-    assert c.post("/api/immich/uninstall", json={"confirm": "remove-from-immich"}).status_code == 409   # DRY_RUN : rien
+    assert c.post("/api/immich/uninstall", json={"confirm": "remove-from-immich"}).status_code == 409   # DRY_RUN: nothing
     s.dry_run = False
     saved = w.db.execute("SELECT * FROM written").fetchall()
     w.db.execute("UPDATE written SET immich_id = 'autre-' || immich_id WHERE kind IN ('tag', 'tag_asset')")
@@ -185,7 +185,7 @@ def test_dashboard_undo_keeps_user_data_and_stops_writes(admin, dev_app):
     values = {t["value"] for t in admin.get("/tags").json()}
     assert "Perso/Jardin" in values and not any(v == "Nature" or v.startswith("Nature/") for v in values)
 
-    assert w.sync() is None                                                        # suspendu : le cycle ne repose rien
+    assert w.sync() is None                                                        # suspended: the cycle sets nothing back
     _idle(admin)
     assert {t["value"] for t in admin.get(f"/assets/{aid}").json().get("tags", [])} == {"Perso/Jardin"}
     assert c.get("/api/status").json()["writes_paused"] is True
@@ -193,8 +193,8 @@ def test_dashboard_undo_keeps_user_data_and_stops_writes(admin, dev_app):
 
 
 def test_tags_deleted_by_hand_then_resync_then_uninstall(admin, tmp_path):
-    """Tags de l'outil supprimés à la main dans Immich, puis recréés par la synchro (nouveaux ids) : le retrait doit
-    quand même tout enlever, sans viser les anciens ids (400 d'Immich, tags laissés en place)."""
+    """Tool tags deleted by hand in Immich, then created again by the sync (new ids): the removal must
+    still remove everything, without targeting the old ids (400 from Immich, tags left in place)."""
     env = _env()
     client = ImmichClient(env["IMMICH_URL"], env["IMMICH_API_KEY"], dry_run=False)
     assert client.check(), client.errors
@@ -219,7 +219,7 @@ def test_tags_deleted_by_hand_then_resync_then_uninstall(admin, tmp_path):
     _idle(admin)
     assert len(nature()) == 6
     traced = {r["immich_id"] for r in db.execute("SELECT immich_id FROM written WHERE kind IN ('tag', 'tag_asset')")}
-    assert traced == {t["id"] for t in nature()}, "anciens ids encore tracés"
+    assert traced == {t["id"] for t in nature()}, "old ids still recorded"
 
     u = PatientSyncer(db, client, settle_seconds=0, admin=admin)
     u.uninstall()

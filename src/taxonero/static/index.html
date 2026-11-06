@@ -62,7 +62,7 @@
 <main>
   <div class="view" id="v-photos">
     <div class="pagehead"><h1 data-i18n="nav.photos"></h1><div class="chips" id="pfilters"></div></div>
-    <!-- Grille de photos unique : déplacée dans la fiche d'une espèce ou d'un rang quand on y est (homeGrid, embedGrid). -->
+    <!-- Single photo grid: moved into the record of a species or of a rank when you are there (homeGrid, embedGrid). -->
     <div id="pblock">
       <div class="ptools" id="ptools"></div>
       <div class="pwrap"><div id="pgrid"></div><nav id="ptimeline" hidden data-i18n-aria="photos.timeline"></nav></div>
@@ -120,8 +120,8 @@
 <script src="static/vendor/leaflet/leaflet.js"></script>
 <script src="static/vendor/annotorious/annotorious.js"></script>
 <script src="static/vendor/panzoom/panzoom.min.js"></script>
-<!-- Scripts classiques (pas de modules) chargés dans l'ordre : ils partagent la portée globale ;
-     seul main.js lance du code au chargement qui dépend des autres fichiers. -->
+<!-- Classic scripts (no modules) loaded in order: they share the global scope;
+     only main.js runs code at load time that depends on the other files. -->
 <script src="static/js/core.js"></script>
 <script src="static/js/nav.js"></script>
 <script src="static/js/photos.js"></script>

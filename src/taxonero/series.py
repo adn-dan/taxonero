@@ -1,26 +1,26 @@
-"""Séries (rafales) : photos du même appareil prises à moins de SERIES_GAP secondes l'une de l'autre, de proche en
-proche, et à moins de SERIES_KM si les deux sont géolocalisées. Une série dure au plus SERIES_MAX_SPAN secondes de sa
-première à sa dernière photo : sans cette borne, une balade photographiée toutes les minutes formait une seule
-« série » de plusieurs heures et kilomètres, où le lissage remplaçait un rouge-gorge sûr à 92 % par le merle du début.
+"""Series (bursts): photos from the same camera taken less than SERIES_GAP seconds apart, step by
+step, and less than SERIES_KM apart if both are geotagged. A series lasts at most SERIES_MAX_SPAN seconds from its
+first to its last photo: without this bound, a walk photographed every minute formed a single
+"series" of several hours and kilometres, where smoothing replaced a robin at 92 % by the blackbird from the start.
 
-Lissage par série, sur le modèle du post-traitement de MegaDetector (classification_postprocessing,
-smooth_classification_results_sequence_level : « une séquence cerf/cerf/cerf/élan/cerf/cerf/cerf/cerf, c'est juste
-un cerf »), appliqué seulement aux détections encore à relire :
-- ne comptent que les propositions au rang espèce à au moins MIN_CONF ;
-- une espèce isolée (une seule photo) devient l'espèce dominante si celle-ci est proposée sur au moins
-  MIN_TO_FLIP photos et figure parmi ses candidats avec une probabilité d'au moins MIN_FLIP_RATIO fois celle de
-  l'espèce proposée : un modèle sûr de lui (92 %) n'est pas contredit par un candidat marginal (3 %) ;
-- une proposition déjà issue du lissage ne vote pas pour l'espèce dominante (sinon elle se renforcerait d'elle-même) ;
-- une proposition vague au rang genre, famille ou ordre devient l'espèce dominante si celle-ci est sur au moins
-  MIN_TO_REFINE photos et appartient à ce taxon. MegaDetector va plus loin (une proposition « animal » prend
-  l'espèce dominante) : ses séquences de pièges photo n'ont en général qu'une espèce, une photothèque en mélange
-  souvent (une détection « Animalia » sur une poule deviendrait « chat » si les chats dominent la série).
-Une série demande un appareil connu (marque ou modèle) : sans lui (captures, images reçues, scans), des photos
-importées ensemble paraissent prises au même moment.
-Les photos d'une rafale se ressemblent : une erreur du modèle s'y répète souvent. Le lissage corrige donc les
-incohérences, il ne rend pas une proposition plus sûre : la validation automatique n'en tient pas compte. La
-proposition d'origine du modèle reste enregistrée (model_key), et la détection garde la trace du lissage
-(smoothed ; series_n : photos de la série qui proposent la même espèce).
+Smoothing per series, modelled on the MegaDetector post-processing (classification_postprocessing,
+smooth_classification_results_sequence_level: "a deer/deer/deer/elk/deer/deer/deer/deer sequence is just
+a deer"), applied only to detections still awaiting review:
+- only proposals at species rank with at least MIN_CONF count;
+- an isolated species (a single photo) becomes the dominant species if that one is proposed on at least
+  MIN_TO_FLIP photos and is among its candidates with a probability of at least MIN_FLIP_RATIO times that of
+  the proposed species: a confident model (92 %) is not contradicted by a marginal candidate (3 %);
+- a proposal already coming from smoothing does not vote for the dominant species (otherwise it would reinforce itself);
+- a vague proposal at genus, family or order rank becomes the dominant species if that one is on at least
+  MIN_TO_REFINE photos and belongs to this taxon. MegaDetector goes further (an "animal" proposal takes
+  the dominant species): its camera-trap sequences usually hold a single species, a photo library often mixes
+  them (an "Animalia" detection on a hen would become "cat" if cats dominate the series).
+A series needs a known camera (make or model): without it (screenshots, received images, scans), photos
+imported together look as if taken at the same moment.
+Photos of a burst look alike: a model error often repeats across them. Smoothing therefore fixes
+inconsistencies, it does not make a proposal more certain: auto-confirmation ignores it. The
+original model proposal stays saved (model_key), and the detection keeps a record of the smoothing
+(smoothed; series_n: photos of the series proposing the same species).
 """
 
 import json
@@ -55,14 +55,14 @@ def km(a, b) -> float:
 
 
 def linked(p: dict, q: dict) -> bool:
-    """Deux photos consécutives (même appareil, triées par date) de la même série."""
+    """Two consecutive photos (same camera, sorted by date) of the same series."""
     near = p["lat"] is None or q["lat"] is None or km(p, q) <= SERIES_KM
     return abs(q["t"] - p["t"]) <= SERIES_GAP and near
 
 
 def chains(rows: list[dict]) -> list[list[dict]]:
-    """Découpe en séries des photos d'un même appareil triées par date (clé « t », en secondes) : de proche en proche
-    (linked), et jamais plus de SERIES_MAX_SPAN secondes entre la première et la dernière photo d'une série."""
+    """Split into series the photos of one camera sorted by date (key "t", in seconds): step by step
+    (linked), and never more than SERIES_MAX_SPAN seconds between the first and the last photo of a series."""
     out: list[list[dict]] = []
     for r in rows:
         if out and linked(out[-1][-1], r) and r["t"] - out[-1][0]["t"] <= SERIES_MAX_SPAN:
@@ -73,11 +73,11 @@ def chains(rows: list[dict]) -> list[list[dict]]:
 
 
 def assign(db: sqlite3.Connection) -> int:
-    """Calcule les séries de toute la photothèque (asset.series_id : id de la première photo de la série ; NULL pour
-    une photo seule). Renvoie le nombre de photos dont la série a changé."""
+    """Compute the series of the whole photo library (asset.series_id: id of the first photo of the series; NULL for
+    a single photo). Return the number of photos whose series changed."""
     rows = [dict(r) for r in db.execute(
         "SELECT asset_id, taken_at, lat, lon, make, model, series_id FROM asset WHERE missing_at IS NULL AND taken_at IS NOT NULL")]
-    for r in rows:   # appareil inconnu ou date illisible : jamais en série
+    for r in rows:   # unknown camera or unreadable date: never in a series
         r["t"] = seconds(r["taken_at"]) if r["make"] or r["model"] else None
     stale = [(r["asset_id"],) for r in rows if r["t"] is None and r["series_id"]]
     rows = sorted((r for r in rows if r["t"] is not None), key=lambda r: (r["make"] or "", r["model"] or "", r["t"]))
@@ -91,14 +91,14 @@ def assign(db: sqlite3.Connection) -> int:
                 wanted[r["asset_id"]] = chain[0]["asset_id"] if len(chain) > 1 else None
     changes = [(sid, r["asset_id"]) for r in rows if (sid := wanted.get(r["asset_id"])) != r["series_id"]]
     db.executemany("UPDATE asset SET series_id = ? WHERE asset_id = ?", changes)
-    db.executemany("UPDATE asset SET series_id = NULL WHERE asset_id = ?", stale)   # plus en série (appareil inconnu…)
+    db.executemany("UPDATE asset SET series_id = NULL WHERE asset_id = ?", stale)   # no longer in a series (unknown camera…)
     db.commit()
     return len(changes) + len(stale)
 
 
 def _before(d: dict) -> dict:
-    """Proposition d'avant le lissage d'une détection lissée : celle enregistrée (presmooth), sinon, pour un lissage
-    d'avant cette colonne, la proposition d'origine du modèle (model_key) avec la plausibilité de ce candidat."""
+    """Proposal from before the smoothing of a smoothed detection: the saved one (presmooth), otherwise, for a smoothing
+    from before this column, the original model proposal (model_key) with the plausibility of that candidate."""
     if d["presmooth"]:
         return json.loads(d["presmooth"])
     cands = json.loads(d["candidates"] or "[]")
@@ -108,12 +108,12 @@ def _before(d: dict) -> dict:
 
 
 def smooth(db: sqlite3.Connection, load_taxon) -> int:
-    """Lissage des détections à relire, série par série (voir le docstring du module). load_taxon(key) -> dict | None
-    donne la lignée d'un taxon. Renvoie le nombre de détections modifiées.
+    """Smoothing of the detections awaiting review, series by series (see the module docstring). load_taxon(key) -> dict | None
+    gives the lineage of a taxon. Return the number of detections changed.
 
-    Une détection déjà lissée est jugée de nouveau sur sa proposition d'avant le lissage : si la règle ne le justifie
-    plus (série redécoupée, garde-fous ajoutés depuis), cette proposition est rétablie. Sa photo peut alors ne plus
-    être dans une série du tout."""
+    A detection already smoothed is judged again on its proposal from before the smoothing: if the rule no longer
+    justifies it (series split again, safeguards added since), that proposal is restored. Its photo may then no longer
+    be in a series at all."""
     keep = ("taxon_key", "taxon_rank", "score", "plausibility", "frame_support")
     groups: dict[str, list[dict]] = {}
     for r in db.execute(
@@ -124,7 +124,7 @@ def smooth(db: sqlite3.Connection, load_taxon) -> int:
             "AND (a.series_id IS NOT NULL OR (d.smoothed = 1 AND d.status = 'pending'))"):
         d = dict(r)
         d["lissee"] = d["status"] == "pending" and d["smoothed"] == 1
-        if d["lissee"]:   # jugée sur sa proposition d'avant le lissage
+        if d["lissee"]:   # judged on its proposal from before the smoothing
             d["now"] = {k: d[k] for k in keep}
             d.update(_before(d))
         groups.setdefault(d["series_id"] or f"seule-{d['id']}", []).append(d)
@@ -154,7 +154,7 @@ def smooth(db: sqlite3.Connection, load_taxon) -> int:
                     target = (c.get("p", d["score"]), c.get("plausibility"))
             if target:
                 if d["lissee"] and d["now"]["taxon_key"] == dominant and d["series_n"] == n_dom and d["presmooth"]:
-                    continue   # déjà lissée ainsi (un lissage d'avant presmooth est réécrit une fois, pour l'enregistrer)
+                    continue   # already smoothed this way (a smoothing from before presmooth is rewritten once, to save it)
                 before = json.dumps({k: d[k] for k in keep})
                 flips.append((dominant, target[0], target[1], n_dom, before, d["id"]))
             elif d["lissee"]:
@@ -168,5 +168,5 @@ def smooth(db: sqlite3.Connection, load_taxon) -> int:
     db.executemany("UPDATE detection SET series_n = ? WHERE id = ?", supports)
     db.commit()
     if reverts:
-        log.info("%d détection(s) lissée(s) par une série rendue(s) à leur proposition d'origine", len(reverts))
+        log.info("%d detection(s) smoothed by a series restored to their original proposal", len(reverts))
     return len(flips) + len(reverts)

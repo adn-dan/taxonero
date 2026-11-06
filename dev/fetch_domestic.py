@@ -1,8 +1,8 @@
-"""Photos de test d'animaux domestiques (chiens, chats, chevaux, poules) depuis iNaturalist, toujours les
-mêmes observations pour que les mesures restent comparables. Photos CC0/CC-BY, non versionnées : ce script
-les retélécharge. Sert à vérifier que les animaux domestiques sont bien reconnus comme tels
-(DOMESTIC_ANIMALS=skip), par exemple en comparant les modes d'OWLv2.
-Sortie : dev/photos_domestic/*.jpg + dev/photos_domestic/truth.csv (licence et auteur de chaque photo)
+"""Test photos of domestic animals (dogs, cats, horses, hens) from iNaturalist, always the
+same observations so that measurements stay comparable. CC0/CC-BY photos, not versioned: this script
+downloads them again. Used to check that domestic animals are recognised as such
+(DOMESTIC_ANIMALS=skip), for instance by comparing the OWLv2 modes.
+Output: dev/photos_domestic/*.jpg + dev/photos_domestic/truth.csv (licence and author of each photo)
 """
 
 import csv
@@ -24,7 +24,7 @@ def main() -> None:
         for obs in http.get(f"https://api.inaturalist.org/v1/observations/{ids}").raise_for_status().json()["results"]:
             photo = next((p for p in obs["photos"] if p.get("license_code") in ("cc0", "cc-by")), None)
             if not photo or not obs.get("location"):
-                print(f"{obs['id']} : plus de photo sous licence libre, ignorée")
+                print(f"{obs['id']}: no photo under a free licence any more, skipped")
                 continue
             path = OUT / f"dom_{obs['id']}.jpg"
             if not path.exists():
@@ -41,7 +41,7 @@ def main() -> None:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    print(f"{len(rows)} photos dans {OUT}")
+    print(f"{len(rows)} photos in {OUT}")
 
 
 if __name__ == "__main__":

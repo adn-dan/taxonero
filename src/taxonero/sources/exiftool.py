@@ -1,5 +1,5 @@
-"""ExifTool (Phil Harvey, la référence pour les métadonnées photo) gardé ouvert (-stay_open) : un seul processus
-pour toutes les lectures et écritures, au lieu d'un démarrage de Perl (~0,2 s) par photo."""
+"""ExifTool (Phil Harvey, the reference for photo metadata) kept open (-stay_open): a single process
+for all reads and writes, instead of starting Perl (~0.2 s) per photo."""
 
 import json
 import os
@@ -9,11 +9,11 @@ import sys
 import threading
 from pathlib import Path
 
-# Windows : pas de fenêtre de console à chaque lancement d'ExifTool (application de bureau).
+# Windows: no console window at every ExifTool launch (desktop application).
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
-# Installation, si ExifTool manque (message affiché dans le dashboard).
-INSTALL_HINT = {"win32": "https://exiftool.org (exiftool.exe dans le PATH)", "darwin": "brew install exiftool, ou le paquet de https://exiftool.org"}.get(
-    sys.platform, "paquet libimage-exiftool-perl (Debian, Ubuntu) ou perl-Image-ExifTool (Fedora)")
+# Installation, if ExifTool is missing (message shown in the dashboard).
+INSTALL_HINT = {"win32": "https://exiftool.org (exiftool.exe in the PATH)", "darwin": "brew install exiftool, or the package from https://exiftool.org"}.get(
+    sys.platform, "package libimage-exiftool-perl (Debian, Ubuntu) or perl-Image-ExifTool (Fedora)")
 
 
 class ExifToolError(RuntimeError):
@@ -21,8 +21,8 @@ class ExifToolError(RuntimeError):
 
 
 def command() -> list[str] | None:
-    """Commande ExifTool : celle livrée avec l'application de bureau (dossier « exiftool » du lanceur, ou à côté du programme :
-    exiftool.exe autonome sous Windows, script Perl ailleurs), sinon celle du système."""
+    """ExifTool command: the one shipped with the desktop application ("exiftool" folder of the launcher, or next to the program:
+    standalone exiftool.exe on Windows, Perl script elsewhere), otherwise the system one."""
     base = (Path(os.environ["TAXONERO_EXIFTOOL"]) if os.environ.get("TAXONERO_EXIFTOOL")   # lanceur de bureau
             else Path(getattr(sys, "_MEIPASS", "")) / "exiftool" if getattr(sys, "frozen", False) else None)
     if base and (base / "exiftool.exe").exists():
@@ -51,14 +51,14 @@ class ExifTool:
         return self._proc
 
     def run(self, *args: str) -> tuple[str, str]:
-        """Une commande (un argument par élément, comme en ligne de commande) ; renvoie (sortie, erreurs). Les valeurs
-        sont passées par -ec : retours à la ligne écrits \\n, antislash \\\\."""
+        """One command (one argument per item, as on the command line); return (output, errors). Values
+        are passed with -ec: line breaks written \\n, backslash \\\\."""
         if any("\n" in a for a in args):
-            raise ValueError("argument sur plusieurs lignes : l'échapper (\\n) avec -ec")
+            raise ValueError("argument on several lines: escape it (\\n) with -ec")
         with self._lock:
             p = self._start()
-            # Marqueurs de fin à nous, sur les deux sorties (-echo3, -echo4) : le « {ready} » d'ExifTool disparaît
-            # avec -q, et il en reste parfois un d'une commande précédente, ignoré.
+            # End markers of our own, on both outputs (-echo3, -echo4): ExifTool's "{ready}" disappears
+            # with -q, and one from a previous command sometimes remains, ignored.
             p.stdin.write("\n".join([*args, "-echo3", "{done}", "-echo4", "{done}", "-execute"]) + "\n")
             p.stdin.flush()
             out = []
@@ -75,17 +75,17 @@ class ExifTool:
         return "".join(out), "".join(err)
 
     def read(self, paths: list[str], tags: list[str]) -> list[dict]:
-        """Métadonnées de plusieurs fichiers (valeurs numériques, -n), une entrée par fichier lisible."""
+        """Metadata of several files (numeric values, -n), one entry per readable file."""
         if not paths:
             return []
         out, _ = self.run("-j", "-n", "-q", "-q", "-ec", "-charset", "filename=utf8", *(f"-{t}" for t in tags), *paths)
         return json.loads(out) if out.strip() else []
 
     def write(self, path: str, assignments: list[str]) -> None:
-        """Écrit des valeurs (ex. -XMP-dc:Subject+=Mésange) ; crée le fichier s'il s'agit d'un .xmp absent."""
+        """Write values (e.g. -XMP-dc:Subject+=Tit); create the file if it is a missing .xmp."""
         out, err = self.run("-ec", "-overwrite_original", "-charset", "filename=utf8", *assignments, path)
         if "1 image files updated" not in out and "1 image files created" not in out and "unchanged" not in out:
-            raise ExifToolError((err or out).strip() or f"écriture refusée : {path}")
+            raise ExifToolError((err or out).strip() or f"write refused: {path}")
 
     def close(self) -> None:
         with self._lock:
@@ -100,5 +100,5 @@ class ExifTool:
 
 
 def escape(value: str) -> str:
-    """Valeur pour -ec : antislash et retours à la ligne échappés."""
+    """Value for -ec: backslashes and line breaks escaped."""
     return value.replace("\\", "\\\\").replace("\n", "\\n")

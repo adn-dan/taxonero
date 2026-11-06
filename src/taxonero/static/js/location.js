@@ -1,12 +1,12 @@
-/* ============================== lieu indiqué à la main ============================== */
-/* Photos sans GPS : on clique sur la carte à l'endroit de la prise de vue. Le lieu aide l'identification (espèces
-   présentes dans la région) ; un GPS de la source n'est jamais remplacé. Le dernier lieu choisi est retenu dans ce
-   navigateur pour l'appliquer d'un clic aux photos suivantes de la même sortie. */
+/* ============================== place entered by hand ============================== */
+/* Photos without GPS: click on the map where the photo was taken. The place helps identification (species
+   present in the region); a GPS from the source is never replaced. The last chosen place is remembered in this
+   browser to apply it with one click to the next photos of the same outing. */
 const LOC = { map: null, marker: null, resolve: null };
 const lastLoc = () => { try { return JSON.parse(localStorage.getItem('last-location') || 'null'); } catch (e) { return null; } };
 const saveLastLoc = p => { try { localStorage.setItem('last-location', JSON.stringify(p)); } catch (e) {} };
 
-/* Ouvre la carte ; renvoie {lat, lon}, 'clear' (effacer le lieu indiqué) ou null (annulé). */
+/* Open the map; return {lat, lon}, 'clear' (clear the place entered) or null (cancelled). */
 function pickLocation({ current = null, canClear = false } = {}) {
   const box = $('#locpick'), last = lastLoc();
   box.innerHTML = `<div class="lpcard" role="dialog" aria-modal="true" aria-labelledby="lp-title">
@@ -48,7 +48,7 @@ function pickLocation({ current = null, canClear = false } = {}) {
   });
 }
 
-/* Envoie le lieu au serveur pour une sélection (même forme que la relecture en lot) ; renvoie la réponse. */
+/* Send the place to the server for a selection (same shape as the bulk review); return the response. */
 async function sendLocation(sel, p) {
   const body = { ...sel, ...(p === 'clear' ? { lat: null, lon: null } : p) };
   const r = await api('/api/assets/location', { method: 'POST', body: JSON.stringify(body) });
@@ -58,7 +58,7 @@ async function sendLocation(sel, p) {
   return r;
 }
 
-/* Ligne « lieu » de la visionneuse : pas de GPS, ou lieu indiqué à la main (modifiable). */
+/* "Place" line of the viewer: no GPS, or place entered by hand (editable). */
 function locLine(a) {
   if (a.lat != null && !a.geo_user) return '';
   return `<div class="locline">📍 ${a.geo_user ? t('loc.user') : t('loc.none')}

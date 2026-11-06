@@ -1,13 +1,15 @@
-"""Analyse d'une image : détection (MegaDetector v6 pour la faune, OWLv2 à vocabulaire ouvert
-pour les plantes, champignons et petits animaux), classification (BioCLIP 2), repondération
-géographique (GBIF), décision hiérarchique et nettoyage des détections superposées.
+"""Analysis of an image: detection (MegaDetector v6 for wildlife, open-vocabulary OWLv2
+for plants, fungi and small animals), classification (BioCLIP 2), geographic
+reweighting (GBIF), hierarchical decision and cleanup of overlapping detections.
 """
 
 import io
+import json
 import time
+import zlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -22,13 +24,13 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Box:
-    x: float  # normalisé 0..1, coin haut gauche
+    x: float  # normalised 0..1, top left corner
     y: float
     w: float
     h: float
     score: float
-    label: str                 # animal | plant | fungus | image (pas de boîte : image entière)
-    kingdom: str | None = None  # indice de règne donné par le détecteur (Animalia, Plantae, Fungi)
+    label: str                 # animal | plant | fungus | image (no box: whole image)
+    kingdom: str | None = None  # kingdom hint given by the detector (Animalia, Plantae, Fungi)
     source: str = "md"          # md (MegaDetector) | owl (OWLv2) | image | manual
 
     @property
@@ -38,31 +40,31 @@ class Box:
 
 @dataclass
 class Candidate:
-    name: str                      # nom scientifique (binôme) donné par le modèle
-    score: float                   # probabilité modèle
+    name: str                      # scientific name (binomial) given by the model
+    score: float                   # model probability
     lineage: dict[str, str]
     gbif_key: int | None = None
     accepted_name: str | None = None
     plausibility: str = "unknown"
-    geo_weight: float = 1.0        # a priori p(espèce | lieu), non normalisé
-    posterior: float = 0.0         # après repondération géographique (et filtrage des candidats écartés)
-    prior: float = 0.0             # même probabilité, avant filtrage (sert à rétablir un candidat écarté)
+    geo_weight: float = 1.0        # prior p(species | place), not normalised
+    posterior: float = 0.0         # after geographic reweighting (and filtering of excluded candidates)
+    prior: float = 0.0             # same probability, before filtering (used to restore an excluded candidate)
 
 
 @dataclass
 class Decision:
     gbif_key: int | None
     name: str | None
-    rank: str                      # species, genus, family... ou 'none'
-    confidence: float              # probabilité cumulée au rang retenu
+    rank: str                      # species, genus, family... or 'none'
+    confidence: float              # cumulative probability at the kept rank
     margin: float
     plausibility: str
     candidates: list[Candidate] = field(default_factory=list)
-    excluded: list[Candidate] = field(default_factory=list)   # écartés par les paramètres
+    excluded: list[Candidate] = field(default_factory=list)   # excluded by the settings
 
 
 def average(a: list[Candidate], b: list[Candidate]) -> list[Candidate]:
-    """Moyenne des scores de deux listes de candidats (absent d'une liste = score 0)."""
+    """Mean of the scores of two candidate lists (missing from a list = score 0)."""
     out: dict[str, Candidate] = {}
     for cands in (a, b):
         for c in cands:
@@ -73,8 +75,8 @@ def average(a: list[Candidate], b: list[Candidate]) -> list[Candidate]:
 
 
 def image_quality(image: Image.Image) -> float:
-    """Qualité visuelle 0..1 : moitié couleurs (indice de Hasler et Süsstrunk, nul en noir et blanc
-    comme les pièges photo infrarouges), moitié netteté (variance du laplacien)."""
+    """Visual quality 0..1: half colourfulness (Hasler and Süsstrunk index, zero in black and white
+    like infrared camera traps), half sharpness (variance of the Laplacian)."""
     rgb = np.asarray(image.convert("RGB").resize((256, 256)), dtype=np.float32)
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     rg, yb = r - g, 0.5 * (r + g) - b
@@ -85,22 +87,22 @@ def image_quality(image: Image.Image) -> float:
 
 
 class Detector:
-    """MegaDetector v6 (ONNX). Classes du modèle : 0 animal, 1 personne, 2 véhicule ; seule la 0 est gardée."""
+    """MegaDetector v6 (ONNX). Model classes: 0 animal, 1 person, 2 vehicle; only 0 is kept."""
 
     def __init__(self, onnx_path: str | Path, providers: list[str] | None = None, min_score: float = 0.5,
                  min_area: float = 0.005):
         import onnxruntime as ort
         names = [p[0] if isinstance(p, tuple) else p for p in providers or []]
         if "CUDAExecutionProvider" in names and hasattr(ort, "preload_dlls"):
-            # Bibliothèques CUDA et cuDNN installées par PyTorch (paquets nvidia-*) : sans ce préchargement,
-            # ONNX Runtime ne les trouve pas et repasse en silence sur le processeur.
+            # CUDA and cuDNN libraries installed by PyTorch (nvidia-* packages): without this preload,
+            # ONNX Runtime does not find them and silently falls back to the CPU.
             try:
                 ort.preload_dlls()
             except Exception as e:
-                log.warning("préchargement CUDA pour ONNX Runtime impossible : %s", e)
+                log.warning("CUDA preload for ONNX Runtime failed: %s", e)
         self.session = ort.InferenceSession(str(onnx_path), providers=providers or ort.get_available_providers())
         self.min_score = min_score
-        self.min_area = min_area  # fraction de l'image : en dessous, presque toujours du bruit
+        self.min_area = min_area  # fraction of the image: below it, almost always noise
 
     def detect(self, image: Image.Image) -> list[Box]:
         w, h = image.size
@@ -111,29 +113,29 @@ class Detector:
         for lab, (x1, y1, x2, y2), s in zip(labels[0], boxes[0], scores[0]):
             if s < self.min_score or int(lab) != 0:
                 continue
-            # float() : les numpy.float32 seraient stockés en BLOB par SQLite.
+            # float(): numpy.float32 values would be stored as BLOBs by SQLite.
             x1, y1, x2, y2 = max(0.0, float(x1)), max(0.0, float(y1)), min(float(w), float(x2)), min(float(h), float(y2))
             if x2 - x1 < 8 or y2 - y1 < 8 or (x2 - x1) * (y2 - y1) < self.min_area * w * h:
                 continue
-            # Pas d'indice de règne : MegaDetector pose parfois une boîte « animal » sur une plante,
-            # et l'indice pénaliserait alors la bonne réponse (mesuré sur le jeu de dev).
+            # No kingdom hint: MegaDetector sometimes puts an "animal" box on a plant,
+            # and the hint would then penalise the right answer (measured on the dev set).
             out.append(Box(x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h, float(s), "animal", None, "md"))
         return _nms(sorted(out, key=lambda b: -b.score))
 
 
 class OpenVocabDetector:
-    """OWLv2 (Apache 2.0) interrogé en texte libre : plantes, champignons, lichens, et les petits
-    animaux (insectes, araignées) que MegaDetector, entraîné sur des pièges photo, détecte mal."""
+    """OWLv2 (Apache 2.0) queried with free text: plants, fungi, lichens, and the small
+    animals (insects, spiders) that MegaDetector, trained on camera traps, detects poorly."""
 
-    QUERIES = {  # requête -> (libellé, règne)
+    QUERIES = {  # query -> (label, kingdom)
         "a flower": ("plant", "Plantae"), "a plant": ("plant", "Plantae"), "a leaf": ("plant", "Plantae"),
         "a tree": ("plant", "Plantae"), "a moss": ("plant", "Plantae"), "a fern": ("plant", "Plantae"),
         "a mushroom": ("fungus", "Fungi"), "a lichen": ("fungus", "Fungi"),
         "an insect": ("animal", "Animalia"), "a butterfly": ("animal", "Animalia"), "a spider": ("animal", "Animalia"),
         "a snail": ("animal", "Animalia"), "a bird": ("animal", "Animalia"), "an animal": ("animal", "Animalia"),
-        # Domestique contre sauvage : OWLv2 garde, pour chaque boîte, la requête au meilleur score. Sans les
-        # concurrents sauvages, « a dog » se déclenchait sur les loups et les renards (mesuré sur le jeu de dev).
-        # Les boîtes « domestic » ne sont que des indices ; les boîtes « wild » restent des sujets (animal).
+        # Domestic versus wild: OWLv2 keeps, for each box, the best-scoring query. Without the
+        # wild competitors, "a dog" fired on wolves and foxes (measured on the dev set).
+        # "domestic" boxes are only hints; "wild" boxes remain subjects (animal).
         "a dog": ("domestic", "Canidae"), "a cat": ("domestic", "Felidae"), "a horse": ("domestic", "Equidae"),
         "a cow": ("domestic", "Bovidae"), "a sheep": ("domestic", "Bovidae"), "a goat": ("domestic", "Bovidae"),
         "a chicken": ("domestic", "Phasianidae"),
@@ -150,17 +152,17 @@ class OpenVocabDetector:
         self.model = Owlv2ForObjectDetection.from_pretrained(model_id).to(device).eval()
         self.device, self.min_score, self.min_area = device, min_score, min_area
         self.queries = list(self.QUERIES)
-        # Les requêtes ne changent jamais : leurs empreintes de texte sont calculées une fois ici, au lieu de
-        # repasser à chaque photo dans la tour de texte (comme le fait model(**inputs)). Mêmes boîtes.
+        # The queries never change: their text embeddings are computed once here, instead of
+        # going through the text tower for every photo (as model(**inputs) does). Same boxes.
         tok = self.processor(text=[self.queries], return_tensors="pt").to(device)
         with torch.no_grad():
             q = self.model.owlv2.get_text_features(input_ids=tok["input_ids"], attention_mask=tok["attention_mask"]).pooler_output
         self._query = (q / torch.linalg.norm(q, ord=2, dim=-1, keepdim=True))[None]
         self._query_mask = (tok["input_ids"][:, 0] > 0)[None]
 
-    # OWLv2 complète l'image en carré puis la ramène à 960 px : faite par sa préparation (processeur) sur un aperçu de
-    # 1440 px, l'opération coûte ~230 ms par photo sur 4 cœurs, pendant que le GPU attend. Réduite d'abord à 960 px
-    # avec Pillow : ~26 ms, mêmes boîtes sur 19 photos de dev sur 20 (une boîte à 0,31, au ras du seuil, perdue).
+    # OWLv2 pads the image to a square then scales it to 960 px: done by its processor on a
+    # 1440 px preview, this costs ~230 ms per photo on 4 cores, while the GPU waits. Reduced to 960 px first
+    # with Pillow: ~26 ms, same boxes on 19 dev photos out of 20 (one box at 0.31, right at the threshold, lost).
     INPUT_SIDE = 960
 
     def detect(self, image: Image.Image) -> list[Box]:
@@ -176,7 +178,7 @@ class OpenVocabDetector:
             feats = feature_map.reshape(b, ph * pw, dim)
             logits = self.model.class_predictor(feats, self._query, self._query_mask)[0]
             outputs = Owlv2ObjectDetectionOutput(logits=logits, pred_boxes=self.model.box_predictor(feats, feature_map))
-        side = max(w, h)  # OWLv2 travaille sur l'image complétée en carré
+        side = max(w, h)  # OWLv2 works on the image padded to a square
         res = self.processor.post_process_grounded_object_detection(outputs, threshold=self.min_score,
                                                                      target_sizes=[(side, side)])[0]
         out = []
@@ -194,13 +196,13 @@ MD_SURE = 0.8
 
 
 def merge_boxes(primary: list[Box], secondary: list[Box], max_boxes: int = 5) -> list[Box]:
-    """Fusionne deux détecteurs : MegaDetector prioritaire, OWLv2 ajoute ce qui ne recouvre rien.
-    Une boîte qui couvre presque toute l'image devient « image entière » (le sujet, c'est la scène)."""
+    """Merge two detectors: MegaDetector first, OWLv2 adds what overlaps nothing.
+    A box covering almost the whole image becomes "whole image" (the subject is the scene)."""
     def overlaps(a: Box, b: Box) -> bool:
         return _iou(a, b) >= 0.3 or _contained(a, b) >= 0.6 or _contained(b, a) >= 0.6
 
-    # MegaDetector peu sûr de lui sur ce qu'OWLv2 voit comme une plante ou un champignon : faux
-    # positif typique (fleur prise pour un animal). Les vrais animaux sortent à >= 0,9.
+    # MegaDetector unsure about what OWLv2 sees as a plant or a fungus: typical false
+    # positive (flower taken for an animal). Real animals come out at >= 0.9.
     flora = [b for b in secondary if b.label in ("plant", "fungus") and b.area <= 0.8]
     kept = [b for b in primary if b.score >= MD_SURE or not any(overlaps(b, f) for f in flora)]
     for b in secondary:
@@ -220,15 +222,15 @@ def _iou(a: Box, b: Box) -> float:
 
 
 def _contained(a: Box, b: Box) -> float:
-    """Part de la boîte a contenue dans b."""
+    """Fraction of box a contained in b."""
     ix = max(0.0, min(a.x + a.w, b.x + b.w) - max(a.x, b.x))
     iy = max(0.0, min(a.y + a.h, b.y + b.h) - max(a.y, b.y))
     return ix * iy / (a.w * a.h + 1e-9)
 
 
 def _nms(boxes: list[Box], thr: float = 0.5, contain_thr: float = 0.7) -> list[Box]:
-    """Suppression des doublons : recouvrement (IoU) ou boîte contenue dans une boîte mieux notée
-    (MegaDetector détecte parfois l'animal entier et des parties de lui-même)."""
+    """Duplicate removal: overlap (IoU) or box contained in a better-scored box
+    (MegaDetector sometimes detects the whole animal and parts of itself)."""
     kept: list[Box] = []
     for b in boxes:
         if all(_iou(b, k) < thr and _contained(b, k) < contain_thr and _contained(k, b) < contain_thr for k in kept):
@@ -236,8 +238,8 @@ def _nms(boxes: list[Box], thr: float = 0.5, contain_thr: float = 0.7) -> list[B
     return kept
 
 
-# Recadrage plus petit que ça dans l'aperçu (1440 px sur le petit côté par défaut) : on le refait dans l'original s'il est disponible.
-# BioCLIP travaille en 224 px ; avec la marge, en dessous de ~400 px l'aperçu perd déjà des détails.
+# Crop smaller than this in the preview (1440 px on the short side by default): redone from the original if available.
+# BioCLIP works at 224 px; with the margin, below ~400 px the preview already loses detail.
 SMALL_CROP_PX = 400
 
 
@@ -246,8 +248,8 @@ def crop_side(image: Image.Image, box: Box, margin: float = 0.15) -> float:
     return max(box.w * w, box.h * h) * (1 + 2 * margin)
 
 
-# Côté maximal d'une image décodée en entier (original, image déposée sur la page Identifier) : bien au-delà de
-# ce qu'exigent les petits sujets (SMALL_CROP_PX), et ~50 Mo en mémoire au lieu de ~150 Mo pour 50 Mpx.
+# Maximum side of an image decoded in full (original, image dropped on the Identify page): well beyond
+# what small subjects need (SMALL_CROP_PX), and ~50 MB in memory instead of ~150 MB for 50 Mpx.
 MAX_SIDE = 4096
 
 
@@ -255,7 +257,7 @@ def open_image(data: bytes | Image.Image, max_side: int | None = None) -> Image.
     image = data if isinstance(data, Image.Image) else Image.open(io.BytesIO(data))
     if max_side and max(image.size) > max_side:
         k = max_side / max(image.size)
-        image.draft("RGB", (int(image.width * k), int(image.height * k)))   # JPEG : décodage directement réduit
+        image.draft("RGB", (int(image.width * k), int(image.height * k)))   # JPEG: decoded directly at reduced size
     image = ImageOps.exif_transpose(image).convert("RGB")
     if max_side and max(image.size) > max_side:
         image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
@@ -263,7 +265,7 @@ def open_image(data: bytes | Image.Image, max_side: int | None = None) -> Image.
 
 
 def exif_latlon(data: bytes) -> tuple[float | None, float | None]:
-    """Coordonnées GPS inscrites dans l'EXIF d'une image (None, None si absentes ou illisibles)."""
+    """GPS coordinates written in the EXIF of an image (None, None if absent or unreadable)."""
     try:
         gps = Image.open(io.BytesIO(data)).getexif().get_ifd(0x8825)
         def deg(v, ref):
@@ -271,19 +273,19 @@ def exif_latlon(data: bytes) -> tuple[float | None, float | None]:
             r = d + m / 60 + sec / 3600
             return -r if ref in ("S", "W") else r
         lat, lon = deg(gps[2], gps[1]), deg(gps[4], gps[3])
-        # Récepteur sans position : certains appareils écrivent 0/0 (NaN une fois divisé) ou des valeurs hors limites.
+        # Receiver without a fix: some cameras write 0/0 (NaN once divided) or out-of-range values.
         return (lat, lon) if abs(lat) <= 90 and abs(lon) <= 180 else (None, None)
     except Exception:
         return None, None
 
 
 def same_frame(a: Image.Image, b: Image.Image, tol: float = 0.01) -> bool:
-    """Même cadrage (rapport largeur/hauteur) : sinon l'original a été recadré ou tourné depuis l'aperçu."""
+    """Same framing (width/height ratio): otherwise the original was cropped or rotated since the preview."""
     return abs(a.width / a.height - b.width / b.height) <= tol * a.width / a.height
 
 
 def crop(image: Image.Image, box: Box, margin: float = 0.15) -> Image.Image:
-    """Recadre avec une marge (le contexte aide la classification), en carré si possible."""
+    """Crop with a margin (context helps classification), square if possible."""
     w, h = image.size
     cx, cy = (box.x + box.w / 2) * w, (box.y + box.h / 2) * h
     side = max(box.w * w, box.h * h) * (1 + 2 * margin)
@@ -293,11 +295,11 @@ def crop(image: Image.Image, box: Box, margin: float = 0.15) -> Image.Image:
 
 
 def _tol_classifier(device: str):
-    """BioCLIP 2 allégé, résultats inchangés :
-    - les empreintes de texte des ~870 000 espèces (2,7 Go en float32) sont lues en mmap : sur processeur,
-      ces pages sont du cache disque que le noyau peut reprendre sous pression mémoire, au lieu de mémoire
-      privée qui finit en arrêt du processus (OOM) ;
-    - la tour de texte du modèle (~0,5 Go), inutile une fois ces empreintes calculées, est libérée."""
+    """Lightweight BioCLIP 2, same results:
+    - the text embeddings of the ~870,000 species (2.7 GB in float32) are read with mmap: on the CPU,
+      these pages are disk cache that the kernel can reclaim under memory pressure, instead of private
+      memory that ends in the process being killed (OOM);
+    - the model's text tower (~0.5 GB), useless once these embeddings are computed, is released."""
     import warnings
     import torch
     from bioclip import TreeOfLifeClassifier
@@ -306,11 +308,11 @@ def _tol_classifier(device: str):
         def get_txt_emb(self):
             path = self.get_cached_datafile("embeddings/txt_emb_species.npy")
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)   # tableau en lecture seule : jamais modifié
+                warnings.simplefilter("ignore", UserWarning)   # read-only array: never modified
                 return torch.from_numpy(np.load(path, mmap_mode="r"))
 
     clf = Light(device=device)
-    m = getattr(clf.model, "_orig_mod", clf.model)   # pybioclip enveloppe le modèle dans torch.compile
+    m = getattr(clf.model, "_orig_mod", clf.model)   # pybioclip wraps the model in torch.compile
     for name in ("transformer", "token_embedding", "ln_final"):
         setattr(m, name, None)
     for name in ("positional_embedding", "text_projection"):
@@ -326,14 +328,14 @@ class Classifier:
         self._rank = Rank.SPECIES
         self.model = _tol_classifier(device)
         self.k = k
-        # Images par passage : un GPU en traite beaucoup à la fois, le processeur n'y gagne rien.
+        # Images per pass: a GPU processes many at once, the CPU gains nothing.
         self.batch_size = 8 if device == "cpu" else 32
 
     def classify(self, images: list[Image.Image]) -> list[list[Candidate]]:
         preds = self.model.predict(images, self._rank, k=self.k, batch_size=self.batch_size)
         out: list[list[Candidate]] = [[] for _ in images]
         for p in preds:
-            idx = int(p["file_name"])  # pybioclip indexe les images PIL par position
+            idx = int(p["file_name"])  # pybioclip indexes PIL images by position
             lineage = {r: p[r] for r in RANKS[:-1] if p.get(r)}
             name = f"{p['genus']} {p['species_epithet']}"
             lineage["species"] = name
@@ -343,8 +345,8 @@ class Classifier:
         return out
 
 
-# Poids d'un candidat dont le règne ne correspond pas à l'indice du détecteur (indice souple :
-# OWLv2 confond parfois algue et lichen, galle et araignée).
+# Weight of a candidate whose kingdom does not match the detector hint (soft hint:
+# OWLv2 sometimes confuses alga and lichen, gall and spider).
 KINGDOM_MISMATCH = 0.4
 
 
@@ -355,13 +357,13 @@ MIN_CANDIDATES = 3
 def rerank(cands: list[Candidate], tx: Taxonomy | None, lat: float | None, lon: float | None,
            kingdom_hint: str | None = None, drop: "Callable[[Candidate], bool] | None" = None,
            excluded: list[Candidate] | None = None, tolerant: bool = False) -> list[Candidate]:
-    """Normalise les noms via GBIF (synonymes) et repondère par la plausibilité géographique
-    et, s'il y en a un, par l'indice de règne du détecteur. drop : candidats écartés (paramètres),
-    ajoutés à excluded si fourni. tolerant : GBIF en panne, les candidats restent proposés (plausibilité « unverified »,
-    poids neutre) au lieu de faire échouer l'action ; réservé aux actions manuelles, l'analyse automatique réessaie."""
-    # Candidats sous 1 % : jamais affichés, et sur le banc d'essai les ignorer ne change ni le taux d'espèces
-    # justes ni celui des erreurs (54 photos : 8,6 candidats vérifiés au lieu de 20, deux décisions différentes,
-    # une de plus juste). Chacun coûtait jusqu'à six requêtes GBIF.
+    """Normalise names via GBIF (synonyms) and reweight by geographic plausibility
+    and, if there is one, by the detector's kingdom hint. drop: candidates excluded (settings),
+    added to excluded if given. tolerant: GBIF down, candidates are still proposed (plausibility "unverified",
+    neutral weight) instead of failing the action; reserved for manual actions, the automatic analysis retries."""
+    # Candidates below 1 %: never shown, and on the benchmark ignoring them changes neither the rate of correct
+    # species nor the error rate (54 photos: 8.6 candidates checked instead of 20, two different decisions,
+    # one more correct). Each cost up to six GBIF requests.
     cands = [c for i, c in enumerate(sorted(cands, key=lambda c: -c.score)) if i < MIN_CANDIDATES or c.score >= MIN_CANDIDATE_SCORE]
     if tx is not None:
         tx.prefetch_candidates([(c.name, c.lineage.get("kingdom")) for c in cands], lat, lon,
@@ -385,7 +387,7 @@ def rerank(cands: list[Candidate], tx: Taxonomy | None, lat: float | None, lon: 
                         raise
                     c.plausibility, c.geo_weight = "unverified", 1.0
         key = c.gbif_key or c.name
-        if key in merged:  # deux noms du modèle -> même espèce acceptée : on cumule
+        if key in merged:  # two model names -> same accepted species: add them up
             merged[key].score += c.score
         else:
             merged[key] = c
@@ -398,8 +400,8 @@ def rerank(cands: list[Candidate], tx: Taxonomy | None, lat: float | None, lon: 
     for c in everything:
         c.prior = c.posterior = c.posterior / z
     def dropped(c: Candidate) -> bool:
-        try:
-            return bool(drop and drop(c))
+        try:   # the filter of the settings (curation.candidate_filter) also takes the place of the photo
+            return bool(drop and (drop(c, lat, lon) if hasattr(drop, "fossils") else drop(c)))
         except httpx.HTTPError:
             if not tolerant:
                 raise
@@ -412,7 +414,7 @@ def rerank(cands: list[Candidate], tx: Taxonomy | None, lat: float | None, lon: 
 
 
 def renormalize(cands: list[Candidate]) -> list[Candidate]:
-    """Probabilités (prior) renormalisées sur les candidats gardés, triées."""
+    """Probabilities (prior) renormalised over the kept candidates, sorted."""
     z = sum(c.prior for c in cands) or 1.0
     for c in cands:
         c.posterior = c.prior / z
@@ -421,7 +423,7 @@ def renormalize(cands: list[Candidate]) -> list[Candidate]:
 
 def decide(cands: list[Candidate], tx: Taxonomy | None, species_threshold: float = 0.5,
            higher_threshold: float = 0.7, tolerant: bool = False) -> Decision:
-    """Retient le rang le plus précis dont la probabilité cumulée dépasse le seuil."""
+    """Keep the most precise rank whose cumulative probability exceeds the threshold."""
     if not cands:
         return Decision(None, None, "none", 0.0, 0.0, "unknown")
     top = cands[0]
@@ -438,7 +440,7 @@ def decide(cands: list[Candidate], tx: Taxonomy | None, species_threshold: float
             continue
         name, p = max(groups.items(), key=lambda kv: kv[1])
         if p >= higher_threshold:
-            # Rang attendu : sans lui, l'API répond pour un genre ou un ordre ambigu par le règne entier (clé 1, Animalia).
+            # Expected rank: without it, the API answers an ambiguous genus or order with the whole kingdom (key 1, Animalia).
             try:
                 t = tx.match(name, kingdom=top.lineage.get("kingdom"), enrich=False, rank=rank) if tx else None
             except httpx.HTTPError:
@@ -456,13 +458,13 @@ class Analysis:
     box: Box
     decision: Decision
     domestic: bool = False
-    # Sujet seul (recadrage et photo entière moyennés) : probabilité du taxon retenu sur le recadrage seul. Très
-    # basse, l'espèce vient de la photo entière : le cadre ne contient peut-être pas le sujet.
+    # Single subject (crop and whole photo averaged): probability of the kept taxon on the crop alone. Very
+    # low, the species comes from the whole photo: the box may not contain the subject.
     frame_support: float | None = None
 
 
 def frame_support(crop: list[Candidate], d: Decision) -> float | None:
-    """Probabilité, sur le recadrage seul (BioCLIP), du taxon retenu (espèce, ou genre, famille… au rang décidé)."""
+    """Probability, on the crop alone (BioCLIP), of the kept taxon (species, or genus, family… at the decided rank)."""
     if d.rank == "none" or not d.candidates:
         return None
     if d.rank == "species":
@@ -479,21 +481,21 @@ def _genus(a: "Analysis") -> str | None:
     return d.candidates[0].lineage.get("genus") if d.candidates else None
 
 
-# Espèces (ou formes) uniquement domestiques : écartées d'office.
+# Species (or forms) that are only domestic: excluded outright.
 DOMESTIC_NAMES = {"Felis catus", "Canis familiaris", "Canis lupus familiaris", "Equus caballus", "Equus asinus",
                   "Bos taurus", "Ovis aries", "Capra hircus", "Sus domesticus", "Gallus gallus domesticus"}
 
 
-# Espèces sauvages qu'on confond avec un animal domestique (chien/loup, chat/chat forestier, porc/sanglier,
-# pigeon de ville, canard domestique) : jamais auto-validées, toujours relues.
+# Wild species confused with a domestic animal (dog/wolf, cat/wildcat, pig/wild boar,
+# feral pigeon, domestic duck): never auto-confirmed, always reviewed.
 AMBIGUOUS_WITH_DOMESTIC = {"Canis lupus", "Felis silvestris", "Sus scrofa", "Columba livia", "Anas platyrhynchos",
                            "Gallus gallus", "Equus ferus", "Bos primigenius", "Ovis gmelini", "Capra aegagrus"}
 
 
 def is_domestic(a: "Analysis", hints: list[Box]) -> bool:
-    """Animal domestique : espèce uniquement domestique, ou famille ambiguë quand OWLv2 voit sur le même sujet
-    « a dog », « a cat »… plutôt que leur équivalent sauvage. La famille vient de l'indice (Canidae…)
-    et doit se retrouver parmi les premiers candidats de BioCLIP."""
+    """Domestic animal: species that is only domestic, or ambiguous family when OWLv2 sees on the same subject
+    "a dog", "a cat"… rather than their wild counterpart. The family comes from the hint (Canidae…)
+    and must be among BioCLIP's top candidates."""
     d = a.decision
     top = d.candidates[0] if d.candidates else None
     names = {d.name, top.accepted_name if top else None, top.name if top else None} - {None}
@@ -505,10 +507,10 @@ def is_domestic(a: "Analysis", hints: list[Box]) -> bool:
 
 
 def same_subject(a: "Analysis", b: "Analysis") -> bool:
-    """Deux détections du même individu : elles se recouvrent et désignent le même taxon (ou genre),
-    ou bien ce sont des fragments voisins du même genre dont l'un est peu sûr côté détecteur
-    (serpent coupé en deux, carabe découpé en morceaux). Un papillon sur une fleur reste deux sujets ;
-    deux animaux bien détectés côte à côte aussi."""
+    """Two detections of the same individual: they overlap and point to the same taxon (or genus),
+    or they are neighbouring fragments of the same genus, one of which the detector is unsure about
+    (snake cut in two, ground beetle cut into pieces). A butterfly on a flower stays two subjects;
+    so do two well-detected animals side by side."""
     da, db = a.decision, b.decision
     same_taxon = bool(da.gbif_key and da.gbif_key == db.gbif_key)
     same_genus = bool(_genus(a) and _genus(a) == _genus(b))
@@ -530,7 +532,7 @@ def _union(a: Box, b: Box) -> Box:
 
 
 def dedupe(results: list["Analysis"]) -> list["Analysis"]:
-    """Une détection par sujet : on garde la plus sûre, et sa boîte englobe les fragments fusionnés."""
+    """One detection per subject: keep the most certain one, and its box encloses the merged fragments."""
     kept: list[Analysis] = []
     for r in sorted(results, key=lambda r: -r.decision.confidence):
         for k in kept:
@@ -543,16 +545,16 @@ def dedupe(results: list["Analysis"]) -> list["Analysis"]:
 
 
 ALL_GROUPS = frozenset({"animal", "plant", "fungus", "microbe"})
-# Règne donné par BioCLIP (TreeOfLife) -> groupe ; les autres règnes (plantes, algues…) comptent avec les plantes.
+# Kingdom given by BioCLIP (TreeOfLife) -> group; the other kingdoms (plants, algae…) count with plants.
 RAW_GROUP = {"Animalia": "animal", "Metazoa": "animal", "Fungi": "fungus"}
-# Invisibles en photo : réponses du modèle sur une texture, pas de vrais sujets. Dans ces deux règnes mêlés, seuls
-# les algues brunes et les myxomycètes se photographient. Même règle en SQL : curation.DETECTION_GROUP.
+# Invisible in photos: model answers on a texture, not real subjects. In these two mixed kingdoms, only
+# brown algae and slime moulds get photographed. Same rule in SQL: curation.DETECTION_GROUP.
 MICROBE_KINGDOMS = ("Bacteria", "Archaea", "Viruses")
 VISIBLE_PHYLUM = {"Chromista": "Ochrophyta", "Protozoa": "Mycetozoa"}
 
 
 def group_of_lineage(lineage: dict) -> str:
-    """Groupe (animal, plant, fungus, microbe) d'après le règne, et l'embranchement pour les règnes mêlés."""
+    """Group (animal, plant, fungus, microbe) from the kingdom, and the phylum for mixed kingdoms."""
     kingdom = lineage.get("kingdom")
     if kingdom in MICROBE_KINGDOMS or (kingdom in VISIBLE_PHYLUM and lineage.get("phylum") != VISIBLE_PHYLUM[kingdom]):
         return "microbe"
@@ -560,7 +562,7 @@ def group_of_lineage(lineage: dict) -> str:
 
 
 def group_of_result(r: "Analysis") -> str:
-    """Groupe d'une détection : celui du premier candidat, sinon libellé de la boîte."""
+    """Group of a detection: that of the top candidate, otherwise the box label."""
     top = r.decision.candidates[0] if r.decision.candidates else None
     kingdom = top.lineage.get("kingdom") if top else None
     if kingdom:
@@ -569,9 +571,9 @@ def group_of_result(r: "Analysis") -> str:
 
 
 def fix_false_animals(results: list["Analysis"]) -> list["Analysis"]:
-    """Boîte MegaDetector peu sûre dont le contenu est identifié comme plante ou champignon :
-    faux positif (fleur, champignon pris pour un animal). Écartée s'il existe déjà une boîte de
-    flore dans l'image, sinon reclassée."""
+    """Unsure MegaDetector box whose content is identified as a plant or a fungus:
+    false positive (flower, fungus taken for an animal). Dropped if there is already a flora box
+    in the image, otherwise relabelled."""
     flora = {"Plantae": "plant", "Fungi": "fungus"}
     has_flora = any(r.box.label in ("plant", "fungus") for r in results)
     out = []
@@ -587,7 +589,7 @@ def fix_false_animals(results: list["Analysis"]) -> list["Analysis"]:
 
 
 def load_original(original: "Callable[[], bytes | None]", preview: Image.Image) -> Image.Image | None:
-    """Original décodé, s'il est lisible (pas de RAW ni de HEIC sans greffon) et cadré comme l'aperçu."""
+    """Decoded original, if readable (no RAW, no HEIC without the plugin) and framed like the preview."""
     try:
         data = original()
         full = open_image(data, MAX_SIDE) if data else None
@@ -605,33 +607,33 @@ class Analyzer:
                  open_mode: str = "always"):
         self.detector, self.classifier, self.taxonomy = detector, classifier, taxonomy
         self.open_detector = open_detector
-        # 'always' : OWLv2 sur chaque photo ; 'fallback' : seulement si MegaDetector ne trouve aucun animal
-        # (OWLv2 coûte ~4 fois MegaDetector sur processeur).
+        # 'always': OWLv2 on every photo; 'fallback': only if MegaDetector finds no animal
+        # (OWLv2 costs ~4 times MegaDetector on the CPU).
         self.open_mode = open_mode
         self.max_boxes, self.full_image_fallback = max_boxes, full_image_fallback
-        self.drop: Callable[[Candidate], bool] | None = None   # candidats écartés (paramètres)
-        self.tolerant = False   # GBIF en panne : décision quand même (page Identifier), voir rerank
-        self.timings: dict[str, list] = {}   # étape -> [secondes, photos]
+        self.drop: Callable[[Candidate], bool] | None = None   # excluded candidates (settings)
+        self.tolerant = False   # GBIF down: decide anyway (Identify page), see rerank
+        self.timings: dict[str, list] = {}   # stage -> [seconds, photos]
 
     def analyze(self, data: bytes | Image.Image, lat: float | None = None, lon: float | None = None,
                 original: "Callable[[], bytes | None] | None" = None, fallback: bool | None = None,
                 groups: frozenset[str] = ALL_GROUPS) -> list[Analysis]:
-        """original : renvoie le fichier original (ou None) ; appelé seulement si un sujet est petit.
-        fallback : image entière classée si rien n'est détecté (None : réglage de l'analyseur).
-        groups : groupes cherchés (animal, plant, fungus, microbe) ; les autres ne sont ni détectés ni gardés."""
+        """original: returns the original file (or None); called only if a subject is small.
+        fallback: whole image classified if nothing is detected (None: analyser setting).
+        groups: groups searched (animal, plant, fungus, microbe); the others are neither detected nor kept."""
         return self.analyze_many([(data, lat, lon, original)], fallback, groups)[0]
 
     def analyze_many(self, items: list[tuple], fallback: bool | None = None,
                      groups: frozenset[str] = ALL_GROUPS) -> list[list[Analysis]]:
-        """Plusieurs photos (data, lat, lon, original) : détection photo par photo, puis tous les recadrages
-        identifiés en un seul passage de BioCLIP (bien plus rapide sur GPU), puis décision photo par photo.
-        Mêmes résultats que photo par photo : BioCLIP traite chaque image indépendamment."""
+        """Several photos (data, lat, lon, original): detection photo by photo, then all the crops
+        identified in a single BioCLIP pass (much faster on GPU), then decision photo by photo.
+        Same results as photo by photo: BioCLIP processes each image independently."""
         return self.decide_many(self.infer_many(items, fallback, groups), groups)
 
     def infer_many(self, items: list[tuple], fallback: bool | None = None,
                    groups: frozenset[str] = ALL_GROUPS) -> list[tuple]:
-        """Partie « modèles » de analyze_many (détecteurs, BioCLIP) : ni base ni GBIF, elle peut tourner dans un
-        fil à part pendant que le précédent lot passe la vérification géographique (decide_many)."""
+        """"Models" part of analyze_many (detectors, BioCLIP): neither database nor GBIF, it can run in a
+        separate thread while the previous batch goes through the geographic check (decide_many)."""
         fallback = self.full_image_fallback if fallback is None else fallback
         prepared = [self._detect(*item, fallback, groups) for item in items]
         batch: list[Image.Image] = []
@@ -642,6 +644,26 @@ class Analyzer:
         self._timed("bioclip", t0, len(prepared))
         return [(p, [next(classified) for _ in p["crops"]], next(classified) if p["context"] else None) for p in prepared]
 
+    @staticmethod
+    def pack(inferred: tuple) -> bytes:
+        """Result of infer_many for one photo, for the database: what decide_many needs (boxes, hints, place,
+        BioCLIP candidates), without the images. Compressed JSON, a few KB."""
+        p, classified, whole = inferred
+        cands = lambda cs: [asdict(c) for c in cs]
+        data = {"boxes": [asdict(b) for b in p["boxes"]], "hints": [asdict(b) for b in p["hints"]],
+                "lat": p["lat"], "lon": p["lon"], "context": p["context"],
+                "classified": [cands(cs) for cs in classified], "whole": cands(whole) if whole is not None else None}
+        return zlib.compress(json.dumps(data, separators=(",", ":"), default=float).encode())
+
+    @staticmethod
+    def unpack(blob: bytes) -> tuple:
+        """Inverse of pack: the (p, classified, whole) tuple that decide_many takes."""
+        d = json.loads(zlib.decompress(blob))
+        cands = lambda cs: [Candidate(**c) for c in cs]
+        p = {"boxes": [Box(**b) for b in d["boxes"]], "hints": [Box(**b) for b in d["hints"]],
+             "lat": d["lat"], "lon": d["lon"], "context": d["context"]}
+        return p, [cands(cs) for cs in d["classified"]], cands(d["whole"]) if d["whole"] is not None else None
+
     def decide_many(self, inferred: list[tuple], groups: frozenset[str] = ALL_GROUPS) -> list[list[Analysis]]:
         t0 = time.perf_counter()
         out = [self._decide(p, classified, whole, groups) for p, classified, whole in inferred]
@@ -649,7 +671,7 @@ class Analyzer:
         return out
 
     def _timed(self, stage: str, t0: float, photos: int = 1) -> None:
-        """Temps passé par étape (Paramètres > Modèles d'IA : où passe le temps)."""
+        """Time spent per stage (Settings > AI models: where the time goes)."""
         acc = self.timings.setdefault(stage, [0.0, 0])
         acc[0] += time.perf_counter() - t0
         acc[1] += photos
@@ -658,8 +680,8 @@ class Analyzer:
         t0 = time.perf_counter()
         image = open_image(data)
         self._timed("decode", t0)
-        # Sans les animaux, MegaDetector (animaux, personnes, véhicules) ne sert à rien ; OWLv2 garde ses requêtes
-        # de petits animaux (insectes, araignées) si les animaux sont cherchés.
+        # Without animals, MegaDetector (animals, people, vehicles) is useless; OWLv2 keeps its queries
+        # for small animals (insects, spiders) if animals are searched.
         t0 = time.perf_counter()
         md = self.detector.detect(image) if self.detector and "animal" in groups else []
         self._timed("megadetector", t0)
@@ -667,10 +689,10 @@ class Analyzer:
         t0 = time.perf_counter()
         ov = self.open_detector.detect(image) if run_ov else []
         self._timed("owlv2", t0)
-        hints = [b for b in ov if b.label == "domestic"]          # « a dog », « a cat »… : indices seulement
+        hints = [b for b in ov if b.label == "domestic"]          # "a dog", "a cat"…: hints only
         boxes = merge_boxes(md, [b for b in ov if b.label in groups], self.max_boxes)
         if not boxes and fallback:
-            # Rien de détecté (sujet flou, très gros, ou scène) : image entière.
+            # Nothing detected (blurred subject, very large, or scene): whole image.
             boxes = [Box(0.0, 0.0, 1.0, 1.0, 0.0, "image", None, "image")]
         t0 = time.perf_counter()
         crops = [image if b.area >= 0.999 else crop(image, b) for b in boxes]
@@ -680,7 +702,7 @@ class Analyzer:
                 crops = [c if b.area >= 0.999 or crop_side(image, b) >= SMALL_CROP_PX else crop(full, b)
                          for b, c in zip(boxes, crops)]
         self._timed("crops", t0)
-        # Un seul sujet : moyenne recadrage + image entière (le contexte aide, cf. benchmark).
+        # Single subject: average of crop + whole image (context helps, see benchmark).
         context = len(boxes) == 1 and boxes[0].area < 0.999
         return {"image": image, "boxes": boxes, "crops": crops, "hints": hints, "lat": lat, "lon": lon, "context": context}
 
@@ -691,7 +713,7 @@ class Analyzer:
             classified = [average(classified[0], whole)]
         results = []
         for b, cands in zip(p["boxes"], classified):
-            # Groupe non cherché d'après BioCLIP : écarté avant les requêtes GBIF de la vérification géographique.
+            # Group not searched according to BioCLIP: dropped before the GBIF requests of the geographic check.
             top = max(cands, key=lambda c: c.score, default=None)
             if groups != ALL_GROUPS and top and top.lineage.get("kingdom") and group_of_lineage(top.lineage) not in groups:
                 continue

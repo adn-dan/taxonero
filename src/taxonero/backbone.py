@@ -1,15 +1,15 @@
-"""Copie locale de la taxonomie GBIF (GBIF Backbone Taxonomy) : correspondance des noms (synonymes compris) et
-fiches (rang, lignée), sans requête réseau ni limite de débit ; ce sont les requêtes faites pour chaque candidat
-de chaque photo. Mêmes identifiants que l'API (même version), donc mêmes clés pour les requêtes qui restent en
-ligne (présence autour d'un point, fossiles, cartes).
+"""Local copy of the GBIF taxonomy (GBIF Backbone Taxonomy): name matching (synonyms included) and
+records (rank, lineage), without network requests or rate limits; these are the requests made for every candidate
+of every photo. Same identifiers as the API (same version), hence the same keys for the requests that stay
+online (presence around a point, fossils, maps).
 
-Restent aussi à l'API, une seule fois par taxon : les noms communs (l'archive en a nettement moins : pas de nom
-français local pour la moitié des taxons du jeu de dev) et la catégorie UICN (l'API suit la Liste rouge
-actuelle). Les noms communs locaux servent à la recherche de la visionneuse.
+Also left to the API, once per taxon: common names (the archive has far fewer: no local French
+name for half of the taxa of the dev set) and the IUCN category (the API follows the current Red
+List). The local common names are used by the viewer search.
 
-L'archive (~0,9 Go, https://hosted-datasets.gbif.org/datasets/backbone/current/) est téléchargée une fois,
-convertie en base SQLite (data/gbif-backbone.sqlite), puis supprimée. Tant que la base n'existe pas, ou si
-l'API passe à une autre version de la taxonomie, Taxonomy interroge l'API comme avant.
+The archive (~0.9 GB, https://hosted-datasets.gbif.org/datasets/backbone/current/) is downloaded once,
+converted to an SQLite database (data/gbif-backbone.sqlite), then deleted. As long as the database does not exist, or if
+the API moves to another version of the taxonomy, Taxonomy queries the API as before.
 """
 
 import io
@@ -29,10 +29,10 @@ DATASET = "https://api.gbif.org/v1/dataset/d7dddbf4-2cf0-4f39-9b2a-bb099caae36c"
 SCHEMA = """
 CREATE TABLE taxon (
     key        INTEGER PRIMARY KEY,
-    accepted   INTEGER,   -- nom accepté (synonymes)
+    accepted   INTEGER,   -- accepted name (synonyms)
     rank       TEXT,      -- SPECIES, GENUS…
     status     TEXT,      -- ACCEPTED, SYNONYM, DOUBTFUL…
-    name       TEXT,      -- nom canonique, sans auteur
+    name       TEXT,      -- canonical name, without author
     authorship TEXT,
     kingdom TEXT, phylum TEXT, class TEXT, "order" TEXT, family TEXT, genus TEXT, species TEXT
 );
@@ -45,21 +45,21 @@ CREATE INDEX vernacular_key ON vernacular(key);
 CREATE INDEX vernacular_name ON vernacular(name COLLATE NOCASE);
 """
 BELOW_SPECIES = {"SUBSPECIES", "VARIETY", "FORM", "INFRASPECIFIC_NAME", "INFRASUBSPECIFIC_NAME"}
-# Règnes au sens de BioCLIP (TreeOfLife) -> règnes de GBIF.
+# Kingdoms in the BioCLIP sense (TreeOfLife) -> GBIF kingdoms.
 KINGDOMS = {"Archaeplastida": "Plantae", "Metazoa": "Animalia"}
 
 
 def _rows(z: zipfile.ZipFile, name: str):
     with z.open(name) as f:
         lines = io.TextIOWrapper(f, encoding="utf-8", newline="\n")
-        next(lines)   # en-tête
+        next(lines)   # header
         for line in lines:
             yield line.rstrip("\n").split("\t")
 
 
 def build(archive: Path, out: Path, version: str = "") -> Path:
-    """Convertit l'archive Darwin Core en base SQLite (fichier temporaire renommé à la fin : une base à moitié
-    construite n'est jamais utilisée)."""
+    """Convert the Darwin Core archive to an SQLite database (temporary file renamed at the end: a half-built
+    database is never used)."""
     tmp = out.with_suffix(".building")
     tmp.unlink(missing_ok=True)
     db = sqlite3.connect(tmp)
@@ -88,18 +88,18 @@ def build(archive: Path, out: Path, version: str = "") -> Path:
     db.execute("VACUUM")
     db.close()
     tmp.replace(out)
-    log.info("taxonomie GBIF locale prête : %s (%.0f Mo, %.0f s)", out, out.stat().st_size / 2 ** 20, time.monotonic() - t0)
+    log.info("local GBIF taxonomy ready: %s (%.0f MB, %.0f s)", out, out.stat().st_size / 2 ** 20, time.monotonic() - t0)
     return out
 
 
 def api_version(http: httpx.Client) -> str:
-    """Version de la taxonomie utilisée par l'API GBIF (date de publication du jeu de données)."""
+    """Version of the taxonomy used by the GBIF API (publication date of the dataset)."""
     return (http.get(DATASET, timeout=30).raise_for_status().json().get("pubDate") or "")[:10]
 
 
 def install(data_dir: Path, user_agent: str, progress=lambda state, version: None) -> Path:
-    """Télécharge et construit la base si elle manque ou ne correspond plus à la version de l'API. Long (téléchargement
-    de ~0,9 Go puis une dizaine de minutes de conversion) : à lancer en tâche de fond. progress(état, version) :
+    """Download and build the database if it is missing or no longer matches the API version. Long (download
+    of ~0.9 GB then about ten minutes of conversion): to run in the background. progress(state, version):
     downloading, building, ready."""
     out = data_dir / "gbif-backbone.sqlite"
     with httpx.Client(headers={"User-Agent": user_agent}, follow_redirects=True) as http:
@@ -107,11 +107,11 @@ def install(data_dir: Path, user_agent: str, progress=lambda state, version: Non
         if out.exists() and local_version(out) == version:
             progress("ready", version)
             return out
-        # Autre version que celle de l'API : ses clés ne correspondraient plus, elle n'est plus utilisée.
+        # Version other than the API's: its keys would no longer match, it is no longer used.
         out.unlink(missing_ok=True)
         archive = data_dir / "gbif-backbone.zip"
         progress("downloading", version)
-        log.info("téléchargement de la taxonomie GBIF (version %s, ~0,9 Go)…", version)
+        log.info("downloading the GBIF taxonomy (version %s, ~0.9 GB)…", version)
         with http.stream("GET", URL, timeout=httpx.Timeout(60, read=300)) as r, open(archive, "wb") as f:
             r.raise_for_status()
             for chunk in r.iter_bytes(2 ** 20):
@@ -134,15 +134,15 @@ def local_version(path: Path) -> str | None:
 
 
 class Backbone:
-    """Lecture seule. Réponses au même format que l'API GBIF, pour que Taxonomy n'ait rien d'autre à changer."""
+    """Read-only. Responses in the same format as the GBIF API, so that Taxonomy has nothing else to change."""
 
     def __init__(self, path: Path):
         self._path, self._local = path, threading.local()
-        self.db   # fichier absent ou illisible : l'erreur sort ici, pas à la première recherche
+        self.db   # missing or unreadable file: the error comes out here, not at the first search
 
     @property
     def db(self) -> sqlite3.Connection:
-        """Une connexion par fil : partagée entre fils simultanés, une même connexion mélange les réponses."""
+        """One connection per thread: shared between simultaneous threads, a single connection mixes up the responses."""
         c = getattr(self._local, "conn", None)
         if c is None:
             c = self._local.conn = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True)
@@ -150,20 +150,20 @@ class Backbone:
         return c
 
     def match(self, name: str, kingdom: str | None = None, rank: str | None = None) -> dict | None:
-        """Correspondance exacte du nom canonique (casse ignorée), comme species/match. None si rien de sûr : l'appelant
-        se rabat alors sur l'API (correspondance approchée, fautes d'orthographe)."""
+        """Exact match of the canonical name (case ignored), like species/match. None if nothing certain: the caller
+        then falls back on the API (fuzzy matching, spelling mistakes)."""
         rows = self.db.execute("SELECT * FROM taxon WHERE name = ? COLLATE NOCASE", (name.strip(),)).fetchall()
         if rank:
             rows = [r for r in rows if r["rank"] == rank.upper()]
         kingdom = KINGDOMS.get(kingdom, kingdom)
-        # Règne indiqué par le modèle : il départage les homonymes ; s'il n'en reste aucun, il est ignoré (comme l'API).
+        # Kingdom given by the model: it separates homonyms; if none remains, it is ignored (like the API).
         rows = [r for r in rows if r["kingdom"] == kingdom] or rows if kingdom else rows
-        rows = [r for r in rows if r["status"] != "DOUBTFUL"]   # l'API ne retient pas un nom seulement douteux
+        rows = [r for r in rows if r["status"] != "DOUBTFUL"]   # the API does not keep a name that is only doubtful
         if not rows:
             return None
         best = min(rows, key=lambda r: (r["status"] != "ACCEPTED", r["key"]))
         if len({r["kingdom"] for r in rows if r["status"] == "ACCEPTED"}) > 1:
-            return None   # homonymes acceptés dans plusieurs règnes : l'API sait mieux trancher
+            return None   # accepted homonyms in several kingdoms: the API knows better how to decide
         out = {"usageKey": best["key"], "matchType": "EXACT", "rank": best["rank"], "status": best["status"],
                "scientificName": best["name"], "canonicalName": best["name"], "kingdom": best["kingdom"]}
         if best["accepted"]:
@@ -182,8 +182,8 @@ class Backbone:
 
 
     def search(self, q: str, lang: str = "fr", limit: int = 12) -> list[dict]:
-        """Recherche par début de nom scientifique ou de nom commun (champ de recherche de la visionneuse) : taxons
-        acceptés, espèces d'abord, nom commun dans la langue des noms s'il y en a un."""
+        """Search by the start of a scientific or common name (viewer search field): accepted
+        taxa, species first, common name in the names language if there is one."""
         q = q.strip().replace("\\", "").replace("%", "").replace("_", "")
         if len(q) < 2:
             return []
@@ -204,7 +204,7 @@ class Backbone:
                 h["common"] = r["common"]
         order = {"species": 0, "genus": 1, "family": 2, "subspecies": 3}
         out = sorted(hits.values(), key=lambda h: (order.get(h["rank"], 4), not h["common"], len(h["name"])))[:limit]
-        for h in out:   # trouvé par le nom scientifique : son nom commun dans la langue des noms, s'il y en a un
+        for h in out:   # found by scientific name: its common name in the names language, if there is one
             if not h["common"]:
                 r = self.db.execute("SELECT name FROM vernacular WHERE key = ? AND lang = ? LIMIT 1", (h["gbif_key"], lang)).fetchone()
                 h["common"] = r["name"] if r else ""

@@ -1,5 +1,5 @@
-"""Routes des pages Espèces, espèce, rangs supérieurs et Statistiques : fiches, Wikipédia, aires de répartition,
-recherche de taxons, photos principales, statistiques et export CSV."""
+"""Routes of the Species, species, higher ranks and Statistics pages: records, Wikipedia, range maps,
+taxon search, main photos, statistics and CSV export."""
 
 import csv
 import io
@@ -28,7 +28,7 @@ def register(app, c) -> None:
 
     @app.get("/api/taxon/{key}", dependencies=[Depends(auth)])
     def taxon_card(key: int, name: str = ""):
-        """Fiche d'un taxon (noms, liens), récupérée si besoin : fiche de comparaison d'un candidat."""
+        """Record of a taxon (names, links), fetched if needed: comparison card of a candidate."""
         with lock:
             if not ensure_taxon(key, name or None):
                 raise HTTPException(404)
@@ -36,47 +36,47 @@ def register(app, c) -> None:
 
     @app.get("/api/wiki/{key}", dependencies=[Depends(auth)])
     def wiki_panel(key: int, src: str = "wikipedia", lang: str = ""):
-        """Article Wikipédia (dans la langue demandée, sinon la première disponible) ou Wikispecies."""
+        """Wikipedia article (in the requested language, otherwise the first available) or Wikispecies."""
         t = taxon(key)
         if not t:
             raise HTTPException(404)
-        if tx.articles_stale(t):   # fiche d'avant la recherche par synonymes, pas encore reprise en tâche de fond
+        if tx.articles_stale(t):   # record from before the synonym search, not yet picked up in the background
             try:
                 t = tx.refresh_articles({**t, "gbif_key": key})
                 with lock:
                     store.save_taxon(db, key, json.dumps(t, ensure_ascii=False))
                     db.commit()
             except Exception:
-                log.debug("articles indisponibles pour %s", key, exc_info=True)
+                log.debug("articles unavailable for %s", key, exc_info=True)
         if src == "wikispecies":
             url = t.get("wikispecies")
         else:
             links = t.get("wikipedia", {})
             url = links.get(lang) or links.get(s.names_lang) or next(iter(links.values()), None)
         if not url:
-            fail(404, "no_page", "pas de page pour ce taxon")
+            fail(404, "no_page", "no page for this taxon")
         a = wiki.article(tx, url)
         a["languages"] = sorted(t.get("wikipedia", {}))
-        # Langue réellement servie (repli si l'article n'existe pas dans la langue demandée) : le menu l'affiche.
+        # Language actually served (fallback if the article does not exist in the requested language): the menu shows it.
         a["lang"] = next((k for k, v in t.get("wikipedia", {}).items() if v == url), None)
         return a
 
     @app.get("/api/refphotos/{key}", dependencies=[Depends(auth)])
     def ref_photos(key: int, name: str = ""):
-        """Photos de référence du taxon (iNaturalist, licences Creative Commons) : comparaison à la relecture."""
+        """Reference photos of the taxon (iNaturalist, Creative Commons licences): comparison during review."""
         t = taxon(key)
         try:
-            # iNaturalist et GBIF ne classent pas toujours pareil : en dernier recours, synonymes GBIF de même épithète
-            # (les autres peuvent désigner un taxon plus large ou voisin : mieux vaut pas de photo qu'un autre animal).
+            # iNaturalist and GBIF do not always classify alike: as a last resort, GBIF synonyms with the same epithet
+            # (the others may name a broader or neighbouring taxon: better no photo than another animal).
             accepted = (t or {}).get("scientific_name") or name
             return refphotos.photos(tx, [accepted, name], lambda: tx.synonym_names(key, accepted, same_epithet=True))
         except Exception:
-            fail(502, "refphotos_unavailable", "iNaturalist injoignable")
+            fail(502, "refphotos_unavailable", "iNaturalist unreachable")
 
     @app.get("/api/range/{key}", dependencies=[Depends(auth)])
     def range_map(key: int):
-        """Aire de répartition au format compact (forme de l'hexagone + [x, y, n] par case, Mercator 0..1).
-        Normalement déjà en local (pré-chargée par la synchronisation) ; sinon téléchargée une fois."""
+        """Range map in compact format (hexagon shape + [x, y, n] per cell, Mercator 0..1).
+        Normally already local (prefetched by the synchronisation); otherwise downloaded once."""
         data = ranges.cached(db, key)
         if data is None:
             with range_lock:
@@ -86,13 +86,13 @@ def register(app, c) -> None:
 
     @app.get("/api/range/{key}/{z}/{x}/{y}", dependencies=[Depends(auth)])
     def range_tile(key: int, z: int, x: int, y: int):
-        """Zoom fort : cases de la tuile GBIF z/x/y, à taille constante à l'écran (voir ranges.zoom_tile)."""
+        """High zoom: cells of the GBIF tile z/x/y, at a constant size on screen (see ranges.zoom_tile)."""
         if not (0 <= z <= 18 and 0 <= x < 2 ** z and 0 <= y < 2 ** z):
             raise HTTPException(404)
         try:
             data = ranges.zoom_tile(tx, key, z, x, y)
         except Exception:
-            fail(502, "range_unavailable", "GBIF injoignable")
+            fail(502, "range_unavailable", "GBIF unreachable")
         return Response(json.dumps(data, separators=(",", ":")), media_type="application/json",
                         headers={"Cache-Control": "private, max-age=86400"})
 
@@ -116,19 +116,19 @@ def register(app, c) -> None:
         out.sort(key=lambda r: order.get(r["rank"], 4))  # tri stable : garde l'ordre de pertinence GBIF
         return out[:12]
 
-    # -- espèces, arbre, carte, stats ----------------------------------------
+    # -- species, tree, map, stats ----------------------------------------
 
     def quality(asset_id: str) -> float:
-        """Calculée par la synchronisation ; à défaut (photo validée depuis), valeur neutre : la page ne
-        télécharge pas de vignettes pour choisir ses couvertures."""
+        """Computed by the synchronisation; failing that (photo confirmed since), a neutral value: the page does not
+        download thumbnails to choose its covers."""
         row = db.execute("SELECT quality FROM image_quality WHERE asset_id = ?", (asset_id,)).fetchone()
         return row["quality"] if row else 0.5
 
     covers_cache: dict = {}
 
     def best_covers() -> dict[int, dict]:
-        """Photo principale de chaque taxon : celle choisie à la main si elle est toujours validée pour ce taxon,
-        sinon le choix automatique (gardé tant qu'aucune détection ni qualité d'image n'a changé)."""
+        """Main photo of each taxon: the one chosen by hand if it is still confirmed for this taxon,
+        otherwise the automatic choice (kept as long as no detection or image quality has changed)."""
         sig = tuple(db.execute("SELECT count(*), max(id), total(reviewed_at), total(x + y + w + h), "
                                "(SELECT count(*) FROM image_quality), (SELECT total(missing_at) FROM asset) "
                                "FROM detection WHERE status = 'confirmed'").fetchone())
@@ -143,10 +143,10 @@ def register(app, c) -> None:
         return out
 
     def compute_covers() -> dict[int, dict]:
-        """Pour chaque taxon, la photo où le sujet est le mieux visible : taille du rectangle × confiance
-        × qualité de l'image (couleurs, netteté). Le repli « image entière » (aucun détecteur n'a localisé
-        le sujet) compte comme un rectangle moyen ; un vrai gros plan détecté plein cadre garde tout son poids.
-        La qualité n'est calculée (puis mise en cache) que pour les candidates proches de la meilleure."""
+        """For each taxon, the photo where the subject is best visible: box size × confidence
+        × image quality (colours, sharpness). The "whole image" fallback (no detector located
+        the subject) counts as an average box; a real close-up detected full frame keeps its whole weight.
+        Quality is only computed (then cached) for the candidates close to the best one."""
         cands: dict[int, list] = {}
         for r in db.execute(
                 "SELECT taxon_key, asset_id, x, y, w, h, confirmed_by, "
@@ -167,8 +167,8 @@ def register(app, c) -> None:
 
     @app.get("/api/species", dependencies=[Depends(auth)])
     def species():
-        # Mois (1-12, en UTC comme la page Statistiques), pays et appareils des observations : la page Espèces
-        # filtre avec, quand on clique sur un graphique des statistiques.
+        # Month (1-12, in UTC like the Statistics page), country and cameras of the observations: the Species page
+        # filters with them when a statistics chart is clicked.
         rows = db.execute(
             "SELECT d.taxon_key, count(DISTINCT d.asset_id) AS n, max(a.taken_at) AS last, min(a.taken_at) AS first, "
             "json_group_array(DISTINCT CAST(strftime('%m', a.taken_at) AS INTEGER)) AS months, "
@@ -195,8 +195,8 @@ def register(app, c) -> None:
 
     @app.get("/api/higher/{rank}/{name}", dependencies=[Depends(auth)])
     def higher_page(rank: str, name: str):
-        """Page d'un rang supérieur (règne… genre) : sa fiche (récupérée au besoin), ses espèces validées et les
-        lieux de leurs photos."""
+        """Page of a higher rank (kingdom… genus): its record (fetched if needed), its confirmed species and the
+        places of their photos."""
         if rank not in HIGHER_RANKS:
             raise HTTPException(404)
         members = [x for x in species() if ((x["taxon"] or {}).get("lineage") or {}).get(rank) == name]
@@ -215,17 +215,17 @@ def register(app, c) -> None:
         return {"rank": rank, "name": name, "key": key, "taxon": taxon(key), "species": members, "points": points}
 
     class CoverIn(BaseModel):
-        asset_id: str | None = None   # None : revenir au choix automatique
+        asset_id: str | None = None   # None: back to the automatic choice
 
     @app.put("/api/species/{key}/cover", dependencies=[Depends(auth)])
     def set_cover(key: int, body: CoverIn):
-        """Photo principale du taxon (vignettes, arbre, fiche), choisie parmi ses photos validées."""
+        """Main photo of the taxon (thumbnails, tree, record), chosen among its confirmed photos."""
         if body.asset_id is None:
             db.execute("DELETE FROM cover_choice WHERE taxon_key = ?", (key,))
         else:
             if not db.execute("SELECT 1 FROM detection WHERE taxon_key = ? AND asset_id = ? AND status = 'confirmed'",
                               (key, body.asset_id)).fetchone():
-                fail(422, "not_this_species", "cette photo n'est pas validée pour ce taxon")
+                fail(422, "not_this_species", "this photo is not confirmed for this taxon")
             db.execute("INSERT OR REPLACE INTO cover_choice VALUES (?, ?)", (key, body.asset_id))
         db.commit()
         return {"cover": best_covers().get(key)}
@@ -233,7 +233,7 @@ def register(app, c) -> None:
     higher_pending: set[str] = set()
 
     def _enrich_higher(names: list[str]) -> None:
-        # Rang et règne de chaque nom, d'après la classification des espèces : GBIF a des homonymes.
+        # Rank and kingdom of each name, from the classification of the species: GBIF has homonyms.
         where = {}
         for r in db.execute("SELECT data FROM taxon"):
             lin = json.loads(r["data"]).get("lineage") or {}
@@ -249,7 +249,7 @@ def register(app, c) -> None:
                         store.save_taxon(db, t.gbif_key, to_json(t))
                         db.commit()
             except Exception as e:
-                log.info("fiche de %s non récupérée : %s", name, e)
+                log.info("record of %s not fetched: %s", name, e)
             finally:
                 higher_pending.discard(name)
 
@@ -258,8 +258,8 @@ def register(app, c) -> None:
 
     @app.post("/api/higher-taxa", dependencies=[Depends(auth)])
     def higher_taxa(body: NamesIn):
-        """Noms communs et liens des ordres, familles, genres de l'arbre. Ceux qui manquent sont
-        récupérés en arrière-plan (GBIF + Wikidata) et apparaîtront au chargement suivant."""
+        """Common names and links of the orders, families, genera of the tree. Missing ones are
+        fetched in the background (GBIF + Wikidata) and will appear at the next load."""
         known = {}
         for r in db.execute("SELECT gbif_key, data FROM taxon"):
             d = json.loads(r["data"])
@@ -292,8 +292,8 @@ def register(app, c) -> None:
 
     @app.get("/api/observations", dependencies=[Depends(auth)])
     def observations():
-        """Observations validées (une par photo et par taxon) avec date, lieu et matériel :
-        la page Statistiques calcule ses graphiques à partir de cette liste."""
+        """Confirmed observations (one per photo and per taxon) with date, place and equipment:
+        the Statistics page computes its charts from this list."""
         rows = db.execute(
             "SELECT DISTINCT d.taxon_key, a.asset_id, a.taken_at, a.lat, a.lon, a.city, a.state, a.country, "
             "a.make, a.model, a.lens FROM detection d JOIN asset a ON a.asset_id = d.asset_id "
@@ -303,19 +303,19 @@ def register(app, c) -> None:
 
     @app.get("/api/review-stats", dependencies=[Depends(auth)])
     def review_stats():
-        """Bilan de la relecture et de l'auto-validation."""
+        """Summary of the review and of the auto-confirmation."""
         q = lambda sql: db.execute(sql).fetchone()[0]
         return {
             "auto": q("SELECT count(*) FROM detection WHERE status = 'confirmed' AND confirmed_by = 'auto'"),
             "user": q("SELECT count(*) FROM detection WHERE status = 'confirmed' AND confirmed_by = 'user'"),
             "pending": q("SELECT count(*) FROM detection WHERE status = 'pending'"),
             "rejected": q("SELECT count(*) FROM detection WHERE status = 'rejected'"),
-            # Relectures où tu as gardé la proposition du modèle / choisi une autre espèce.
+            # Reviews where you kept the model proposal / chose another species.
             "kept": q("SELECT count(*) FROM detection WHERE status = 'confirmed' AND confirmed_by = 'user' AND taxon_key = model_key"),
             "corrected": q("SELECT count(*) FROM detection WHERE status = 'confirmed' AND confirmed_by = 'user' AND taxon_key IS NOT model_key"),
             "deleted": q("SELECT count(*) FROM detection WHERE status = 'deleted'"),
             "manual_boxes": q("SELECT count(*) FROM detection WHERE source = 'manual'"),
-            # Contrôles : détections qui auraient été auto-validées, relues par toi, et combien étaient justes.
+            # Checks: detections that would have been auto-confirmed, reviewed by you, and how many were right.
             "audits": q("SELECT count(*) FROM detection WHERE audit = 1 AND confirmed_by = 'user' AND status != 'deleted'"),
             "audits_ok": q("SELECT count(*) FROM detection WHERE audit = 1 AND status = 'confirmed' AND confirmed_by = 'user' "
                            "AND taxon_key = model_key"),
@@ -331,13 +331,13 @@ def register(app, c) -> None:
     }
 
     def cell(v):
-        """Texte qu'un tableur prendrait pour une formule (=, +, -, @ en tête : noms venus de GBIF/Wikidata, noms de
-        fichiers) : précédé d'une apostrophe. Les nombres restent des nombres."""
+        """Text a spreadsheet would take for a formula (=, +, -, @ at the start: names from GBIF/Wikidata, file
+        names): prefixed with an apostrophe. Numbers stay numbers."""
         return f"'{v}" if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
 
     def csv_export(lang: str = "", only: list[str] | None = None):
-        """Observations validées. lang : langue du nom commun et des articles (colonnes en français pour fr,
-        en anglais sinon). only : seulement ces photos."""
+        """Confirmed observations. lang: language of the common name and of the articles (columns in French for fr,
+        in English otherwise). only: only these photos."""
         keep = set(only) if only is not None else None
         lang = lang if lang in s.langs else s.names_lang
         buf = io.StringIO()
@@ -365,5 +365,5 @@ def register(app, c) -> None:
 
     @app.post("/api/export.csv", dependencies=[Depends(auth)])
     def export_selection(body: ExportIn, lang: str = ""):
-        """Même fichier, limité aux photos sélectionnées."""
+        """Same file, limited to the selected photos."""
         return csv_export(lang, body.asset_ids)

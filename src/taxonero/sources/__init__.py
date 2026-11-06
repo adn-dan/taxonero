@@ -1,16 +1,16 @@
-"""Connecteurs de sources de photos.
+"""Photo source connectors.
 
-Une source fournit les photos et reçoit les résultats. Interface commune (celle d'ImmichClient, que les autres
-reproduisent) :
-- état : check() -> bool, status() -> dict, version, writable, errors, warnings, dry_run, close(), link(id) (lien
-  vers la photo dans la source, ou None), write_gap (écart minimal entre deux écritures sur une même photo) ;
-- lecture : iter_assets(updated_after, size, with_exif, kind, with_people) et get_asset(id, missing_ok), au format
-  des assets d'Immich (id, checksum, originalFileName, type, people, updatedAt, tags, exifInfo) ;
-- images : thumbnail(id, "thumbnail" | "preview") et original(id), en octets ;
-- écriture : list_tags, upsert_tags, bulk_tag, untag_assets, count_assets_with_tag, delete_tag, set_description.
+A source provides the photos and receives the results. Common interface (that of ImmichClient, which the others
+reproduce):
+- state: check() -> bool, status() -> dict, version, writable, errors, warnings, dry_run, close(), link(id) (link
+  to the photo in the source, or None), write_gap (minimum gap between two writes to the same photo);
+- reading: iter_assets(updated_after, size, with_exif, kind, with_people) and get_asset(id, missing_ok), in the format
+  of Immich assets (id, checksum, originalFileName, type, people, updatedAt, tags, exifInfo);
+- images: thumbnail(id, "thumbnail" | "preview") and original(id), as bytes;
+- writing: list_tags, upsert_tags, bulk_tag, untag_assets, count_assets_with_tag, delete_tag, set_description.
 
-Sources « fichiers » (files.py) : un dossier (kind « folder », PHOTOS_DIR) ou la bibliothèque d'un logiciel
-(kind « catalog », CATALOG_PATH), résultats dans des fichiers XMP à côté des photos.
+"File" sources (files.py): a folder (kind "folder", PHOTOS_DIR) or the library of an application
+(kind "catalog", CATALOG_PATH), results in XMP files next to the photos.
 """
 
 import importlib
@@ -19,8 +19,8 @@ from pathlib import Path
 
 from ..config import Settings
 
-# Connecteurs connus : classe, nature du chemin à indiquer, éditions où ils ont un sens et systèmes où ils tournent
-# (None : tous). Ceux d'un logiciel installé sur l'ordinateur (réglages lus chez lui) sont réservés au bureau.
+# Known connectors: class, kind of path to give, editions where they make sense and systems where they run
+# (None: all). Those of an application installed on the computer (settings read from it) are desktop only.
 SOURCES = {
     "immich": {"cls": "..immich.client:ImmichClient", "kind": "server", "editions": ("server", "desktop"), "platforms": None},
     "local": {"cls": ".local:LocalFolder", "kind": "folder", "editions": ("server", "desktop"), "platforms": None},
@@ -43,25 +43,25 @@ def kind(source: str) -> str:
 
 
 def default_path(source: str) -> Path | None:
-    """Bibliothèque du logiciel à son emplacement habituel, s'il est installé ici."""
+    """Library of the application at its usual location, if it is installed here."""
     ref = SOURCES[source].get("default")
     return _load(ref)() if ref else None
 
 
 def check_path(source: str, path: Path) -> str | None:
-    """Raison pour laquelle ce chemin ne convient pas à la source, ou None."""
+    """Reason why this path does not suit the source, or None."""
     spec = SOURCES[source]
     if not path.is_absolute():
         return f"chemin complet attendu : {path}"
     if spec["kind"] == "folder" and not path.is_dir():
-        return f"dossier introuvable : {path}"
+        return f"folder not found: {path}"
     if spec["kind"] == "catalog" and not (path.is_file() and path.suffix.lower() == spec["suffix"]):
-        return f"fichier {spec['suffix']} introuvable : {path}"
+        return f"{spec['suffix']} file not found: {path}"
     return None
 
 
 def available(edition: str) -> list[dict]:
-    """Connecteurs proposés dans le dashboard, avec la raison s'ils ne sont pas utilisables ici."""
+    """Connectors offered in the dashboard, with the reason if they cannot be used here."""
     out = []
     for name, spec in SOURCES.items():
         reason = None
@@ -74,7 +74,7 @@ def available(edition: str) -> list[dict]:
 
 
 def source_path(s: Settings) -> Path | None:
-    """Dossier ou bibliothèque de la source choisie (None pour Immich)."""
+    """Folder or library of the chosen source (None for Immich)."""
     return {"folder": s.photos_dir, "catalog": s.catalog_path}.get(kind(s.source))
 
 

@@ -1,5 +1,5 @@
-"""Application du dashboard branchée sur l'Immich de dev et une copie de la base de dev, avec une identification
-simulée (aucun modèle chargé) : partagée par test_api.py et test_ui.py."""
+"""Dashboard application plugged into the dev Immich and a copy of the dev database, with a simulated
+identification (no model loaded): shared by test_api.py and test_ui.py."""
 
 import os
 import sqlite3
@@ -14,7 +14,7 @@ DEV_READY = ENV.exists() and DB.exists()
 
 @pytest.fixture
 def dev_app(tmp_path, monkeypatch):
-    """(Settings, Worker) sur une copie de la base de dev."""
+    """(Settings, Worker) on a copy of the dev database."""
     from taxonero.config import Settings
     from taxonero.pipeline import Candidate
     from taxonero.taxonomy import Taxonomy
@@ -34,12 +34,12 @@ def dev_app(tmp_path, monkeypatch):
                           posterior=0.9, prior=0.9)
             return [Analysis(Box(0.1, 0.1, 0.5, 0.5, 0.9, "animal"), Decision(5219243, "Vulpes vulpes", "species", 0.9, 0.8, "unknown", [c]))]
 
-    # Service d'observations GBIF simulé : son état ne doit pas décider du résultat des tests. GBIF_LIVE=1 : le vrai.
+    # Simulated GBIF observation service: its state must not decide the test results. GBIF_LIVE=1: the real one.
     if not os.environ.get("GBIF_LIVE"):
         real = Taxonomy._fetch
         monkeypatch.setattr(Taxonomy, "_fetch", lambda self, url, retries=6: {"count": 500, "results": [], "endOfRecords": True}
                             if "/occurrence/" in url else real(self, url, retries))
-    # Copie allégée (sans le cache réseau ni les aires) : /tmp est souvent en RAM.
+    # Light copy (without the network cache or the range maps): /tmp is often in RAM.
     src, dst = sqlite3.connect(DB), sqlite3.connect(tmp_path / "taxonero.sqlite")
     src.backup(dst)
     dst.execute("DELETE FROM http_cache")

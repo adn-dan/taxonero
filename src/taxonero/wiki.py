@@ -1,8 +1,8 @@
-"""Contenu Wikipédia / Wikispecies pour le panneau latéral du dashboard.
+"""Wikipedia / Wikispecies content for the side panel of the dashboard.
 
-Wikipédia interdit l'affichage en iframe (frame-ancestors 'none') : on récupère le texte par l'API
-(TextExtracts), on le nettoie avec une liste blanche de balises sans attributs, et on l'affiche
-directement dans la page.
+Wikipedia forbids display in an iframe (frame-ancestors 'none'): the text is fetched through the API
+(TextExtracts), cleaned with a whitelist of tags without attributes, and displayed
+directly in the page.
 """
 
 import re
@@ -15,7 +15,7 @@ from .taxonomy import Taxonomy
 ALLOWED = {"p", "b", "i", "em", "strong", "ul", "ol", "li", "h2", "h3", "h4", "br", "dfn", "sup", "sub",
            "abbr", "span", "small", "dl", "dt", "dd", "blockquote"}
 VOID = {"br"}
-# Sections sans intérêt dans un panneau de lecture rapide.
+# Sections of no interest in a quick-reading panel.
 SKIP_SECTIONS = re.compile(r"^(notes?|références|references|bibliographie|liens externes|external links|voir aussi|"
                            r"see also|annexes|articles connexes|further reading|einzelnachweise|weblinks|literatur|"
                            r"primary references|links)\b", re.I)
@@ -25,10 +25,10 @@ class _Sanitizer(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
-        self.skipping = False        # dans une section ignorée (références, liens externes...)
+        self.skipping = False        # in an ignored section (references, external links...)
         self.heading: str | None = None   # balise de titre en cours (h2/h3/h4), texte mis en tampon
         self.heading_text: list[str] = []
-        self.drop = 0                # dans <script>/<style> : contenu ignoré
+        self.drop = 0                # in <script>/<style>: content ignored
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style"):
@@ -44,7 +44,7 @@ class _Sanitizer(HTMLParser):
         elif tag == self.heading:
             title = escape("".join(self.heading_text).strip())
             self.heading = None
-            if tag == "h2":  # une nouvelle section commence : on décide de la garder ou non
+            if tag == "h2":  # a new section starts: decide whether to keep it
                 self.skipping = bool(SKIP_SECTIONS.match(title))
             if not self.skipping and title:
                 self.out.append(f"<{tag}>{title}</{tag}>")
@@ -77,7 +77,7 @@ def _title(url: str) -> tuple[str, str]:
 
 
 def article(tx: Taxonomy, url: str) -> dict:
-    """{'title', 'html', 'thumbnail', 'url'} pour une URL d'article Wikipédia ou Wikispecies."""
+    """{'title', 'html', 'thumbnail', 'url'} for a Wikipedia or Wikispecies article URL."""
     base, title = _title(url)
     data = tx.get(f"{base}/w/api.php", {"action": "query", "prop": "extracts|pageimages", "titles": title,
                                          "redirects": 1, "pithumbsize": 480, "format": "json"}, ttl=7 * 86400)

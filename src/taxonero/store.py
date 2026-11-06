@@ -1,6 +1,6 @@
-"""Stockage local (SQLite). C'est la source de vérité : Immich n'en reçoit qu'une projection
-(tags, bloc de description) reconstructible à tout moment, et chaque écriture faite dans
-Immich est tracée ici pour pouvoir être annulée (uninstall).
+"""Local storage (SQLite). This is the source of truth: Immich only receives a projection of it
+(tags, description block) that can be rebuilt at any time, and every write made in
+Immich is recorded here so that it can be undone (uninstall).
 """
 
 import json
@@ -19,62 +19,62 @@ CREATE TABLE IF NOT EXISTS asset (
     make         TEXT,
     model        TEXT,
     lens         TEXT,
-    city         TEXT,          -- lieu (géocodage inverse fait par Immich)
+    city         TEXT,          -- place (reverse geocoding done by Immich)
     state        TEXT,
     country      TEXT,
     width        INTEGER,
     height       INTEGER,
-    analyzed_at  REAL,          -- NULL = à analyser
-    analyzer     TEXT,          -- détecteur + classifieur utilisés
-    fail_count   INTEGER DEFAULT 0,  -- analyses en échec d'affilée (abandon au-delà de MAX_FAILURES)
+    analyzed_at  REAL,          -- NULL = to analyse
+    analyzer     TEXT,          -- detector + classifier used
+    fail_count   INTEGER DEFAULT 0,  -- consecutive failed analyses (given up beyond MAX_FAILURES)
     last_error   TEXT,
-    missing_at   REAL,          -- disparue d'Immich (supprimée ou à la corbeille) : masquée, plus synchronisée
-    kind         TEXT,          -- IMAGE ou VIDEO (vidéo : seule l'image clé d'Immich est analysée)
-    people       INTEGER,       -- personnes reconnues par Immich sur la photo (NULL : pas encore demandé)
-    twin_of      TEXT,          -- RAW doublé d'un JPG du même cliché : id du JPG (analysé à sa place)
-    geo_user     INTEGER,       -- 1 : lat/lon indiqués à la main (photo sans GPS) ; un GPS de la source les remplace
-    series_id    TEXT           -- série (rafale) : id de sa première photo ; NULL pour une photo seule (series.py)
+    missing_at   REAL,          -- gone from Immich (deleted or in the trash): hidden, no longer synchronised
+    kind         TEXT,          -- IMAGE or VIDEO (video: only Immich's key frame is analysed)
+    people       INTEGER,       -- people recognised by Immich in the photo (NULL: not asked yet)
+    twin_of      TEXT,          -- RAW paired with a JPG of the same shot: id of the JPG (analysed instead)
+    geo_user     INTEGER,       -- 1: lat/lon entered by hand (photo without GPS), a GPS from the source replaces them
+    series_id    TEXT           -- series (burst): id of its first photo; NULL for a single photo (series.py)
 );
 
 CREATE TABLE IF NOT EXISTS detection (
     id           INTEGER PRIMARY KEY,
     asset_id     TEXT NOT NULL REFERENCES asset(asset_id) ON DELETE CASCADE,
-    -- Rectangle normalisé (0..1) dans l'image.
+    -- Normalised rectangle (0..1) in the image.
     x REAL, y REAL, w REAL, h REAL,
     det_score    REAL,
     box_label    TEXT,                          -- animal | plant | fungus | image
     detector     TEXT,                          -- md | owl | image | manual
     source       TEXT NOT NULL,                 -- 'auto' | 'manual'
     status       TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'confirmed' | 'rejected' | 'deleted'
-    confirmed_by TEXT,                          -- 'auto' (seuil) | 'user'
+    confirmed_by TEXT,                          -- 'auto' (threshold) | 'user'
     taxon_key    INTEGER,                       -- GBIF
-    taxon_rank   TEXT,                          -- rang retenu (species, genus, family...)
+    taxon_rank   TEXT,                          -- rank kept (species, genus, family...)
     score        REAL,
     margin       REAL,
     plausibility TEXT,                          -- green | amber | red | unknown
-    candidates   TEXT,                          -- JSON : top-k [{name, rank, score, gbif_key, plausibility}]
-    -- Candidats écartés par les paramètres (disparus, absents de la région), gardés pour pouvoir les
-    -- rendre si le réglage change. Même format, avec 'p0' : probabilité avant filtrage.
+    candidates   TEXT,                          -- JSON: top-k [{name, rank, score, gbif_key, plausibility}]
+    -- Candidates excluded by the settings (extinct, absent from the region), kept so that they can be
+    -- restored if the setting changes. Same format, with 'p0': probability before filtering.
     candidates_out TEXT,
-    audit        INTEGER DEFAULT 0,             -- 1 : aurait été auto-validée, gardée pour contrôle
-    -- Proposition d'origine du modèle (conservée même si l'utilisateur corrige) : sert à calibrer.
+    audit        INTEGER DEFAULT 0,             -- 1: would have been auto-confirmed, kept for checking
+    -- Original model proposal (kept even if the user corrects it): used for calibration.
     model_key    INTEGER,
     model_rank   TEXT,
     model_conf   REAL,
-    series_n     INTEGER,                       -- photos de la série qui proposent la même espèce (series.py)
-    smoothed     INTEGER,                       -- 1 : proposition remplacée par l'espèce dominante de la série
-    presmooth    TEXT,                          -- JSON : proposition d'avant le lissage, rétablie si la règle ne le justifie plus
-    frame_support REAL,                         -- sujet seul : probabilité du taxon retenu sur le recadrage seul
+    series_n     INTEGER,                       -- photos of the series proposing the same species (series.py)
+    smoothed     INTEGER,                       -- 1: proposal replaced by the dominant species of the series
+    presmooth    TEXT,                          -- JSON: proposal from before smoothing, restored if the rule no longer justifies it
+    frame_support REAL,                         -- single subject: probability of the kept taxon on the crop alone
     created_at   REAL NOT NULL,
     reviewed_at  REAL
 );
--- (asset_id, status) : sans lui, SQLite prend l'index sur status pour les EXISTS par photo et parcourt toutes
--- les détections en attente pour chacune (plusieurs minutes pour la page Photos à 70 000 photos).
+-- (asset_id, status): without it, SQLite picks the index on status for the per-photo EXISTS and goes through all
+-- pending detections for each one (several minutes for the Photos page at 70,000 photos).
 DROP INDEX IF EXISTS detection_asset;
 CREATE INDEX IF NOT EXISTS detection_asset_status ON detection(asset_id, status);
 CREATE INDEX IF NOT EXISTS detection_status ON detection(status);
--- Relectures faites à la main (fiabilité par groupe, calibration) : quelques centaines de lignes parmi des dizaines
--- de milliers, lues sans parcourir toute la table.
+-- Reviews done by hand (reliability per group, calibration): a few hundred rows among tens
+-- of thousands, read without going through the whole table.
 CREATE INDEX IF NOT EXISTS detection_user ON detection(model_key) WHERE confirmed_by = 'user';
 
 CREATE TABLE IF NOT EXISTS taxon (
@@ -82,31 +82,40 @@ CREATE TABLE IF NOT EXISTS taxon (
     data         TEXT NOT NULL                  -- JSON (taxonomy.Taxon)
 );
 
--- Trace de chaque objet écrit dans Immich (pour rebuild / uninstall).
+-- Record of every object written to Immich (for rebuild / uninstall).
 CREATE TABLE IF NOT EXISTS written (
     kind         TEXT NOT NULL,                 -- 'tag' | 'tag_asset' | 'description'
-    immich_id    TEXT NOT NULL,                 -- id du tag, ou de l'asset pour description
+    immich_id    TEXT NOT NULL,                 -- tag id, or asset id for a description
     asset_id     TEXT NOT NULL DEFAULT '',
     value        TEXT,
     written_at   REAL NOT NULL,
     PRIMARY KEY (kind, immich_id, asset_id)
 );
 
--- Qualité d'image (couleurs, netteté) pour choisir la photo de couverture d'une espèce.
+-- Image quality (colours, sharpness) to choose the cover photo of a species.
 CREATE TABLE IF NOT EXISTS image_quality (
     asset_id     TEXT PRIMARY KEY,
     quality      REAL NOT NULL                  -- 0..1
 );
 
--- Dernier état écrit avec succès dans Immich, par photo (empreinte des tags et du bloc de description) :
--- la synchronisation ne relit que les photos dont l'état voulu a changé, plus un contrôle complet par jour.
+-- Last state successfully written to Immich, per photo (fingerprint of the tags and of the description block):
+-- synchronisation only reads again the photos whose wanted state changed, plus a full check once a day.
 CREATE TABLE IF NOT EXISTS asset_sync (
     asset_id     TEXT PRIMARY KEY,
     wanted       TEXT NOT NULL,
     synced_at    REAL NOT NULL
 );
 
--- Photo principale choisie à la main pour un taxon (sinon : choix automatique, web.compute_covers).
+-- AI result of a photo waiting for the geographic check (Worker.infer, then Worker.decide): the GPU part of the
+-- analysis is done for the whole queue first, then the GPU is released while GBIF is queried. Deleted once the
+-- photo is saved (Worker._save). data: Analyzer.pack.
+CREATE TABLE IF NOT EXISTS inferred (
+    asset_id     TEXT PRIMARY KEY,
+    data         BLOB NOT NULL,
+    created      REAL NOT NULL
+);
+
+-- Main photo chosen by hand for a taxon (otherwise: automatic choice, web.compute_covers).
 CREATE TABLE IF NOT EXISTS cover_choice (
     taxon_key    INTEGER PRIMARY KEY,
     asset_id     TEXT NOT NULL
@@ -119,8 +128,8 @@ CREATE TABLE IF NOT EXISTS state (
 
 
 def _private(path: str | Path) -> None:
-    """La base contient la clé API : lisible par son seul propriétaire. SQLite donne ses droits au -wal et au -shm
-    qu'il crée ; ceux d'une base créée avant cette règle sont corrigés ici. Pas le propriétaire : on laisse tel quel."""
+    """The database holds the API key: readable by its owner only. SQLite gives its permissions to the -wal and -shm
+    files it creates; those of a database created before this rule are fixed here. Not the owner: left as is."""
     if str(path) == ":memory:":
         return
     Path(path).touch(mode=0o600, exist_ok=True)
@@ -134,13 +143,13 @@ def _private(path: str | Path) -> None:
 def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     _private(path)
-    # timeout : le worker et le dashboard écrivent dans la même base ; on attend un verrou plutôt que d'échouer.
+    # timeout: the worker and the dashboard write to the same database; wait for a lock rather than fail.
     db = sqlite3.connect(path, check_same_thread=False, timeout=30)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
-    # WAL + NORMAL (réglage recommandé par SQLite) : plus d'écriture forcée sur le disque à chaque commit, sans
-    # risque de corruption ; une coupure de courant peut seulement perdre les dernières transactions. Sur un pool
-    # ZFS à disques durs, chaque écriture forcée coûte ~5 à 20 ms, et l'analyse en fait plusieurs par photo.
+    # WAL + NORMAL (setting recommended by SQLite): no more forced disk write at every commit, without
+    # risk of corruption; a power cut can only lose the last transactions. On a ZFS pool
+    # of hard drives, each forced write costs ~5 to 20 ms, and the analysis does several per photo.
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA foreign_keys=ON")
     db.executescript(SCHEMA)
@@ -149,7 +158,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 
 def _migrate(db: sqlite3.Connection) -> None:
-    """Ajoute les colonnes apparues depuis la création de la base (jamais de suppression)."""
+    """Add the columns that appeared since the database was created (never any removal)."""
     for table in ("asset", "detection"):
         have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
         create = db.execute("SELECT sql FROM sqlite_master WHERE name = ?", (table,)).fetchone()["sql"]
@@ -160,8 +169,8 @@ def _migrate(db: sqlite3.Connection) -> None:
             col = line.split()[0]
             if col not in have and col not in create:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {line.replace('NOT NULL', '')}")
-    # Index sur des colonnes ajoutées par une migration : créés après elle (une base d'avant ne les a pas encore
-    # quand le schéma s'applique).
+    # Indexes on columns added by a migration: created after it (an older database does not have them yet
+    # when the schema is applied).
     db.execute("CREATE INDEX IF NOT EXISTS asset_series ON asset(series_id)")
     db.commit()
 
@@ -171,7 +180,7 @@ def get_state(db: sqlite3.Connection, key: str, default: str | None = None) -> s
     return row["value"] if row else default
 
 
-WRITES_PAUSED = "writes_paused"   # état : "1" après un retrait, rien n'est écrit tant qu'on ne reprend pas
+WRITES_PAUSED = "writes_paused"   # state: "1" after a removal, nothing is written until writes are resumed
 
 
 def set_state(db: sqlite3.Connection, key: str, value: str) -> None:
@@ -180,8 +189,8 @@ def set_state(db: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def upsert_asset(db: sqlite3.Connection, a: dict, with_people: bool = False) -> bool:
-    """Enregistre un asset Immich. Retourne True s'il est nouveau ou si son fichier a changé.
-    with_people : la réponse a été demandée avec withPeople (sinon Immich renvoie quand même une liste vide)."""
+    """Save an Immich asset. Return True if it is new or if its file changed.
+    with_people: the response was requested with withPeople (otherwise Immich still returns an empty list)."""
     exif = a.get("exifInfo") or {}
     row = db.execute("SELECT checksum FROM asset WHERE asset_id = ?", (a["id"],)).fetchone()
     changed = row is None or row["checksum"] != a.get("checksum")
@@ -209,8 +218,8 @@ def upsert_asset(db: sqlite3.Connection, a: dict, with_people: bool = False) -> 
     return changed
 
 
-# Formats RAW (extensions). Un RAW accompagné d'un JPG (ou HEIC…) du même cliché n'est pas analysé :
-# même image, travail en double. Il reçoit les tags de son JPG.
+# RAW formats (extensions). A RAW accompanied by a JPG (or HEIC…) of the same shot is not analysed:
+# same image, duplicate work. It receives the tags of its JPG.
 RAW_EXT = {"3fr", "arw", "cr2", "cr3", "crw", "dcr", "dng", "erf", "fff", "iiq", "k25", "kdc", "mef", "mos",
            "mrw", "nef", "nrw", "orf", "ori", "pef", "raf", "raw", "rw2", "rwl", "sr2", "srf", "srw", "x3f"}
 
@@ -221,8 +230,8 @@ def _split(name: str | None) -> tuple[str, str]:
 
 
 def link_raw_twins(db: sqlite3.Connection) -> int:
-    """Relie chaque RAW à l'image du même cliché : même nom de fichier sans l'extension et même date de prise
-    de vue (à la seconde). Un RAW seul reste analysé normalement. Renvoie le nombre de RAW reliés."""
+    """Link each RAW to the image of the same shot: same file name without the extension and same capture
+    time (to the second). A RAW on its own is still analysed normally. Return the number of RAW files linked."""
     others: dict[tuple[str, str], str] = {}
     raws: list[tuple[str, tuple[str, str], str | None]] = []
     for r in db.execute("SELECT asset_id, file_name, taken_at, twin_of FROM asset "

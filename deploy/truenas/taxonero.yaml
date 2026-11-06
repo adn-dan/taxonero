@@ -1,30 +1,30 @@
-# taxonero sur TrueNAS SCALE : Apps > Discover Apps > ⋮ > Install via YAML, coller ce fichier.
-# Avant : créer le dossier de données, propriété de l'utilisateur des apps (568:568) ; pour le GPU, cocher
-# « Install NVIDIA Drivers » dans Apps > Configuration > Settings (et ne pas isoler la carte pour une VM).
-# Remplacer POOL par le nom du pool, et renseigner le mot de passe du dashboard.
-# Image construite sur le NAS à la place (deploy/truenas/build.sh) : image: taxonero:<variante>, pull_policy: never.
+# taxonero on TrueNAS SCALE: Apps > Discover Apps > ⋮ > Install via YAML, paste this file.
+# Before: create the data folder, owned by the apps user (568:568); for the GPU, tick
+# "Install NVIDIA Drivers" in Apps > Configuration > Settings (and do not isolate the card for a VM).
+# Replace POOL with the name of the pool, and fill in the dashboard password.
+# Image built on the NAS instead (deploy/truenas/build.sh): image: taxonero:<variant>, pull_policy: never.
 services:
   taxonero:
-    image: ghcr.io/adn-dan/taxonero:latest-cuda13   # latest-cuda12 (pilote < 580), latest-cpu (sans GPU)
-    pull_policy: always              # retélécharge latest à chaque Edit > Save : c'est la mise à jour
+    image: ghcr.io/adn-dan/taxonero:latest-cuda13   # latest-cuda12 (driver < 580), latest-cpu (no GPU)
+    pull_policy: always              # downloads latest again at every Edit > Save: that is the update
     restart: unless-stopped
-    user: "568:568"                  # utilisateur des apps TrueNAS, propriétaire du dossier de données
+    user: "568:568"                  # TrueNAS apps user, owner of the data folder
     environment:
       TZ: Europe/Paris
-      DASHBOARD_PASSWORD: ""         # à remplir (utilisateur « nature ») ; vide : dashboard fermé (erreur 503)
-      DRY_RUN: "true"                # rien n'est écrit dans Immich ; passer à "false" après relecture
-      # Connexion à Immich : se règle dans le dashboard (Paramètres > Immich). Adresse vue depuis le
-      # conteneur : celle du NAS et le port de l'app Immich, par exemple http://192.168.1.10:30041.
-      # Variante : la fixer ici (elle est alors verrouillée dans le dashboard).
+      DASHBOARD_PASSWORD: ""         # to fill in (user "nature"); empty: dashboard closed (error 503)
+      DRY_RUN: "true"                # nothing is written to Immich; switch to "false" after review
+      # Immich connection: set in the dashboard (Settings > Immich). Address as seen from the
+      # container: that of the NAS and the port of the Immich app, for example http://192.168.1.10:30041.
+      # Alternative: set it here (it is then locked in the dashboard).
       # IMMICH_URL: http://192.168.1.10:30041
       # IMMICH_API_KEY: ...
     volumes:
-      - /mnt/POOL/apps/taxonero/data:/data   # base, sauvegardes, modèles (~5 Go)
-      # - /mnt/POOL/photos:/photos              # SOURCE=local : photos d'un dossier au lieu d'Immich
+      - /mnt/POOL/apps/taxonero/data:/data   # database, backups, models (~5 GB)
+      # - /mnt/POOL/photos:/photos              # SOURCE=local: photos from a folder instead of Immich
     ports:
       - "8765:8765"                  # dashboard
-    mem_limit: 8g                    # au-delà, seul ce conteneur est arrêté, pas Immich ni le reste
-    deploy:                          # GPU NVIDIA ; à retirer pour une image cpu
+    mem_limit: 8g                    # beyond it, only this container is stopped, not Immich or the rest
+    deploy:                          # NVIDIA GPU; remove for a cpu image
       resources:
         reservations:
           devices:

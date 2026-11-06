@@ -1,8 +1,8 @@
-"""Source « dossier local » : les photos d'un dossier (et de ses sous-dossiers), sans Immich.
+""""Local folder" source: the photos of a folder (and of its subfolders), without Immich.
 
-Résultats dans un fichier XMP à côté de chaque photo (voir files.py), lu par digiKam, darktable, Lightroom Classic
-(fichiers RAW), Adobe Bridge et Immich (bibliothèques externes). Nom du sidecar : celui qui existe déjà (photo.jpg.xmp
-ou photo.xmp) ; sinon photo.xmp pour un RAW (convention Lightroom, Capture One, Bridge), photo.jpg.xmp pour le reste
+Results in an XMP file next to each photo (see files.py), read by digiKam, darktable, Lightroom Classic
+(RAW files), Adobe Bridge and Immich (external libraries). Sidecar name: the one that already exists (photo.jpg.xmp
+or photo.xmp); otherwise photo.xmp for a RAW (Lightroom, Capture One, Bridge convention), photo.jpg.xmp for the rest
 (digiKam, darktable).
 """
 
@@ -11,16 +11,16 @@ from pathlib import Path
 
 from .files import FileSource, check_folder, ext_sidecar, first_existing, is_image, is_raw, std_sidecar
 
-# Dossiers techniques (Synology, corbeilles, Windows) ; les dossiers cachés (.xxx) sont toujours ignorés.
+# Technical folders (Synology, recycle bins, Windows); hidden folders (.xxx) are always ignored.
 SKIP_DIRS = {"@eaDir", "#recycle", "@Recycle", "$RECYCLE.BIN", "System Volume Information", "lost+found"}
-# Bibliothèques d'autres logiciels : leurs copies et aperçus internes ne sont pas des photos à part entière
-# (photothèque Apple Photos, aperçus de Lightroom Classic).
+# Libraries of other applications: their internal copies and previews are not photos in their own right
+# (Apple Photos library, Lightroom Classic previews).
 SKIP_SUFFIXES = (".photoslibrary", ".lrdata", ".lrlibrary")
 
 
 class LocalFolder(FileSource):
     name = "local"
-    label = "dossier local"
+    label = "local folder"
 
     def _files(self):
         for d, dirs, files in os.walk(self.root):

@@ -1,9 +1,9 @@
-# Images prêtes à l'emploi sur GHCR (ghcr.io/<propriétaire>/taxonero:<version>-<variante>, et latest-<variante>),
-# construites à chaque tag vX.Y.Z :
-#   cpu (x86 et ARM : Raspberry Pi 5, NAS ARM, serveurs Ampere), cuda12, cuda13 (NVIDIA), rocm (AMD), xpu (Intel).
-# rocm : PyTorch pour AMD pèse 14 Go installé ; la construction peut manquer de place sur les machines de GitHub,
-# son échec n'empêche pas la publication des autres images.
-# Après la toute première publication : rendre le paquet public (GitHub > Packages > taxonero > Package settings).
+# Ready-to-use images on GHCR (ghcr.io/<owner>/taxonero:<version>-<variant>, and latest-<variant>),
+# built at every vX.Y.Z tag:
+#   cpu (x86 and ARM: Raspberry Pi 5, ARM NAS, Ampere servers), cuda12, cuda13 (NVIDIA), rocm (AMD), xpu (Intel).
+# rocm: PyTorch for AMD weighs 14 GB installed; the build may run out of space on GitHub machines,
+# its failure does not prevent the publication of the other images.
+# After the very first publication: make the package public (GitHub > Packages > taxonero > Package settings).
 name: image
 on:
   push:
@@ -22,13 +22,13 @@ jobs:
         gpu: [cpu, cuda12, cuda13, rocm, xpu]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - name: Place disque (images GPU de plusieurs Go)
+      - name: Disk space (GPU images of several GB)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost \
             /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell /usr/local/lib/node_modules
           sudo docker image prune --all --force
           df -h /
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3 ; construction ARM sur une machine x86
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3; ARM build on an x86 machine
         if: matrix.gpu == 'cpu'
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
@@ -52,6 +52,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Cache GitHub limité à 10 Go par dépôt : pas pour rocm, qui le remplirait à lui seul.
+          # GitHub cache limited to 10 GB per repository: not for rocm, which would fill it on its own.
           cache-from: ${{ matrix.gpu != 'rocm' && format('type=gha,scope={0}', matrix.gpu) || '' }}
           cache-to: ${{ matrix.gpu != 'rocm' && format('type=gha,mode=max,scope={0}', matrix.gpu) || '' }}

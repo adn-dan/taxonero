@@ -1,14 +1,14 @@
 /* ============================== suggestions de recherche ============================== */
-/* Sous la barre de recherche, pendant la frappe : espèces et rangs (règne… genre) dont un nom commun (toutes
-   langues) ou le nom scientifique correspond, sans tenir compte des accents ni des majuscules. Début de nom
-   d'abord, puis début de mot, puis n'importe où. Flèches pour choisir, Entrée pour ouvrir, Échap pour fermer ;
-   Entrée sans choix : tous les résultats, sur la page Espèces. Lieux, appareils et fichiers : demandés au serveur. */
+/* Under the search bar, while typing: species and ranks (kingdom… genus) whose common name (all
+   languages) or scientific name matches, ignoring accents and capitals. Start of name
+   first, then start of word, then anywhere. Arrows to choose, Enter to open, Escape to close;
+   Enter without a choice: all results, on the Species page. Places, cameras and files: asked from the server. */
 const SUG = { items: [], sel: -1, src: null, entries: [], req: 0 };
 const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 async function sugEntries() {
   if (!SP.all.length) { try { SP.all = await api('/api/species'); } catch (e) { return []; } }
   if (SUG.src === SP.all) return SUG.entries;
-  const ranks = new Map();   // « rang/nom » -> espèces
+  const ranks = new Map();   // "rank/name" -> species
   SP.all.forEach(s => HIGHER_RANKS.forEach(r => { const n = s.taxon?.lineage?.[r];
     if (n) ranks.set(`${r}/${n}`, [...(ranks.get(`${r}/${n}`) || []), s]); }));
   const missing = [...new Set([...ranks.keys()].map(k => k.split('/')[1]))].filter(n => !(SP.higher || {})[n]);
@@ -25,13 +25,13 @@ async function sugEntries() {
   SUG.src = SP.all; SUG.entries = [...species, ...higher];
   return SUG.entries;
 }
-/* Langue de l'interface et nom scientifique : début de nom (3), début de mot (2), n'importe où (1). Autres
-   langues : début de nom ou de mot seulement, classés après (sinon « ren » sortait d'abord le raton laveur). */
+/* Interface language and scientific name: start of name (3), start of word (2), anywhere (1). Other
+   languages: start of name or of word only, ranked after (otherwise "ren" brought up the raccoon first). */
 function sugScore(e, q) {
   const word = new RegExp(`[\\s'’,(-]${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
   const of = h => { const f = fold(h); return !f ? 0 : f.startsWith(q) ? 3 : word.test(f) ? 2 : f.includes(q) ? 1 : 0; };
   let best = Math.max(0, ...e.hay.map(of));
-  for (const h of e.other) { const s = of(h); if (s >= 2) best = Math.max(best, s - 1.5); }   // 1,5 ou 0,5
+  for (const h of e.other) { const s = of(h); if (s >= 2) best = Math.max(best, s - 1.5); }   // 1.5 or 0.5
   return best;
 }
 async function showSuggestions() {
@@ -61,7 +61,7 @@ async function showSuggestions() {
 }
 function sugMove(d) {
   const n = SUG.items.length; if (!n) return;
-  SUG.sel = SUG.sel + d < -1 ? n - 1 : SUG.sel + d >= n ? -1 : SUG.sel + d;   // -1 : aucun choix (texte tapé)
+  SUG.sel = SUG.sel + d < -1 ? n - 1 : SUG.sel + d >= n ? -1 : SUG.sel + d;   // -1: no choice (typed text)
   $$('#sugbox .sug').forEach(a => a.classList.toggle('sel', +a.dataset.i === SUG.sel));
   $('#sugbox .sug.sel')?.scrollIntoView({ block: 'nearest' });
 }
@@ -74,7 +74,7 @@ function sugClose() { $('#sugbox').hidden = true; SUG.sel = -1; }
   input.addEventListener('focus', showSuggestions);
   input.addEventListener('blur', () => setTimeout(sugClose, 150));
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && SUG.sel < 0 && input.value.trim()) {   // tous les résultats
+    if (e.key === 'Enter' && SUG.sel < 0 && input.value.trim()) {   // all results
       location.hash = `species?q=${encodeURIComponent(input.value.trim())}`; input.value = ''; sugClose(); input.blur(); return;
     }
     if ($('#sugbox').hidden) return;
@@ -83,6 +83,6 @@ function sugClose() { $('#sugbox').hidden = true; SUG.sel = -1; }
     else if (e.key === 'Enter' && SUG.sel >= 0) { e.preventDefault();
       location.hash = SUG.items[SUG.sel].href; input.value = ''; sugClose(); input.blur(); }
   });
-  $('#sugbox').addEventListener('mousedown', e => e.preventDefault());   // garder le focus jusqu'au clic
+  $('#sugbox').addEventListener('mousedown', e => e.preventDefault());   // keep the focus until the click
   $('#sugbox').addEventListener('click', e => { if (e.target.closest('.sug')) { input.value = ''; sugClose(); input.blur(); } });
 })();

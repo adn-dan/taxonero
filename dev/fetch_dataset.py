@@ -1,8 +1,8 @@
-"""Constitue un jeu de photos de test avec vérité terrain depuis iNaturalist.
+"""Build a set of test photos with ground truth from iNaturalist.
 
-Observations françaises « research grade », photos CC0/CC-BY. GPS et date sont
-injectés dans l'EXIF (exiftool) pour reproduire de vraies photos d'appareil.
-Sortie : dev/photos/*.jpg + dev/photos/truth.csv
+French "research grade" observations, CC0/CC-BY photos. GPS and date are
+injected into the EXIF (exiftool) to reproduce real camera photos.
+Output: dev/photos/*.jpg + dev/photos/truth.csv
 """
 
 import csv
@@ -66,7 +66,7 @@ def main(per_group_factor: float = 1.0) -> None:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
-    print(f"{len(rows)} photos dans {OUT}")
+    print(f"{len(rows)} photos in {OUT}")
 
 
 if __name__ == "__main__":
