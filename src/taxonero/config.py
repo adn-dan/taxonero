@@ -40,9 +40,10 @@ class Settings(BaseSettings):
     # auto (default): always on GPU, fallback on CPU; always: on every photo; fallback: only
     # when MegaDetector finds no animal. OPEN_DETECTOR=false disables OWLv2 in all cases.
     open_detector_mode: str = "auto"
-    # GPU: photos analysed together (crops identified in a single pass). Larger: faster, more
-    # GPU memory. No effect on the CPU (one photo at a time, grouping gains nothing there).
-    gpu_batch: int = 8
+    # GPU: photos analysed together (detectors and BioCLIP in batches). 0 (default): automatic, from the memory of
+    # the GPU (hardware.auto_batch: ~8 for 12 GB), halved for the rest of the run if it ever runs out. Larger:
+    # faster, more GPU memory. No effect on the CPU (one photo at a time, grouping gains nothing there).
+    gpu_batch: int = 0
     # GPU: models removed from its memory after this time without analysis, reloaded at the next one. 0: always kept.
     models_idle_minutes: int = 5
     # Domestic animals (dogs, cats, horses, cattle, hens): 'skip' = neither detection nor Nature tag.
@@ -194,7 +195,7 @@ CHOICES = {"detection": ("auto", "manual"), "domestic_animals": ("skip", "keep")
            "device": ("auto", "cpu"),
            "open_detector_mode": ("auto", "always", "fallback")}
 BOUNDS = {"auto_confirm_threshold": (0.5, 0.99), "auto_confirm_max_runner_up": (0.0, 0.3), "interval_minutes": (1, 1440),
-          "auto_confirm_audit": (0.0, 0.5), "gpu_batch": (1, 64), "models_idle_minutes": (0, 1440)}
+          "auto_confirm_audit": (0.0, 0.5), "gpu_batch": (0, 64), "models_idle_minutes": (0, 1440)}
 GROUPS = ("animal", "plant", "fungus", "microbe")
 EDITABLE = ("detection", "detect_groups", "device", "open_detector_mode", "gpu_batch", "models_idle_minutes", "exclude_extinct", "hide_absent", "analyze_videos", "skip_people", "skip_raw_twins", "full_image_fallback", "domestic_animals", "auto_confirm", "auto_confirm_threshold",
             "auto_confirm_max_runner_up", "auto_confirm_audit", "write_description", "analysis_window", "interval_minutes")

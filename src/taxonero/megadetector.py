@@ -93,16 +93,31 @@ class TorchDetector:
         self.providers = [f"PyTorch ({device})"]
 
     def detect(self, image: Image.Image):
-        from .pipeline import Box, _nms
+        return self.detect_many([image])[0]
+
+    def detect_many(self, images: list[Image.Image]) -> list:
+        """Several photos in one pass on the GPU (same boxes as one by one); one by one if its memory runs out."""
+        from .pipeline import on_gpu_batch
+        return on_gpu_batch(self._detect_batch, self.detect_one, images)
+
+    def _detect_batch(self, images: list[Image.Image]) -> list:
         torch = self._torch
-        w, h = image.size
-        x = np.asarray(image.convert("RGB").resize((640, 640), Image.BILINEAR), dtype=np.float32) / 255.0
-        x = torch.from_numpy(x.transpose(2, 0, 1)[None].copy()).to(self.device)
-        sizes = torch.tensor([[w, h]], dtype=torch.int64, device=self.device)
+        x = np.stack([np.asarray(im.convert("RGB").resize((640, 640), Image.BILINEAR), dtype=np.float32) / 255.0
+                      for im in images]).transpose(0, 3, 1, 2)
+        x = torch.from_numpy(x.copy()).to(self.device)
+        sizes = torch.tensor([list(im.size) for im in images], dtype=torch.int64, device=self.device)
         with torch.no_grad():
             labels, boxes, scores = (t.cpu().numpy() for t in self.model(x, sizes))
+        return [self._boxes(im.size, labels[i], boxes[i], scores[i]) for i, im in enumerate(images)]
+
+    def detect_one(self, image: Image.Image):
+        return self._detect_batch([image])[0]
+
+    def _boxes(self, size, labels, boxes, scores):
+        from .pipeline import Box, _nms
+        w, h = size
         out = []
-        for lab, (x1, y1, x2, y2), s in zip(labels[0], boxes[0], scores[0]):
+        for lab, (x1, y1, x2, y2), s in zip(labels, boxes, scores):
             if s < self.min_score or int(lab) != 0:
                 continue
             x1, y1, x2, y2 = max(0.0, float(x1)), max(0.0, float(y1)), min(float(w), float(x2)), min(float(h), float(y2))

@@ -165,22 +165,47 @@ class OpenVocabDetector:
     # with Pillow: ~26 ms, same boxes on 19 dev photos out of 20 (one box at 0.31, right at the threshold, lost).
     INPUT_SIDE = 960
 
+    # Photos per pass on the GPU: OWLv2 at 960 px is heavy in memory, half of the analysis batch (set by the
+    # worker from the GPU memory, see hardware.batch_size).
+    batch = 4
+
     def detect(self, image: Image.Image) -> list[Box]:
-        k = self.INPUT_SIDE / max(image.size)
-        if k < 1:
-            image = image.resize((round(image.width * k), round(image.height * k)), Image.Resampling.BILINEAR, reducing_gap=2.0)
-        w, h = image.size
+        return self.detect_many([image])[0]
+
+    def detect_many(self, images: list[Image.Image]) -> list[list[Box]]:
+        """Several photos per pass on the GPU (same boxes as one by one); one by one if its memory runs out."""
+        out = []
+        n = max(1, self.batch)
+        for i in range(0, len(images), n):
+            out += on_gpu_batch(self._detect_batch, self.detect_one, images[i:i + n])
+        return out
+
+    def detect_one(self, image: Image.Image) -> list[Box]:
+        return self._detect_batch([image])[0]
+
+    def _detect_batch(self, images: list[Image.Image]) -> list[list[Box]]:
         from transformers.models.owlv2.modeling_owlv2 import Owlv2ObjectDetectionOutput
-        pixels = self.processor(images=image, return_tensors="pt")["pixel_values"].to(self.device)
+        small = []
+        for image in images:
+            k = self.INPUT_SIDE / max(image.size)
+            if k < 1:
+                image = image.resize((round(image.width * k), round(image.height * k)), Image.Resampling.BILINEAR, reducing_gap=2.0)
+            small.append(image)
+        pixels = self.processor(images=small, return_tensors="pt")["pixel_values"].to(self.device)
         with self._torch.no_grad():
             feature_map = self.model.image_embedder(pixel_values=pixels)[0]
             b, ph, pw, dim = feature_map.shape
             feats = feature_map.reshape(b, ph * pw, dim)
-            logits = self.model.class_predictor(feats, self._query, self._query_mask)[0]
+            query, mask = self._query.expand(b, -1, -1), self._query_mask.expand(b, -1)
+            logits = self.model.class_predictor(feats, query, mask)[0]
             outputs = Owlv2ObjectDetectionOutput(logits=logits, pred_boxes=self.model.box_predictor(feats, feature_map))
-        side = max(w, h)  # OWLv2 works on the image padded to a square
-        res = self.processor.post_process_grounded_object_detection(outputs, threshold=self.min_score,
-                                                                     target_sizes=[(side, side)])[0]
+        # OWLv2 works on the image padded to a square
+        results = self.processor.post_process_grounded_object_detection(
+            outputs, threshold=self.min_score, target_sizes=[(max(im.size), max(im.size)) for im in small])
+        return [self._boxes(im.size, res) for im, res in zip(small, results)]
+
+    def _boxes(self, size, res) -> list[Box]:
+        w, h = size
         out = []
         for s, lab, (x1, y1, x2, y2) in zip(res["scores"], res["labels"], res["boxes"]):
             x1, y1 = max(0.0, float(x1)), max(0.0, float(y1))
@@ -193,6 +218,25 @@ class OpenVocabDetector:
 
 
 MD_SURE = 0.8
+
+
+def on_gpu_batch(batch: Callable, one: Callable, images: list) -> list:
+    """batch(images), or one(image) for each if the GPU runs out of memory for the whole batch (detections in a
+    batch are computed per image: same results)."""
+    if len(images) <= 1:
+        return [one(im) for im in images]
+    try:
+        return batch(images)
+    except RuntimeError as e:   # torch.OutOfMemoryError is a RuntimeError
+        if "out of memory" not in str(e).lower():
+            raise
+        from . import hardware
+        hardware.OOM_EVENTS += 1   # smaller automatic batches from now on (hardware.auto_batch)
+        log.warning("GPU memory full for %d photos at once: one by one, then smaller batches", len(images))
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return [one(im) for im in images]
 
 
 def merge_boxes(primary: list[Box], secondary: list[Box], max_boxes: int = 5) -> list[Box]:
@@ -332,7 +376,8 @@ class Classifier:
         self.batch_size = 8 if device == "cpu" else 32
 
     def classify(self, images: list[Image.Image]) -> list[list[Candidate]]:
-        preds = self.model.predict(images, self._rank, k=self.k, batch_size=self.batch_size)
+        # callback: pybioclip then shows no progress bar (one per batch, in the log of the container)
+        preds = self.model.predict(images, self._rank, k=self.k, batch_size=self.batch_size, callback=lambda done, total: None)
         out: list[list[Candidate]] = [[] for _ in images]
         for p in preds:
             idx = int(p["file_name"])  # pybioclip indexes PIL images by position
@@ -635,7 +680,7 @@ class Analyzer:
         """"Models" part of analyze_many (detectors, BioCLIP): neither database nor GBIF, it can run in a
         separate thread while the previous batch goes through the geographic check (decide_many)."""
         fallback = self.full_image_fallback if fallback is None else fallback
-        prepared = [self._detect(*item, fallback, groups) for item in items]
+        prepared = self._detect_many(items, fallback, groups)
         batch: list[Image.Image] = []
         for p in prepared:
             batch += p["crops"] + ([p["image"]] if p["context"] else [])
@@ -676,19 +721,27 @@ class Analyzer:
         acc[0] += time.perf_counter() - t0
         acc[1] += photos
 
-    def _detect(self, data, lat, lon, original, fallback: bool, groups: frozenset[str] = ALL_GROUPS) -> dict:
+    def _detect_many(self, items: list[tuple], fallback: bool, groups: frozenset[str] = ALL_GROUPS) -> list[dict]:
+        """Detection of several photos: each detector in batches on the GPU (detect_many), same boxes as photo by
+        photo; then boxes and crops photo by photo."""
         t0 = time.perf_counter()
-        image = open_image(data)
-        self._timed("decode", t0)
+        images = [open_image(item[0]) for item in items]
+        self._timed("decode", t0, len(items))
+        many = lambda det: getattr(det, "detect_many", None) or (lambda ims: [det.detect(im) for im in ims])
         # Without animals, MegaDetector (animals, people, vehicles) is useless; OWLv2 keeps its queries
         # for small animals (insects, spiders) if animals are searched.
         t0 = time.perf_counter()
-        md = self.detector.detect(image) if self.detector and "animal" in groups else []
-        self._timed("megadetector", t0)
-        run_ov = self.open_detector and (self.open_mode == "always" or not md)
+        md = many(self.detector)(images) if self.detector and "animal" in groups else [[] for _ in images]
+        self._timed("megadetector", t0, len(items))
+        ov: list[list[Box]] = [[] for _ in images]
+        need = [i for i, m in enumerate(md) if self.open_detector and (self.open_mode == "always" or not m)]
         t0 = time.perf_counter()
-        ov = self.open_detector.detect(image) if run_ov else []
-        self._timed("owlv2", t0)
+        for i, boxes in zip(need, many(self.open_detector)([images[i] for i in need]) if need else []):
+            ov[i] = boxes
+        self._timed("owlv2", t0, len(items))
+        return [self._detect(images[i], md[i], ov[i], *items[i][1:], fallback, groups) for i in range(len(items))]
+
+    def _detect(self, image, md, ov, lat, lon, original, fallback: bool, groups: frozenset[str] = ALL_GROUPS) -> dict:
         hints = [b for b in ov if b.label == "domestic"]          # "a dog", "a cat"…: hints only
         boxes = merge_boxes(md, [b for b in ov if b.label in groups], self.max_boxes)
         if not boxes and fallback:

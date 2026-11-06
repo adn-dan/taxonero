@@ -153,6 +153,38 @@ def open_mode(wanted: str, device: str) -> str:
     return AUTO_OPEN_MODE["cpu" if device == "cpu" else "gpu"] if wanted == "auto" else wanted
 
 
+# GPU out of memory during this run (pipeline.on_gpu_batch): each event halves the automatic batch size.
+OOM_EVENTS = 0
+
+
+def auto_batch(device: str, memory_gb: float | None) -> int:
+    """Photos per GPU pass, from its memory: about 2/3 of a photo per GB (8 for 12 GB, 16 for 24 GB, 4 for
+    6 GB), within 2..32; Apple GPU (memory shared with the system): 8; CPU: 1. Halved after each out-of-memory
+    event of the run."""
+    if device == "cpu":
+        return 1
+    n = 8 if not memory_gb else max(2, min(32, int(memory_gb * 2 / 3)))
+    return max(1, n >> OOM_EVENTS)
+
+
+@cache
+def gpu_memory_gb(device: str) -> float | None:
+    """Memory of the GPU of this PyTorch device (GB), None if unknown (Apple, no driver)."""
+    try:
+        props = {"cuda": lambda t: t.cuda.get_device_properties(0), "xpu": lambda t: t.xpu.get_device_properties(0)}[device]
+        return props(_torch()).total_memory / 2 ** 30
+    except Exception:
+        return None
+
+
+def batch_size(device: str | None, setting: int) -> int:
+    """Photos per pass on the device actually used: 1 on the CPU, otherwise the setting if given (>= 1), otherwise
+    automatic from the memory of the GPU (auto_batch)."""
+    if device in (None, "cpu"):
+        return 1
+    return setting if setting > 0 else auto_batch(device, gpu_memory_gb(device))
+
+
 @cache
 def describe(wanted: str) -> dict:
     """What is actually used: shown in the Settings page."""

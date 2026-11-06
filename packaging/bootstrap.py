@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 PYTHON = "3.12"
@@ -134,6 +135,8 @@ TEXT = {   # installation window: French or English depending on the system
     "models": ("Modèles d'IA, environ 5 Go (une seule fois)", "AI models, about 5 GB (only once)"),
     "models_later": ("Modèles non téléchargés : ils le seront au premier usage.",
                      "Models not downloaded: they will be at first use."),
+    "retry": ("Échec ({what}), nouvel essai dans {s} s…", "Failed ({what}), new attempt in {s} s…"),
+    "log": ("Journal complet : {path}", "Full log: {path}"),
     "fallback": ("Échec de l'installation pour {variant} : repli sur le processeur",
                  "Installation for {variant} failed: falling back to the CPU"),
     "failed": ("L'installation a échoué. Détails ci-dessous ; relancer avec --reinstall pour réessayer.",
@@ -150,16 +153,33 @@ def install(home: Path, variant: str, wheel: Path, ui) -> None:
            "NO_COLOR": "1"}
     venv = home / "venv"
 
-    run = lambda *a: stream([uv, *a], env, ui)
+    def run(*a):
+        """uv, tried again after a pause: on Windows, a step often fails once and passes the next time (file still
+        locked by the antivirus scan or by a Taxonero still closing, network hiccup)."""
+        for attempt, pause in enumerate((5, 15, None)):
+            try:
+                return stream([uv, *a], env, ui)
+            except subprocess.CalledProcessError:
+                if pause is None:
+                    raise
+                ui.line(tr("retry", what=f"uv {a[0]}", s=pause))
+                time.sleep(pause)
 
     ui.step(1, STEPS, tr("python", v=PYTHON))
     run("venv", "--clear", "--python", PYTHON, str(venv))
     py = str(venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python"))
     index, packages = TORCH[variant]
     ui.step(2, STEPS, tr("torch", variant=variant))
-    run("pip", "install", "--python", py, *(["--index-url", index] if index else []), *packages)
+    try:
+        run("pip", "install", "--python", py, *(["--index-url", index] if index else []), *packages)
+    except subprocess.CalledProcessError as e:
+        raise TorchFailed() from e
     ui.step(3, STEPS, tr("app"))
     run("pip", "install", "--python", py, "-c", str(bundle() / "constraints.txt"), f"{wheel}[desktop,cpu]")
+
+
+class TorchFailed(Exception):
+    """The PyTorch build of the detected GPU could not be installed: the CPU one is tried instead."""
 
 
 def fetch_models(home: Path, ui) -> None:
@@ -174,14 +194,30 @@ def fetch_models(home: Path, ui) -> None:
         ui.line(tr("models_later"))
 
 
+LOG: Path | None = None   # install.log of the current installation (main)
+
+
+def log_line(text: str) -> None:
+    """Also kept in install.log: the window closes, the log stays (to understand a failure afterwards)."""
+    if LOG:
+        try:
+            with open(LOG, "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+        except OSError:
+            pass
+
+
 def stream(cmd: list[str], env: dict, ui) -> None:
-    """Run cmd and show its output line by line; CalledProcessError if it fails."""
+    """Run cmd and show its output line by line (window and install.log); CalledProcessError if it fails."""
+    log_line("$ " + " ".join(cmd))
     p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", **NO_WINDOW)
     for line in p.stdout:
         if line.strip():
             ui.line(line.rstrip())
+            log_line(line.rstrip())
     if p.wait():
+        log_line(f"exit code {p.returncode}")
         raise subprocess.CalledProcessError(p.returncode, cmd[0])
 
 
@@ -217,7 +253,13 @@ class ConsoleUI:
 
     def run(self, work, intro):
         print(intro, flush=True)
-        work()
+        try:
+            work()
+        except BaseException as e:
+            log_line(f"failed: {type(e).__name__}: {e}")
+            if LOG:
+                print(tr("log", path=LOG), flush=True)
+            raise
 
 
 class WindowUI:
@@ -275,6 +317,9 @@ class WindowUI:
                 self._later(self.root.destroy)
             except BaseException as e:
                 self.error = e
+                log_line(f"failed: {type(e).__name__}: {e}")
+                if LOG:
+                    self.line(tr("log", path=LOG))
 
                 def failed():
                     self.label.config(text=tr("failed"))
@@ -304,16 +349,21 @@ def main() -> None:
     variant, why = detect()
     stamp = f"{wheel.name}:{hashlib.sha256(wheel.read_bytes()).hexdigest()[:16]}"   # same version, other content: installed again
     if "--reinstall" in sys.argv or state.get("wheel") != stamp or (os.environ.get("TAXONERO_GPU") and state.get("variant") != variant):
+        global LOG
+        LOG = home / "install.log"
+        LOG.unlink(missing_ok=True)   # the last installation only
+        log_line(f"{wheel.name}, {platform.platform()}, {variant} ({why})")
         ui = make_ui()
 
         def work():
             nonlocal variant
             try:
                 install(home, variant, wheel, ui)
-            except subprocess.CalledProcessError:
+            except TorchFailed:   # only PyTorch: another failure would fail the same way on the CPU
                 if variant == "cpu":
                     raise
                 ui.line(tr("fallback", variant=variant))
+                log_line(tr("fallback", variant=variant))
                 variant = "cpu"
                 install(home, variant, wheel, ui)
             keep_exiftool(home)

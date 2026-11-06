@@ -142,22 +142,34 @@ function syncProgress(st) {
   const count = st.total ? ` ${fmtN(Math.floor(done / scale))}/${fmtN(Math.round(st.total / scale))}`
     : st.done ? ` · ${t('count.photos', { n: st.done })}` : '';
   let h = `<b>${t('sync.running')}</b><br>`;
-  // Analysis in two phases: one bar for the AI part (GPU), one for the geographic check (GBIF), the current one
-  // highlighted; the GPU is released between the two.
-  const ph = st.phases && ['analyze', 'geo'].includes(st.step) ? st.phases : null;
-  if (ph) h += ['analyze', 'geo'].map(k => { const [d, n] = ph[k] || [0, 0], v = Math.min(d, n);
-    return `<div class="phase${st.step === k ? ' on' : ''}">${t(`sync.phase_${k}`)} ${fmtN(v)}/${fmtN(n)}
-      <div class="syncbar"><i style="width:${n ? (100 * v / n).toFixed(1) : 0}%"></i></div></div>`; }).join('');
-  else h += `${esc(step ? tOr(`step.${step}`, step) : '')}${count}`;
-  if (!st.total) return h;
-  if (!ph) h += `<div class="syncbar"><i style="width:${(100 * Math.max(done - 1, 0) / st.total).toFixed(1)}%"></i></div>`;
-  if (st.current) h += `<span class="syncfile" title="${esc(st.current)}">${esc(st.current)}</span>`;
-  if (done > 3 && st.step_started) {
-    const left = (Date.now() / 1000 - st.step_started) / (done - 1) * (st.total - done + 1) / 60;
-    const unit = (n, u) => new Intl.NumberFormat(LANG, { style: 'unit', unit: u, unitDisplay: 'short' }).format(n);
-    h += t('sync.eta', { time: left < 60 ? unit(Math.max(1, Math.round(left)), 'minute')
+  // Remaining time from what is already done since start (seconds), as "about N min" or "N h N min".
+  const eta = (start, d, n) => {
+    if (d <= 3 || !start) return '';
+    const left = (Date.now() / 1000 - start) / (d - 1) * (n - d + 1) / 60;
+    const unit = (x, u) => new Intl.NumberFormat(LANG, { style: 'unit', unit: u, unitDisplay: 'short' }).format(x);
+    return t('sync.eta', { time: left < 60 ? unit(Math.max(1, Math.round(left)), 'minute')
       : `${unit(Math.floor(left / 60), 'hour')} ${unit(Math.round(left % 60), 'minute')}` });
+  };
+  // Analysis in two phases running at the same time: one bar for the AI part (GPU), one for the geographic check
+  // (GBIF), each with its remaining time; a finished or waiting phase is greyed.
+  const ph = st.phases && ['analyze', 'geo'].includes(st.step) ? st.phases : null;
+  if (ph) {
+    const active = st.active || [st.step];
+    // Third bar while tags are written during the analysis: same wording as the tag writing step.
+    const sync = STATE.status?.dry_run ? 'sync_dry' : files ? 'sync_xmp' : 'sync';
+    const label = k => k === 'tags' ? (s => s.charAt(0).toUpperCase() + s.slice(1))(t(`step.${sync}`)) : t(`sync.phase_${k}`);
+    h += ['analyze', 'geo', 'tags'].filter(k => k !== 'tags' || ph.tags?.[1]).map(k => {
+      const [d, n, start] = ph[k] || [0, 0], v = Math.min(d, n), on = k === 'tags' ? v < n : active.includes(k);
+      return `<div class="phase${on ? ' on' : ''}">${label(k)} ${fmtN(v)}/${fmtN(n)}
+        <div class="syncbar"><i style="width:${n ? (100 * v / n).toFixed(1) : 0}%"></i></div>${on && v < n ? `<span class="sub">${eta(start, v, n)}</span>` : ''}</div>`; }).join('');
+    if (st.current) h += `<span class="syncfile" title="${esc(st.current)}">${esc(st.current)}</span>`;
+    return h;
   }
+  h += `${esc(step ? tOr(`step.${step}`, step) : '')}${count}`;
+  if (!st.total) return h;
+  h += `<div class="syncbar"><i style="width:${(100 * Math.max(done - 1, 0) / st.total).toFixed(1)}%"></i></div>`;
+  if (st.current) h += `<span class="syncfile" title="${esc(st.current)}">${esc(st.current)}</span>`;
+  h += eta(st.step_started, done, st.total);
   return h;
 }
 async function pollSync(announce) {

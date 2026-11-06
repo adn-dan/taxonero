@@ -5,7 +5,7 @@ const SET_ROWS = [   // labels: set.<key>, set.<key>.sub, set.<key>.<option>, se
   { k: 'detect_groups', type: 'multi', opts: ['animal', 'plant', 'fungus', 'microbe'], when: v => v.detection !== 'manual' },
   { group: 'compute' },
   { k: 'device', type: 'seg', opts: ['auto', 'cpu'], norm: v => v === 'cpu' ? 'cpu' : 'auto', extra: () => deviceNote() },
-  { k: 'gpu_batch', type: 'int', min: 1, max: 64, unit: 'photos', when: () => MODELS?.hardware?.device !== 'cpu' },
+  { k: 'gpu_batch', type: 'int', min: 0, max: 64, unit: 'photos', when: () => MODELS?.hardware?.device !== 'cpu' },   // 0: automatic
   { k: 'models_idle_minutes', type: 'int', min: 0, max: 1440, unit: 'min', when: () => MODELS?.hardware?.device !== 'cpu' },
   { k: 'open_detector_mode', type: 'seg', opts: ['auto', 'always', 'fallback'], extra: () => openNote(), when: () => MODELS?.open_detector !== false },
   { group: 'identification' },
@@ -323,7 +323,7 @@ function modelsCard(m) {
   if (!m) return '';
   const hw = m.hardware, gpu = hw.device !== 'cpu';
   const vendor = { nvidia: 'NVIDIA', amd: 'AMD', intel: 'Intel', apple: 'Apple' }[hw.vendor] || '';
-  const calc = gpu ? `GPU ${vendor} : ${esc(hw.gpu || hw.device)}${hw.memory_gb ? `, ${t('models.memory', { gb: hw.memory_gb })}` : ''}${hw.runtime ? ` · ${esc(hw.runtime)}` : ''}` : t('models.cpu');
+  const calc = gpu ? `GPU ${vendor} : ${esc(hw.gpu || hw.device)}${hw.memory_gb ? `, ${t('models.memory', { gb: hw.memory_gb })}` : ''}${hw.runtime ? ` · ${esc(hw.runtime)}` : ''}${m.batch ? ` · ${t('models.batch', { n: m.batch })}` : ''}` : t('models.cpu');
   const torchOn = gpu ? `GPU ${vendor}` : t('models.cpu');
   // MegaDetector runs under ONNX Runtime: its hardware may differ from PyTorch's.
   // MegaDetector: in PyTorch (same hardware as the other models), or in ONNX if a file is provided.

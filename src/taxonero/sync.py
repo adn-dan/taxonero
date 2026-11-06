@@ -154,6 +154,9 @@ class Syncer:
         self.db.execute("DELETE FROM written WHERE kind = ? AND asset_id = ? AND value = ? AND immich_id != ?",
                         (kind, asset_id, value, immich_id))
         store.record_written(self.db, kind, immich_id, asset_id, value)
+        # Committed right away: no write transaction left open across the calls to Immich that follow, which
+        # would block the other threads writing to the database (analysis alongside, see worker._TagWriter).
+        self.db.commit()
 
     def _ours(self, existing: dict[str, str]) -> dict[str, str]:
         """{value: id} of the tags created by the tool, according to Immich (existing: {value: id}). Records of a tag that
@@ -164,6 +167,7 @@ class Syncer:
                 ours[r["value"]] = r["immich_id"]
             elif not self.client.dry_run:
                 self.db.execute("DELETE FROM written WHERE kind = 'tag' AND immich_id = ?", (r["immich_id"],))
+        self.db.commit()   # before the calls to Immich that follow (see _record)
         return ours
 
     def _write(self, asset_id: str, fn, *args) -> None:
@@ -223,6 +227,7 @@ class Syncer:
             self._write(aid, self.client.untag_assets, tid, [aid])
             if not self.client.dry_run:
                 self.db.execute("DELETE FROM written WHERE kind = 'tag_asset' AND immich_id = ? AND asset_id = ?", (tid, aid))
+                self.db.commit()   # before the next call to Immich (see _record)
             stats.tags_removed += 1
         self.db.commit()
         return taxa
@@ -378,6 +383,7 @@ class Syncer:
                 continue
             existing.pop(value, None)
             self.db.execute("DELETE FROM written WHERE kind = 'tag' AND immich_id = ?", (ours[value],))
+            self.db.commit()   # before the next call to Immich (see _record)
             n += 1
         self.db.commit()
         if n:

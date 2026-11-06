@@ -37,8 +37,9 @@ jamais modifiées.**
 - Tout ce que le dashboard affiche (fiches, noms, aires de répartition, articles) est mis en local par la
   synchronisation : la relecture n'attend pas le réseau. Bouton « Synchroniser » = nouvelles photos
   d'Immich, analyse, tags et mise à jour des données locales, avec progression.
-- Analyse en deux temps, chacun avec sa barre : la partie IA (détection, identification) passe d'abord sur
-  toute la file, puis le GPU est libéré pendant la vérification géographique auprès de GBIF. La présence
+- Analyse en deux phases qui tournent en même temps, chacune avec sa barre : la partie IA (détection,
+  identification) parcourt la file à pleine vitesse du GPU pendant que la vérification géographique (GBIF)
+  suit sur ses résultats ; le GPU est libéré dès que la partie IA est finie. La présence
   autour d'un point coûte une requête GBIF par zone de 1° pour toutes les espèces à la fois (gardée
   180 jours), et non une par candidat.
 - Dashboard au style d'Immich (mêmes couleurs, police, barre latérale) : page Photos avec filtres
@@ -208,9 +209,11 @@ Mémoire : les empreintes de texte de BioCLIP (2,7 Go) sont lues en mmap, donc r
 sous pression mémoire, et la partie texte du modèle, inutile une fois ces empreintes calculées, est libérée.
 Les résultats sont identiques au bit près. `MEM_LIMIT` (8 Go par défaut) borne le conteneur.
 
-Sur GPU, les photos sont analysées par lots (8 par défaut, `GPU_BATCH` ou **Paramètres > Analyse > Calcul** : plus
-grand va plus vite mais prend plus de mémoire du GPU ; tous leurs recadrages identifiés en un seul passage de
-BioCLIP), et les aperçus des photos suivantes se téléchargent pendant le calcul. Résultats identiques à
+Sur GPU, les photos sont analysées par lots (taille automatique selon la mémoire du GPU, 8 pour 12 Go et 16 pour
+24 Go, divisée par deux toute seule si la mémoire sature ; ou fixée par `GPU_BATCH` ou **Paramètres > Analyse >
+Calcul**). MegaDetector et OWLv2 (deux fois moins à la fois) traitent chaque lot en un passage, et tous leurs
+recadrages sont identifiés en un seul passage de BioCLIP ; le nombre d'aperçus téléchargés à l'avance suit la
+taille des lots, et ils se téléchargent pendant le calcul. Résultats identiques à
 l'analyse photo par photo ; sur processeur, grouper n'apporte rien et les photos passent une à une.
 
 Les modèles quittent la mémoire du GPU après 5 minutes sans analyse et sont rechargés à la suivante (`MODELS_IDLE_MINUTES`

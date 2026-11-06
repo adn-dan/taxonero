@@ -887,22 +887,28 @@ def test_server_error_shows_message_and_retry(page, route, view):
 
 
 def test_two_phase_progress_bars(page, dev_app):
-    """Analysis in two phases: one bar for the AI part and one for the GBIF check, the current one highlighted."""
+    """Analysis in two phases at the same time: one bar for the AI part and one for the GBIF check, both active with
+    their remaining time; once the AI part is over, only the check stays highlighted."""
     import os
     s, w = dev_app
+    now = time.time()
     w.progress.update(running=True, step="analyze", done=40, total=100, scale=1, current="IMG_0001.jpg",
-                      step_started=time.time() - 60, phases={"analyze": [40, 100], "geo": [0, 130]})
+                      step_started=now - 60, active=["analyze", "geo"],
+                      phases={"analyze": [40, 100, now - 60], "geo": [25, 130, now - 60]})
     try:
         page.evaluate("pollSync(false)")
         page.wait_for_selector("#syncline .phase.on", state="attached")   # phone: sidebar folded
-        assert page.locator("#syncline .phase").count() == 2
-        assert "Analyse IA 40/100" in page.locator("#syncline .phase.on").text_content()
+        assert page.locator("#syncline .phase").count() == 2 and page.locator("#syncline .phase.on").count() == 2
+        text = page.locator("#syncline").text_content()
+        assert "Analyse IA 40/100" in text and "Vérification GBIF 25/130" in text and text.count("reste environ") == 2
         if os.environ.get("SHOT") and page.is_visible("#syncline"):
             page.locator("#syncline").screenshot(path=os.environ["SHOT"] + f"-{page.viewport_size['width']}.png")
-        w.progress.update(step="geo", done=10, total=130, phases={"analyze": [100, 100], "geo": [10, 130]})
+        w.progress.update(step="geo", done=10, total=105, active=["geo"],
+                          phases={"analyze": [100, 100, now - 60], "geo": [35, 130, now - 60]})
         page.evaluate("pollSync(false)")
-        page.wait_for_function("document.querySelector('#syncline .phase.on')?.innerText.includes('GBIF')")
+        page.wait_for_function("document.querySelectorAll('#syncline .phase.on').length === 1 && "
+                               "document.querySelector('#syncline .phase.on').textContent.includes('GBIF')")
         assert not page.errors, page.errors
         _no_overflow(page)
     finally:
-        w.progress.update(running=False, step=None, phases=None, done=0, total=0)
+        w.progress.update(running=False, step=None, phases=None, active=None, done=0, total=0)

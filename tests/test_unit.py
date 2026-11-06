@@ -2342,10 +2342,13 @@ def test_presence_from_one_faceted_search_per_area():
 
 
 def test_two_phase_analysis_frees_the_gpu_before_the_geographic_check(tmp_path, monkeypatch):
-    """run_once: the AI part runs for the whole queue first (results stored), the models are released, then the
-    geographic check saves the photos: same detections as the analysis in one go, two progress counters, nothing
-    left waiting. An AI result kept across a restart is checked without running the models again."""
+    """run_once: the AI part ("ai" thread, its own connection) and the geographic check run at the same time; when
+    the AI part is over the models are released and the check finishes alone. Same detections as the analysis in
+    one go, two progress counters, nothing left waiting. An AI result kept across a restart is checked without
+    running the models again."""
     import io as _io
+    import threading
+    import time
     from PIL import Image
     from taxonero.config import Settings
     from taxonero.pipeline import Analyzer, Candidate
@@ -2356,48 +2359,83 @@ def test_two_phase_analysis_frees_the_gpu_before_the_geographic_check(tmp_path, 
         def detect(self, image):
             return [Box(.1, .1, .5, .5, .95, "animal", None, "md")]
     class Clf:
-        calls = 0
+        calls, slow = 0, 0.0
         def classify(self, images):
             Clf.calls += 1
+            time.sleep(Clf.slow)
             return [[Candidate("Vulpes vulpes", .7, {"kingdom": "Animalia", "genus": "Vulpes"}),
                      Candidate("Vulpes velox", .2, {"kingdom": "Animalia", "genus": "Vulpes"})] for _ in images]
     def jpeg():
         b = _io.BytesIO(); Image.new("RGB", (300, 200), (90, 120, 60)).save(b, "JPEG"); return b.getvalue()
 
-    def worker(name):
+    def worker(name, n=5):
         s = Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path / name, auto_confirm="off",
                      gbif_local=False, open_detector=False)
         s.data_dir.mkdir()
         w = Worker(s, analyzer=Analyzer(Det(), Clf(), None))
         w.client.thumbnail = lambda aid, size="preview": jpeg()
         w.client.original = lambda aid: None   # no original: the subject is identified on the preview
-        for i in range(5):
+        for i in range(n):
             w.db.execute("INSERT INTO asset (asset_id, file_name, taken_at, kind, people) VALUES (?, ?, ?, 'IMAGE', 0)",
-                         (f"p{i}", f"p{i}.jpg", f"2024-01-0{i + 1}"))
+                         (f"p{i}", f"p{i}.jpg", f"2024-01-{i + 1:02d}"))
         w.db.commit()
         return w
     dets = lambda w: sorted(tuple(r) for r in w.db.execute("SELECT asset_id, taxon_rank, round(score, 6), status FROM detection"))
 
-    one = worker("one")
-    assert one.analyze() == 5
+    one = worker("one", 12)
+    assert one.analyze() == 12
 
-    two = worker("two")
+    two = worker("two", 12)
     for step in ("check", "scan", "reconcile", "apply_skips", "refresh_taxa", "refresh_places", "prune", "sync", "prefetch", "backup"):
         monkeypatch.setattr(two, step, lambda *a, **k: 0)
     monkeypatch.setattr(two, "check", lambda: True)
-    order, seen = [], []
-    monkeypatch.setattr(two, "unload_models", lambda: order.append("unload"))
-    real_decide, real_tick = two.decide, two._tick
-    monkeypatch.setattr(two, "decide", lambda *a: order.append("geo") or real_decide(*a))
-    monkeypatch.setattr(two, "_tick", lambda: real_tick() or seen.append({k: list(v) for k, v in (two.progress["phases"] or {}).items()}))
+    unloads, overlap, threads = [], [], set()
+    monkeypatch.setattr(two, "unload_models", lambda: unloads.append(two.progress.get("active")))
+    real_decide, real_analyze = two.decide, two.analyze
+    monkeypatch.setattr(two, "analyze", lambda *a, **k: threads.add(threading.current_thread().name) or real_analyze(*a, **k))
+    seen = []
+    def decide(*a, **k):
+        n = real_decide(*a, **k)
+        if two.progress.get("phases"):
+            seen.append([p[:2] for p in two.progress["phases"].values()])
+        if n and two.progress.get("active") == ["analyze", "geo"]:
+            overlap.append(n)   # photos checked while the AI part was still running
+        return n
+    monkeypatch.setattr(two, "decide", decide)
+    two.s.batch_size, two.s.gpu_batch, Clf.slow = 2, 1, 0.2   # small batches: both phases have work at once
     report = two.run_once(manual=True)
-    assert (report["inferred"], report["analyzed"]) == (5, 5) and order[:2] == ["unload", "geo"]
+    assert (report["inferred"], report["analyzed"]) == (12, 12)
+    assert threads == {"ai"} and overlap                       # AI in its thread, the check alongside
+    assert unloads and unloads[0] == ["geo"]                   # models released once the AI part is over
     assert dets(two) == dets(one) and dets(two)
     assert two.db.execute("SELECT count(*) FROM inferred").fetchone()[0] == 0 and two.pending_analysis() == 0
-    assert seen[4] == {"analyze": [5, 5], "geo": [0, 5]} and seen[-1]["geo"] == [5, 5]
+    assert seen[-1] == [[12, 12], [12, 12]]                     # both counters complete
+
+    # Dashboard setting during the cycle (Interrupted): the AI thread stops too, nothing half done, the next
+    # cycle resumes where it was.
+    for i in range(20, 30):
+        two.db.execute("INSERT INTO asset (asset_id, file_name, taken_at, kind, people) VALUES (?, ?, ?, 'IMAGE', 0)",
+                       (f"p{i}", f"p{i}.jpg", f"2024-02-{i - 19:02d}"))
+    two.db.commit()
+    stop_after = [1]
+    def stopping(*a, **k):
+        n = real_decide(*a, **k)
+        if n:
+            stop_after[0] -= 1
+            if stop_after[0] == 0:
+                two._stop.set()
+        return n
+    monkeypatch.setattr(two, "decide", stopping)
+    report = two.run_once(manual=True)
+    assert report.get("interrupted") and not [t for t in threading.enumerate() if t.name == "ai"]
+    two._stop.clear()
+    monkeypatch.setattr(two, "decide", real_decide)
+    report = two.run_once(manual=True)
+    assert two.pending_analysis() == 0 and two.db.execute("SELECT count(*) FROM inferred").fetchone()[0] == 0
+    assert len({r[0] for r in two.db.execute("SELECT asset_id FROM detection")}) == 22
 
     # AI result stored, then a restart: only the geographic check is left.
-    calls = Clf.calls
+    Clf.slow = 0
     two.db.execute("UPDATE asset SET analyzed_at = NULL WHERE asset_id = 'p0'")
     two.db.execute("INSERT INTO inferred VALUES ('p0', ?, 0)", (Analyzer.pack(two._analyzer.infer_many([(jpeg(), None, None, None)])[0]),))
     two.db.commit()
@@ -2478,3 +2516,144 @@ def test_requeue_failed_drops_their_waiting_ai_results(tmp_path):
     w.db.execute("INSERT INTO inferred VALUES ('a', x'00', 0), ('b', x'00', 0)")
     assert requeue(w.db, "failed") == 1
     assert [r[0] for r in w.db.execute("SELECT asset_id FROM inferred")] == ["b"]
+
+
+def test_installer_retries_a_step_and_falls_back_to_cpu_only_for_pytorch(tmp_path, monkeypatch):
+    """Desktop launcher: a uv step that fails once (Windows: file locked by the antivirus or by a closing
+    Taxonero) is tried again; only a PyTorch failure leads to the CPU build; everything goes to install.log."""
+    import importlib.util
+    import subprocess
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("bootstrap", Path(__file__).parent.parent / "packaging" / "bootstrap.py")
+    b = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(b)
+    monkeypatch.setattr(b.time, "sleep", lambda s: None)
+    monkeypatch.setattr(b, "LOG", tmp_path / "install.log")
+    calls, failures = [], {}
+
+    def stream(cmd, env, ui):
+        step = "venv" if cmd[1] == "venv" else "torch" if any(c.startswith("torch") for c in cmd) else "app"
+        calls.append(step)
+        b.log_line(" ".join(cmd))
+        if failures.get(step, 0) > 0:
+            failures[step] -= 1
+            raise subprocess.CalledProcessError(2, cmd[0])
+    monkeypatch.setattr(b, "stream", stream)
+    ui = type("UI", (), {"step": lambda *a: None, "line": lambda *a: None})()
+    install = lambda variant: b.install(tmp_path, variant, tmp_path / "x.whl", ui)
+
+    failures["venv"] = 1
+    install("cu130")
+    assert calls == ["venv", "venv", "torch", "app"]
+    calls.clear(); failures["torch"] = 3
+    with pytest.raises(b.TorchFailed):
+        install("cu130")
+    calls.clear(); failures["app"] = 3
+    with pytest.raises(subprocess.CalledProcessError):
+        install("cu130")
+    assert calls == ["venv", "torch", "app", "app", "app"]
+    assert "venv" in (tmp_path / "install.log").read_text()
+
+
+def test_gpu_batch_adapts_to_memory_and_shrinks_after_out_of_memory(monkeypatch):
+    """Photos per GPU pass from its memory (8 for 12 GB, 16 for 24 GB, 1 on the CPU); a batch that runs out of
+    memory is done one by one, with the same results, and the automatic size is halved for the rest of the run."""
+    from taxonero import hardware
+    from taxonero.pipeline import on_gpu_batch
+    monkeypatch.setattr(hardware, "OOM_EVENTS", 0)
+    assert [hardware.auto_batch("cuda", g) for g in (12, 24, 6, 80)] == [8, 16, 4, 32]
+    assert hardware.auto_batch("cpu", 12) == 1 and hardware.auto_batch("mps", None) == 8
+
+    def batch(images):
+        if len(images) > 2:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        return [i * 10 for i in images]
+    assert on_gpu_batch(batch, lambda i: i * 10, [1, 2, 3, 4]) == [10, 20, 30, 40]
+    assert hardware.OOM_EVENTS == 1 and hardware.auto_batch("cuda", 12) == 4
+    with pytest.raises(RuntimeError, match="other"):
+        on_gpu_batch(lambda images: (_ for _ in ()).throw(RuntimeError("other")), lambda i: i, [1, 2])
+
+
+def test_tags_are_written_while_the_analysis_goes_on(tmp_path):
+    """Photos confirmed by the geographic check get their tags from the "tags" thread (its own connection) as they
+    come; a photo without a confirmed detection is not sent; the next sync has nothing left to write for them."""
+    from taxonero.config import Settings
+    from taxonero.sync import Syncer
+    from taxonero.worker import Worker, _TagWriter
+
+    _sync_db(tmp_path, ["a", "b"]).close()
+    (tmp_path / "s.sqlite").rename(tmp_path / "taxonero.sqlite")   # the worker's database
+    w = Worker(Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path, gbif_local=False))
+    w.db.execute("INSERT INTO asset (asset_id) VALUES ('c')")   # analysed, nothing confirmed
+    w.db.commit()
+    im = FakeImmich(["a", "b", "c"])
+    im.write_gap, w.client = 0, im
+    w.progress["phases"] = {"analyze": [0, 0, 0], "geo": [0, 0, 0]}
+    tags = _TagWriter(w)
+    tags.add(["a", "c"])
+    tags.add(["b"])
+    tags.finish()
+    assert tags.done == 2 and w.progress["phases"]["tags"][:2] == [2, 2]
+    assert all(t["value"].endswith("Parus major") for a in ("a", "b") for t in im.assets[a]["tags"])
+    assert not im.assets["c"]["tags"]
+    im.gets = 0
+    assert Syncer(w.db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(full=False).assets == 0
+
+
+def test_sync_keeps_no_write_transaction_open_while_calling_immich(tmp_path):
+    """The tags are written alongside the analysis: a slow Immich must not keep the database locked for the other
+    threads (each write to the database is committed before the next call to Immich)."""
+    import threading
+    import time
+    from taxonero import store
+    from taxonero.sync import Syncer
+    db = _sync_db(tmp_path, ["a"])
+
+    class Slow(FakeImmich):
+        def bulk_tag(self, tag_ids, asset_ids):
+            time.sleep(1.5)
+            return super().bulk_tag(tag_ids, asset_ids)
+    im = Slow(["a"])
+    t = threading.Thread(target=lambda: Syncer(db, im, write_gap=0, settle_seconds=0, verify_rounds=0).sync_all(asset_ids=["a"], full=False))
+    t.start()
+    other = store.connect(tmp_path / "s.sqlite")
+    other.execute("PRAGMA busy_timeout = 200")   # a write that waits for Immich fails here
+    while t.is_alive():
+        other.execute("INSERT OR REPLACE INTO inferred VALUES ('x', x'00', 0)")
+        other.commit()
+        time.sleep(0.05)
+    assert [x["value"] for x in im.assets["a"]["tags"]] == ["Nature/Aves/Paridae/Parus/Parus major"]
+
+
+def test_area_search_refused_for_load_falls_back_then_retries(monkeypatch):
+    """GBIF busy (429) on the heavy area search: the per-taxon searches answer (same counts, the analysis goes on),
+    the area is not asked again for GROUPED_COOLDOWN, then it is."""
+    import httpx
+    from taxonero import store, taxonomy
+    from taxonero.taxonomy import Taxonomy
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    busy = [True]
+
+    class Http:
+        calls: list = []
+        def get(self, url, params=None):
+            u = httpx.URL(str(url))
+            Http.calls.append(u)
+            req = httpx.Request("GET", str(u))
+            if u.path.startswith("/v1/species/"):
+                return httpx.Response(200, json={"key": 1, "rank": "SPECIES"}, request=req)
+            if "facet" in u.params:
+                if busy[0]:
+                    return httpx.Response(429, request=req)
+                return httpx.Response(200, json={"facets": [{"field": "SPECIES_KEY", "counts": [{"name": "1", "count": 30}]}]}, request=req)
+            return httpx.Response(200, json={"count": 30}, request=req)
+
+    tx = Taxonomy(store.connect(":memory:"))
+    tx.min_interval, tx.http = 0, Http()
+    tx.get("https://api.gbif.org/v1/species/1")
+    assert tx.occurrences_near(1, 45.0, 5.0, 5.0) == 30                       # per-taxon answer
+    n = len(Http.calls)
+    assert tx.occurrences_near(1, 46.0, 5.0, 5.0) == 30 and len(Http.calls) == n + 1   # no area attempt meanwhile
+    busy[0] = False
+    tx._busy["area"] = 0                                                       # cooldown over
+    assert tx.occurrences_near(1, 47.0, 5.0, 5.0) == 30 and "facet" in Http.calls[-1].params

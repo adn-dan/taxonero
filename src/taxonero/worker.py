@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import logging
+import queue
 import sqlite3
 import sys
 import threading
@@ -147,6 +148,66 @@ def requeue(db: sqlite3.Connection, scope: str) -> int:
 
 # -- service -------------------------------------------------------------------
 
+class _TagWriter:
+    """Tags written to the source while the analysis goes on ("tags" thread, its own database connection): each
+    photo confirmed by the geographic check gets its tags a few seconds later, instead of at the end of the cycle.
+    Only the photos it is given (no pass over the whole library); the sync at the end of the cycle stays as the
+    safety net (photos postponed because Immich just changed them, RAW twins, failures)."""
+
+    def __init__(self, w: "Worker"):
+        self.w, self.q, self.done, self.queued = w, queue.Queue(), 0, 0
+        self.thread = threading.Thread(target=self._run, daemon=True, name="tags")
+        self.thread.start()
+
+    def add(self, asset_ids: list[str]) -> None:
+        """Photos just saved: those with a confirmed detection go to the writer."""
+        ids = [a for a in asset_ids if self.w.db.execute(
+            "SELECT 1 FROM detection WHERE asset_id = ? AND status = 'confirmed' LIMIT 1", (a,)).fetchone()]
+        for a in ids:
+            self.q.put(a)
+        self.queued += len(ids)
+        self._show()
+
+    def _show(self) -> None:
+        if (phases := self.w.progress.get("phases")) is not None:
+            phases["tags"] = [self.done, self.queued, phases.get("tags", [0, 0, time.time()])[2]]
+
+    def _run(self) -> None:
+        w, s = self.w, self.w.s
+        db = store.connect(s.db_path)
+        try:
+            syncer = Syncer(db, w.client, s.tag_root, s.names_lang, s.write_description,
+                            write_gap=getattr(w.client, "write_gap", WRITE_GAP), checkpoint=w._checkpoint)
+            end = False
+            while not end:
+                ids = [self.q.get()]
+                while True:   # everything waiting, in one pass
+                    try:
+                        ids.append(self.q.get_nowait())
+                    except queue.Empty:
+                        break
+                end = None in ids
+                ids = [a for a in ids if a]
+                if ids:
+                    syncer.sync_all(asset_ids=ids, full=False)
+                    for aid in syncer.missing:
+                        w.mark_missing(aid, db)
+                    syncer.missing.clear()
+                    self.done += len(ids)
+                    self._show()
+        except Interrupted:   # setting from the dashboard: stops, the next cycle resumes
+            pass
+        except Exception:
+            log.exception("tags written during the analysis: stopped, the end of the cycle writes them")
+        finally:
+            db.close()
+
+    def finish(self) -> None:
+        self.q.put(None)
+        while self.thread.is_alive():
+            self.thread.join(1)
+
+
 class Worker:
     def __init__(self, s: Settings, analyzer: Analyzer | None = None):
         self.s = s
@@ -259,6 +320,16 @@ class Worker:
         self.progress.update(step=step, done=0, total=total, scale=1, current=None, step_started=time.time())
         if step not in ("analyze", "geo"):
             self.progress["phases"] = None
+        self.last_activity = time.time()
+
+    def _tick_phase(self, phase: str) -> None:
+        """Next photo of one of the two analysis phases, which may run at the same time: its own counter, and the
+        step counter (top bar, remaining time) if it is the step shown. Stopping point (_checkpoint)."""
+        self._checkpoint()
+        if (phases := self.progress.get("phases")) and phase in phases:
+            phases[phase][0] += 1
+        if self.progress["step"] == phase:
+            self.progress["done"] += 1
         self.last_activity = time.time()
 
     def _tick(self) -> None:
@@ -459,10 +530,11 @@ class Worker:
         store.set_state(self.db, "writable", "1" if ok else "0")
         return ok
 
-    def mark_missing(self, asset_id: str) -> None:
+    def mark_missing(self, asset_id: str, db: sqlite3.Connection | None = None) -> None:
+        db = db or self.db
         log.info("photo %s missing from Immich (deleted or in the trash): hidden", asset_id)
-        self.db.execute("UPDATE asset SET missing_at = ? WHERE asset_id = ?", (time.time(), asset_id))
-        self.db.commit()
+        db.execute("UPDATE asset SET missing_at = ? WHERE asset_id = ?", (time.time(), asset_id))
+        db.commit()
 
     def refresh_taxa(self, limit: int = 50) -> int:
         """Enrich again the taxa saved in an older format (e.g. before multilingual names)."""
@@ -729,6 +801,8 @@ class Worker:
             "taxonomy": {**self.backbone_state, "local": self.tx.local is not None},
             # Where the time goes: ms per photo for each stage (stages overlap, see analyze()).
             "stages": {k: round(sec / n * 1000) for k, (sec, n) in {**self._stages_kept, **getattr(self._analyzer, "timings", {}), **self._timings}.items() if n},
+            # Photos per GPU pass actually used (automatic from its memory, unless set), None on the CPU.
+            "batch": hardware.batch_size(self._device or hw["device"], self.s.gpu_batch) if hw["device"] != "cpu" else None,
             "speed": median(sorted(self._speed)),           # whole analysis, or its AI part (two phases)
             "speed_geo": median(sorted(self._speed_geo)),   # geographic check, second phase
         }
@@ -769,32 +843,38 @@ class Worker:
         self._decider.drop = self._analyzer.drop if outside else candidate_filter(self.s, self.tx)
         return self._decider
 
-    def analyze(self, limit: int | None = None, infer_only: bool = False) -> int:
+    def analyze(self, limit: int | None = None, infer_only: bool = False, db: sqlite3.Connection | None = None) -> int:
         """A batch of photos to analyse, most recent first. A failed photo is retried at the following
         cycles, then given up after MAX_FAILURES failures (visible in the dashboard, can be restarted).
 
         Pipelined, so that the GPU waits as little as possible: previews of the next photos are downloaded
         and decoded while the models work, and the models process a group ("gpu" thread) while
         the previous group goes through the geographic check (GBIF) and the database write.
-        infer_only: first phase of the two-phase analysis (run_once), the models only: results stored for decide()."""
+        infer_only: first phase of the two-phase analysis (run_once), the models only: results stored for decide().
+        db: connection of the calling thread; given, the AI part runs alongside the check (see _both_phases)."""
+        phase, db = db is not None, db or self.db
         where, args = self.queue_sql()
         if infer_only:
             where += " AND NOT EXISTS (SELECT 1 FROM inferred i WHERE i.asset_id = asset.asset_id)"
-        rows = self.db.execute(f"SELECT asset_id, file_name, lat, lon, kind FROM asset WHERE {where} "
+        rows = db.execute(f"SELECT asset_id, file_name, lat, lon, kind FROM asset WHERE {where} "
                                "ORDER BY fail_count, taken_at DESC LIMIT ?", (*args, limit or self.s.batch_size)).fetchall()
-        threshold = auto_threshold(self.db, self.s)
-        if self.progress["step"] != "analyze":   # run_once counts the whole queue, not only this batch
+        threshold = None if infer_only else auto_threshold(self.db, self.s)
+        if not phase and self.progress["step"] != "analyze":   # run_once counts the whole queue, not only this batch
             self._step("analyze", len(rows))
         if not rows:
             return 0
         analyzer = self.analyzer   # model loading before the timing and the batch choice
         # GPU: several photos per BioCLIP pass. CPU: one at a time (no gain from grouping).
-        chunk = self.s.gpu_batch if self._device not in (None, "cpu") and hasattr(analyzer, "analyze_many") else 1
+        chunk = hardware.batch_size(self._device, self.s.gpu_batch) if hasattr(analyzer, "analyze_many") else 1
+        if getattr(analyzer, "open_detector", None) is not None:   # OWLv2: half as many at once (memory)
+            analyzer.open_detector.batch = max(1, chunk // 2)
         piped = hasattr(analyzer, "infer_many")
-        finish = self._keep if infer_only and piped else self._finish
+        finish = (lambda *a: self._keep(*a, db=db)) if infer_only and piped else self._finish
         load = lambda r: open_image(self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)) if piped else \
             self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)
-        with ThreadPoolExecutor(4, thread_name_prefix="apercu") as pool, ThreadPoolExecutor(1, thread_name_prefix="gpu") as gpu:
+        # Previews downloaded ahead: enough at once to keep a large GPU batch fed, at least 4.
+        with ThreadPoolExecutor(max(4, min(16, chunk)), thread_name_prefix="apercu") as pool, \
+                ThreadPoolExecutor(1, thread_name_prefix="gpu") as gpu:
             fetch = lambda r: pool.submit(load, r)
             pending = [fetch(r) for r in rows[:chunk * 2]]
             previous = None
@@ -806,12 +886,12 @@ class Worker:
                     pending += [fetch(r) for r in rows[i + chunk * 2:i + chunk * 3]]
                     items, t0 = [], time.perf_counter()
                     for r, fut in zip(group, pending[:len(group)]):
-                        self._tick()
+                        self._tick_phase("analyze") if phase else self._tick()
                         self.progress["current"] = r["file_name"]
                         try:
                             items.append((r, fut.result()))
                         except Exception as e:
-                            self._failed(r["asset_id"], e)
+                            self._failed(r["asset_id"], e, db)
                     del pending[:len(group)]
                     self._timed("download", t0, len(group))
                     if not piped:
@@ -852,7 +932,8 @@ class Worker:
             return
         self._save(items, batch, threshold)
 
-    def _keep(self, analyzer, items: list[tuple], job, threshold: float | None = None) -> None:
+    def _keep(self, analyzer, items: list[tuple], job, threshold: float | None = None,
+              db: sqlite3.Connection | None = None) -> None:
         """End of the AI part of a group (first phase): results stored for the geographic check (decide). If
         the group failed, each photo is run again alone, so that an unreadable photo does not hold the others."""
         if not items:
@@ -861,20 +942,21 @@ class Worker:
             out = job.result()
         except Exception:
             out = None
+        db = db or self.db
         t0 = time.perf_counter()
         for k, (r, data) in enumerate(items):
             aid = r["asset_id"]
             try:
                 res = out[k] if out is not None else \
                     analyzer.infer_many(self._args([(r, data)]), self.s.full_image_fallback, self.s.groups)[0]
-                self.db.execute("INSERT OR REPLACE INTO inferred VALUES (?, ?, ?)", (aid, analyzer.pack(res), time.time()))
-                self.db.commit()
+                db.execute("INSERT OR REPLACE INTO inferred VALUES (?, ?, ?)", (aid, analyzer.pack(res), time.time()))
+                db.commit()
             except Exception as e:
-                self._failed(aid, e)
+                self._failed(aid, e, db)
         self._timed("save", t0, len(items))
         self._last_done = self._measure(self._speed, self._last_done, len(items))
 
-    def decide(self, limit: int | None = None) -> int:
+    def decide(self, limit: int | None = None, saved: list | None = None) -> int:
         """Second phase of the analysis: geographic check (GBIF), decision and saving of the photos whose AI result
         is stored, without the models (the GPU is free). A photo whose check fails is counted as failed (given up
         after MAX_FAILURES); a GBIF outage (Unavailable) stops the phase, the results wait for the next cycle."""
@@ -884,19 +966,22 @@ class Worker:
         self.db.commit()
         rows = self.db.execute("SELECT a.asset_id, a.file_name, a.kind, i.data FROM inferred i JOIN asset a ON a.asset_id = i.asset_id "
                                "ORDER BY a.taken_at DESC LIMIT ?", (limit or self.s.batch_size,)).fetchall()
-        if self.progress["step"] != "geo":   # run_once counts the whole phase, not only this batch
+        if self.progress["step"] not in ("geo", "analyze"):   # run_once counts the whole phase, not only this batch
             self._step("geo", len(rows))
         threshold = auto_threshold(self.db, self.s)
         decider = self.decider
         for r in rows:
-            self._tick()
-            self.progress["current"] = r["file_name"]
+            self._tick_phase("geo")
+            if self.progress["step"] == "geo":   # alongside the AI part, the file shown is the AI one
+                self.progress["current"] = r["file_name"]
             try:
                 batch = decider.decide_many([decider.unpack(r["data"])], self.s.groups)
             except Exception as e:
                 self._failed(r["asset_id"], e)
                 continue
             self._save([(r, None)], batch, threshold, geo=True)
+            if saved is not None:
+                saved.append(r["asset_id"])
         return len(rows)
 
     def _measure(self, speed: list[float], last: float, n: int) -> float:
@@ -947,20 +1032,22 @@ class Worker:
         else:
             self._last_done = self._measure(self._speed, self._last_done, len(items))
 
-    def _failed(self, aid: str, e: BaseException) -> None:
-        """Failed photo: counted (given up after MAX_FAILURES), or hidden if it disappeared from Immich."""
-        self.db.rollback()
+    def _failed(self, aid: str, e: BaseException, db: sqlite3.Connection | None = None) -> None:
+        """Failed photo: counted (given up after MAX_FAILURES), or hidden if it disappeared from Immich.
+        db: connection of the calling thread (AI part in its own thread, see _both_phases)."""
+        db = db or self.db
+        db.rollback()
         if is_missing(e):
-            self.mark_missing(aid)
+            self.mark_missing(aid, db)
             return
         if is_transient(e):
             # Network, Immich or GBIF temporarily unavailable (429: too many requests): the photo is not
             # to blame, it is not counted as failed. The analysis stops and resumes at the next cycle.
             raise Unavailable(f"{type(e).__name__}: {e}"[:300]) from e
         log.error("analysis failed for %s", aid, exc_info=e)
-        self.db.execute("UPDATE asset SET fail_count = fail_count + 1, last_error = ? WHERE asset_id = ?",
-                        (f"{type(e).__name__}: {e}"[:500], aid))
-        self.db.commit()
+        db.execute("UPDATE asset SET fail_count = fail_count + 1, last_error = ? WHERE asset_id = ?",
+                   (f"{type(e).__name__}: {e}"[:500], aid))
+        db.commit()
 
     def apply_skips(self) -> int:
         """Link RAW files to their JPG, then remove the automatic detections still pending from skipped
@@ -1194,59 +1281,31 @@ class Worker:
             self._soft(report, "taxa_refreshed", self.refresh_taxa)
             self._soft(report, "places_refreshed", self.refresh_places)
             report["analyzed"] = report["inferred"] = 0
-            # Two phases with the real analyser: the AI part for the whole queue (GPU at full speed), then the GPU is
-            # released and the geographic check (GBIF, network) runs on the stored results. An analyser provided
-            # from outside (tests) analyses in one go.
-            two = self._analyzer is None or isinstance(self._analyzer, Analyzer)
             allowed = lambda: manual or in_window(self.s.analysis_window)
-            todo = self.pending_ai if two else self.pending_analysis
-            ai = lambda: allowed() and not self.analysis_paused and todo()
-            if ai():
-                if self._analyzer is None:
-                    # First launch: models downloaded (~5 GB) then loaded, possibly several minutes.
-                    self._step("models")
-                    self._wait_models()
-                n = todo()
-                self._step("analyze", n)
-                if two:   # two bars: AI part, and geographic check of everything that will reach it
-                    self.progress["phases"] = {"analyze": [0, n], "geo": [0, n + self.pending_geo()]}
-            deadline = time.monotonic() + self.s.analysis_max_minutes * 60
-            while ai():
-                if time.monotonic() >= deadline:
-                    report["more"] = True
-                    break
-                try:
-                    n = self.analyze(infer_only=two)
-                except Unavailable as e:
-                    log.warning("analysis suspended until the next cycle: %s", e)
-                    report["paused"] = str(e)
-                    break
-                report["inferred" if two else "analyzed"] += n
-                if not n:
-                    break
-            if self.analysis_paused or (two and self._analyzer is not None and not self.pending_ai()):
-                # Pause, or AI part done: GPU memory given back now, not after models_idle_minutes. The
-                # geographic check needs no model.
-                self.unload_models()
-            if two and allowed() and self.pending_geo():
-                n = self.pending_geo()
-                self._step("geo", n)
-                phases = self.progress.get("phases") or {"analyze": [0, 0]}
-                self.progress["phases"] = {**phases, "geo": [0, n]}
+            if self._analyzer is None or isinstance(self._analyzer, Analyzer):
+                # Real analyser: the AI part and the geographic check at the same time (see _both_phases).
+                self._both_phases(report, allowed)
+            else:
+                # Analyser provided from outside (tests): in one go, batch after batch.
+                if allowed() and not self.analysis_paused and self.pending_analysis():
+                    self._step("analyze", self.pending_analysis())
                 deadline = time.monotonic() + self.s.analysis_max_minutes * 60
-                while self.pending_geo():
+                while allowed() and not self.analysis_paused and self.pending_analysis():
                     if time.monotonic() >= deadline:
                         report["more"] = True
                         break
                     try:
-                        n = self.decide()
+                        n = self.analyze()
                     except Unavailable as e:
-                        log.warning("geographic check suspended until the next cycle: %s", e)
+                        log.warning("analysis suspended until the next cycle: %s", e)
                         report["paused"] = str(e)
                         break
                     report["analyzed"] += n
                     if not n:
                         break
+            if self.analysis_paused:
+                # Pause in the middle of a group: the group held the models, GPU memory is only released here.
+                self.unload_models()
             self._soft(report, "pruned", self.prune)
             # Series (bursts) and smoothing of the proposals awaiting review within a series (series.py).
             report["series"] = series.assign(self.db)
@@ -1280,6 +1339,94 @@ class Worker:
         finally:
             self.progress.update(running=False, step=None, finished=time.time(), report=report)
             self.cycle_lock.release()
+
+    def _both_phases(self, report: dict, allowed) -> None:
+        """Analysis in two phases running at the same time, each with its bar. The AI part ("ai" thread, its own
+        database connection) goes through the queue at full GPU speed and stores its results; this thread checks
+        them against GBIF as they arrive and saves the photos. When the AI part has nothing left, the models leave
+        the GPU and the check finishes on its own. Both stop at ANALYSIS_MAX_MINUTES (the loop starts the next
+        cycle right away, models still loaded if the queue is not empty)."""
+        ai_n = self.pending_ai() if allowed() and not self.analysis_paused else 0
+        geo_n = self.pending_geo() if allowed() else 0
+        if not ai_n and not geo_n:
+            return
+        if ai_n and self._analyzer is None:
+            # First launch: models downloaded (~5 GB) then loaded, possibly several minutes.
+            self._step("models")
+            self._wait_models()
+        deadline = time.monotonic() + self.s.analysis_max_minutes * 60
+        self._step("analyze" if ai_n else "geo", ai_n or geo_n)
+        now = time.time()   # [done, total, start] per phase: two bars, each with its remaining time
+        self.progress["phases"] = {"analyze": [0, ai_n, now], "geo": [0, ai_n + geo_n, now]}
+        self.progress["active"] = ["analyze", "geo"] if ai_n else ["geo"]
+        ai: dict = {"n": 0, "error": None}
+
+        def run_ai():
+            db = store.connect(self.s.db_path)
+            try:
+                while not self.analysis_paused and allowed() and time.monotonic() < deadline:
+                    n = self.analyze(infer_only=True, db=db)
+                    ai["n"] += n
+                    if not n:
+                        break
+            except Interrupted:   # setting from the dashboard: this thread stops, run_once handles it
+                pass
+            except BaseException as e:
+                ai["error"] = e
+            finally:
+                db.close()
+
+        thread = threading.Thread(target=run_ai, daemon=True, name="ai") if ai_n else None
+        if thread:
+            thread.start()
+        # Tags of the photos confirmed by the check, written as they come (not during a removal, nor read-only).
+        tags = _TagWriter(self) if not self.writes_paused() and self.client.writable else None
+        try:
+            while True:
+                if thread and not thread.is_alive():   # AI part over: GPU given back, the check goes on alone
+                    thread = None
+                    self.progress["active"] = ["geo"]
+                    if not self.pending_ai() or self.analysis_paused:
+                        self.unload_models()
+                    self._step("geo", self.pending_geo())
+                if time.monotonic() >= deadline:
+                    report["more"] = True
+                    break
+                if not allowed():   # end of the analysis window: the AI thread stops too
+                    break
+                saved: list[str] = []
+                try:
+                    n = self.decide(saved=saved)
+                except Unavailable as e:   # GBIF down: the AI part goes on, its results wait for the next cycle
+                    log.warning("geographic check suspended until the next cycle: %s", e)
+                    report["paused"] = str(e)
+                    break
+                report["analyzed"] += n
+                if tags and saved:
+                    tags.add(saved)
+                if not n:
+                    if thread is None:
+                        break
+                    self._checkpoint()
+                    thread.join(0.5)   # waiting for AI results
+            while thread and thread.is_alive():   # check stopped first: the AI part ends on its own
+                self._checkpoint()
+                thread.join(1)
+        finally:
+            if thread:   # stop requested (Interrupted): the thread stops at its next photo
+                thread.join()
+            if tags:   # the tags still waiting are written before the end of the analysis
+                tags.finish()
+                report["tags_written"] = tags.done
+            report["inferred"] = ai["n"]
+            self.progress["active"] = None
+        if not self.pending_ai() or self.analysis_paused:
+            self.unload_models()
+        if isinstance(ai["error"], Unavailable):
+            log.warning("analysis suspended until the next cycle: %s", ai["error"])
+            report["paused"] = str(ai["error"])
+        elif ai["error"] is not None:
+            raise ai["error"]
 
     @property
     def models_loaded(self) -> bool:

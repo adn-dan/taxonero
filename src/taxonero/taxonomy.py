@@ -66,6 +66,10 @@ AREA_FACETS = {"SPECIES": "SPECIES_KEY", "GENUS": "GENUS_KEY", "FAMILY": "FAMILY
                "CLASS": "CLASS_KEY", "PHYLUM": "PHYLUM_KEY", "KINGDOM": "KINGDOM_KEY"}
 AREA_LIMIT = 500_000   # values per facet; a facet that reaches it is incomplete and is not used (per-taxon search)
 AREA_TTL = 180 * 86400
+# Grouped search refused for load (429, GBIF limits heavy searches when its servers are busy): per-taxon searches
+# (same counts, small requests that still pass) for this long, then the grouped search is tried again.
+GROUPED_COOLDOWN = 600
+AREA_INTERVAL = 1.0   # s between two area searches: heavy for GBIF, which refuses them first (429) when they come in bursts
 # Species with fossils worldwide (fossil test): one faceted search, ~160,000 species and ~5 MB, kept a year. A species
 # absent from it has no fossil; for one present, its field observations around the photo usually settle the test.
 FOSSILS_URL = (f"{GBIF}/occurrence/search?limit=0&basisOfRecord=FOSSIL_SPECIMEN&facet=speciesKey"
@@ -98,7 +102,10 @@ class Taxonomy:
         self.workers = 4
         self._areas: dict[str, dict] = {}   # decoded areas (see _area), most recent last
         self._areas_lock = threading.Lock()   # the dashboard shares one Taxonomy between its threads
+        self._area_rate = threading.Lock()    # area searches one at a time, AREA_INTERVAL apart
+        self._last_area = 0.0
         self._refused: set[str] = set()   # area or fossil list refused by GBIF (4xx): per-taxon searches instead
+        self._busy: dict[str, float] = {}   # area or fossil list refused for load (429): per-taxon until then
         self._fossils: dict[str, int] | None = None   # species with fossils (see _fossil_list)
         db.execute("CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT, fetched REAL)")
 
@@ -252,15 +259,29 @@ class Taxonomy:
         if not fetch or "area" in self._refused:
             return None
         body = self._refusal_safe("area", key)
-        return None if "area" in self._refused else self._store_area(key, body)
+        return None if not body or "area" in self._refused else self._store_area(key, body)
 
     def _refusal_safe(self, what: str, url: str) -> dict:
-        """GET of a grouped search (area, fossil list). A permanent refusal (4xx other than 429, for instance after a
-        change of the GBIF API) must not make every photo fail: noted, and the per-taxon searches take over."""
+        """GET of a grouped search (area, fossil list), one at a time and AREA_INTERVAL apart (heavy searches). A
+        permanent refusal (4xx other than 429, for instance after a change of the GBIF API) must not make every photo
+        fail: noted, and the per-taxon searches take over."""
+        if time.monotonic() < self._busy.get(what, 0):
+            return {}
         try:
-            return self._fetch(url)
+            with self._area_rate:
+                wait = AREA_INTERVAL - (time.monotonic() - self._last_area)
+                if wait > 0:
+                    time.sleep(wait)
+                try:
+                    return self._fetch(url, retries=2)
+                finally:
+                    self._last_area = time.monotonic()
         except httpx.HTTPStatusError as e:
-            if 400 <= e.response.status_code < 500 and e.response.status_code != 429:
+            if e.response.status_code == 429:   # load: per-taxon searches for a while, then the grouped one again
+                log.info("GBIF busy for the %s search: per-taxon searches for %d min", what, GROUPED_COOLDOWN // 60)
+                self._busy[what] = time.monotonic() + GROUPED_COOLDOWN
+                return {}
+            if 400 <= e.response.status_code < 500:
                 log.warning("GBIF refuses the %s search (%d): per-taxon searches instead", what, e.response.status_code)
                 self._refused.add(what)
                 return {}
@@ -354,15 +375,12 @@ class Taxonomy:
             if any(AREA_FACETS.get((self._cached((f"{GBIF}/species/{k}", None, 30 * 86400)) or {}).get("rank") or "") for k in keys):
                 missing = [a for a in (self._area_req(lat, lon, r) for r in (5.0, 1.0)) if not self._area_cached(a)]
 
-                def get(key):
+                for key in missing if "area" not in self._refused else []:   # one at a time (_refusal_safe)
                     try:
-                        return self._fetch(key)
+                        body = self._refusal_safe("area", key)
                     except Exception:   # left to the normal path, which makes it again and reports the error
-                        return None
-                with ThreadPoolExecutor(2) as pool:
-                    bodies = list(pool.map(get, missing)) if "area" not in self._refused else []
-                for key, body in zip(missing, bodies):   # stored here, in the thread that owns the database
-                    if body is not None:
+                        continue
+                    if body and "area" not in self._refused:
                         self._store_area(key, body)
             old = [k for k in keys if self._area_count(k, lat, lon, 5.0, fetch=False) is None]
             self._prefetch([self._near_req(k, lat, lon, 5.0) for k in old])
@@ -535,7 +553,7 @@ class Taxonomy:
                 self._fossils = json.loads(row[0])
             elif fetch and "fossils" not in self._refused:
                 body = self._refusal_safe("fossils", FOSSILS_URL)
-                if "fossils" not in self._refused:
+                if body and "fossils" not in self._refused:
                     self._store_fossils(body)
         return self._fossils if self._fossils is not None and "_incomplete" not in self._fossils else None
 

@@ -36,8 +36,9 @@ fish, plants, fungi and lichens): an [Immich](https://immich.app) library, a loc
 - Everything the dashboard shows (species sheets, names, range maps, articles) is cached locally by the
   sync, so reviewing never waits for the network. The "Sync" button fetches new photos from Immich,
   analyzes them, writes tags and refreshes local data, with a progress bar.
-- Analysis in two phases, each with its own progress bar: the AI part (detection, identification) runs for
-  the whole queue first, then the GPU is released while the geographic check queries GBIF. Presence around
+- Analysis in two phases running at the same time, each with its own progress bar: the AI part (detection,
+  identification) goes through the queue at full GPU speed while the geographic check (GBIF) follows on its
+  results; the GPU is released as soon as the AI part is over. Presence around
   a point costs one GBIF request per 1° area for all species at once (cached 180 days), not one per candidate.
 - Dashboard styled like Immich (same colors, font, sidebar): Photos page with filters (to review,
   auto-confirmed, confirmed by me, rejected, no detection) and a keyboard-driven full-screen viewer;
@@ -205,8 +206,10 @@ Memory: BioCLIP's text embeddings (2.7 GB) are memory-mapped, so the system can 
 pressure, and the text half of the model, useless once those embeddings are computed, is freed. Results
 are bit-for-bit identical. `MEM_LIMIT` (8 GB by default) caps the container.
 
-On GPU, photos are analyzed in batches (8 by default, `GPU_BATCH` or **Settings > Analysis > Compute**: larger is
-faster but uses more GPU memory; all their crops are identified in a single BioCLIP pass), and
+On GPU, photos are analyzed in batches (automatic from the GPU memory, 8 for 12 GB and 16 for 24 GB, halved on
+its own if the memory runs out; or set with `GPU_BATCH` or **Settings > Analysis > Compute**). MegaDetector and
+OWLv2 (half as many at once) process each batch in one pass, and all their crops are identified in a single
+BioCLIP pass; the number of previews downloaded ahead follows the batch size, and
 the previews of the next photos are downloaded while the models work. Results are identical to
 photo-by-photo analysis; on the CPU, batching brings nothing and photos go one at a time.
 
