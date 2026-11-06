@@ -2244,3 +2244,34 @@ def test_pause_while_models_load_frees_them(tmp_path, monkeypatch):
     _time.sleep(2.0)
     assert not w.models_loaded                # chargés puis retirés aussitôt
 
+
+
+def test_local_folder_metadata_found_with_windows_paths(tmp_path, monkeypatch):
+    """Sous Windows, ExifTool renvoie SourceFile avec des / au lieu des \\ : date, appareil et GPS doivent quand même
+    être rattachés à la photo (sinon ni tri par date, ni séries, ni contrôle géographique)."""
+    from taxonero.sources import files
+    from taxonero.sources.local import LocalFolder
+
+    root = tmp_path / "C:\\Photos"          # chemin « Windows » simulé : des \\ dans le nom du dossier
+    (root / "sortie").mkdir(parents=True)
+    (root / "sortie" / "a.jpg").write_bytes(b"x")
+    monkeypatch.setattr(files, "WINDOWS", True)
+
+    class FakeExifTool:
+        def read(self, paths, tags):
+            return [{"SourceFile": p.replace("\\", "/"), "DateTimeOriginal": "2024:05:01 08:30:00", "Make": "OM",
+                     "Model": "OM-1", "GPSLatitude": 45.5, "GPSLongitude": 6.1} for p in paths]
+
+        def close(self):
+            pass
+
+    data = tmp_path / "data"
+    data.mkdir()
+    src = LocalFolder(root, data)
+    src.et = FakeExifTool()
+    src.db.execute("INSERT INTO file VALUES (?, 'sortie/a.jpg', ?, ?, '{}')",   # lue avant la correction : vide
+                   (src.asset_id("sortie/a.jpg"), *(lambda st: (st.st_size, st.st_mtime_ns))((root / "sortie" / "a.jpg").stat())))
+    (a,) = list(src.iter_assets(updated_after="2000-01-01"))   # fichier inchangé, mais relu
+    assert a["exifInfo"]["dateTimeOriginal"] == "2024-05-01T08:30:00"
+    assert (a["exifInfo"]["make"], a["exifInfo"]["latitude"]) == ("OM", 45.5)
+    src.close()

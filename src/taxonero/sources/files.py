@@ -18,6 +18,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import sys
 import threading
 import uuid
 from collections.abc import Iterable
@@ -55,6 +56,14 @@ def _taken(meta: dict) -> str | None:
         if len(v) >= 19 and v[:4].isdigit() and not v.startswith("0000"):
             return f"{v[:4]}-{v[5:7]}-{v[8:10]}T{v[11:19]}"
     return None
+
+
+WINDOWS = sys.platform == "win32"
+
+
+def same_file(path: str) -> str:
+    """Chemin comparable au SourceFile d'ExifTool, qui sous Windows remplace les \\ par des /."""
+    return path.replace("\\", "/") if WINDOWS else path
 
 
 def is_image(name: str) -> bool:
@@ -185,7 +194,10 @@ class FileSource:
         if kind != "IMAGE":
             return
         with self._lock:
-            known = {r["path"]: (r["size"], r["mtime"]) for r in self.db.execute("SELECT path, size, mtime FROM file")}
+            # Métadonnées vides : jamais lues (ExifTool renvoie toujours au moins SourceFile), par exemple sous Windows
+            # avant la 0.1.2 : relues au prochain passage.
+            known = {r["path"]: (r["size"], r["mtime"])
+                     for r in self.db.execute("SELECT path, size, mtime FROM file WHERE meta IS NOT NULL AND meta != '{}'")}
         batch = []
         for key, sz, mt in self._walk():
             if not with_exif:
@@ -201,7 +213,8 @@ class FileSource:
 
     def _read(self, batch: list[tuple]):
         paths = {key: str(self._resolve(key)) for key, _, _ in batch}
-        metas = {m.get("SourceFile"): m for m in self.et.read(list(paths.values()), READ_TAGS)}
+        found = {same_file(m.get("SourceFile") or ""): m for m in self.et.read(list(paths.values()), READ_TAGS)}
+        metas = {p: found[same_file(p)] for p in paths.values() if same_file(p) in found}
         with self._lock:
             for key, sz, mt in batch:
                 self.db.execute("INSERT OR REPLACE INTO file VALUES (?, ?, ?, ?, ?)",
