@@ -9,6 +9,7 @@
     taxonero reanalyze SCOPE       remet en file : failed (abandonnées), outdated (autre version des modèles), all
     taxonero serve                 dashboard + boucle automatique (édition serveur, mot de passe)
     taxonero desktop               édition de bureau : fenêtre locale, sans compte (voir desktop.py)
+    taxonero desktop --fetch-models  télécharge seulement les modèles (installation de bureau)
 """
 
 import argparse
@@ -23,8 +24,10 @@ from .config import Settings
 def main() -> None:
     ap = argparse.ArgumentParser(prog="taxonero")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "scan", "calibrate", "serve", "desktop"):
+    for name in ("check", "scan", "calibrate", "serve"):
         sub.add_parser(name)
+    p = sub.add_parser("desktop")
+    p.add_argument("--fetch-models", action="store_true", help="télécharger les modèles puis quitter")
     p = sub.add_parser("analyze")
     p.add_argument("--limit", type=int)
     p = sub.add_parser("reanalyze", help="remettre des photos dans la file d'analyse (détections relues conservées)")
@@ -41,6 +44,10 @@ def main() -> None:
     s = Settings()
     if args.cmd == "desktop":
         from . import desktop
+        if args.fetch_models:
+            from .worker import fetch_models
+            fetch_models(desktop.prepare(s))
+            return
         desktop.run(s)   # dossier de données propre au bureau, journal branché ensuite
         return
     logbuffer.install(s)

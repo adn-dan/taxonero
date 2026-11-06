@@ -6,8 +6,8 @@ uv (Astral), dans le dossier de l'utilisateur. Un exécutable par GPU serait én
 dépasserait la limite de 2 Go par fichier des versions GitHub.
 
 L'exécutable contient : uv, la roue de taxonero, constraints.txt et ExifTool. Au premier lancement (ou après une
-mise à jour) : Python 3.12 (géré par uv), PyTorch pour le GPU détecté, puis taxonero ; ensuite il lance
-« taxonero desktop » dans cet environnement. L'installation s'affiche dans une petite fenêtre (Tk) ; sans
+mise à jour) : Python 3.12 (géré par uv), PyTorch pour le GPU détecté, taxonero, puis les modèles d'IA (~5 Go,
+une seule fois) ; ensuite il lance « taxonero desktop » dans cet environnement. L'installation s'affiche dans une petite fenêtre (Tk) ; sans
 affichage graphique, dans la console.
 
     TAXONERO_GPU=cpu|cu130|cu128|rocm|xpu|mps|amd-win   impose une variante (sinon détection automatique)
@@ -20,12 +20,14 @@ import locale
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
 PYTHON = "3.12"
+STEPS = 4   # Python, PyTorch, Taxonero, modèles d'IA
 PYTORCH = "https://download.pytorch.org/whl/"
 AMD_WIN = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/"
 # Variante -> (index de paquets, paquets PyTorch). Mêmes versions que l'image Docker.
@@ -129,6 +131,9 @@ TEXT = {   # fenêtre d'installation : français ou anglais selon le système
     "python": ("Python {v}", "Python {v}"),
     "torch": ("PyTorch ({variant}), plusieurs centaines de Mo", "PyTorch ({variant}), several hundred MB"),
     "app": ("Taxonero et ses bibliothèques", "Taxonero and its libraries"),
+    "models": ("Modèles d'IA, environ 5 Go (une seule fois)", "AI models, about 5 GB (only once)"),
+    "models_later": ("Modèles non téléchargés : ils le seront au premier usage.",
+                     "Models not downloaded: they will be at first use."),
     "fallback": ("Échec de l'installation pour {variant} : repli sur le processeur",
                  "Installation for {variant} failed: falling back to the CPU"),
     "failed": ("L'installation a échoué. Détails ci-dessous ; relancer avec --reinstall pour réessayer.",
@@ -145,22 +150,50 @@ def install(home: Path, variant: str, wheel: Path, ui) -> None:
            "NO_COLOR": "1"}
     venv = home / "venv"
 
-    def run(*a):
-        p = subprocess.Popen([uv, *a], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                             encoding="utf-8", errors="replace", **NO_WINDOW)
-        for line in p.stdout:
-            ui.line(line.rstrip())
-        if p.wait():
-            raise subprocess.CalledProcessError(p.returncode, a[0])
+    run = lambda *a: stream([uv, *a], env, ui)
 
-    ui.step(1, 3, tr("python", v=PYTHON))
+    ui.step(1, STEPS, tr("python", v=PYTHON))
     run("venv", "--clear", "--python", PYTHON, str(venv))
     py = str(venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python"))
     index, packages = TORCH[variant]
-    ui.step(2, 3, tr("torch", variant=variant))
+    ui.step(2, STEPS, tr("torch", variant=variant))
     run("pip", "install", "--python", py, *(["--index-url", index] if index else []), *packages)
-    ui.step(3, 3, tr("app"))
+    ui.step(3, STEPS, tr("app"))
     run("pip", "install", "--python", py, "-c", str(bundle() / "constraints.txt"), f"{wheel}[desktop,cpu]")
+
+
+def fetch_models(home: Path, ui) -> None:
+    """Modèles téléchargés pendant l'installation plutôt qu'au premier usage (rien s'ils sont déjà là). Un échec
+    (hors ligne) n'empêche pas de lancer l'application : ils seront téléchargés à la première analyse."""
+    ui.step(STEPS, STEPS, tr("models"))
+    py = str(home / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python"))
+    try:
+        stream([py, "-m", "taxonero", "desktop", "--fetch-models"],
+               {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}, ui)
+    except (OSError, subprocess.CalledProcessError):
+        ui.line(tr("models_later"))
+
+
+def stream(cmd: list[str], env: dict, ui) -> None:
+    """Lance cmd et affiche sa sortie ligne à ligne ; CalledProcessError si elle échoue."""
+    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace", **NO_WINDOW)
+    for line in p.stdout:
+        if line.strip():
+            ui.line(line.rstrip())
+    if p.wait():
+        raise subprocess.CalledProcessError(p.returncode, cmd[0])
+
+
+def keep_exiftool(home: Path) -> Path | None:
+    """ExifTool recopié hors du lanceur : sous Windows, le lanceur (un seul fichier) s'extrait dans un dossier
+    temporaire que PyInstaller efface dès qu'il se ferme, avant même que l'application s'en serve."""
+    src, dest = bundle() / "exiftool", home / "exiftool"
+    if not src.exists():
+        return None
+    shutil.rmtree(dest, ignore_errors=True)
+    shutil.copytree(src, dest)
+    return dest
 
 
 class ConsoleUI:
@@ -192,7 +225,7 @@ class WindowUI:
         self.intro.pack(anchor="w")
         self.label = ttk.Label(frame, font=("TkDefaultFont", 11, "bold"))
         self.label.pack(anchor="w", pady=(12, 4))
-        self.bar = ttk.Progressbar(frame, maximum=3, mode="determinate")
+        self.bar = ttk.Progressbar(frame, maximum=STEPS, mode="determinate")
         self.bar.pack(fill="x")
         self.log = tk.Text(frame, height=10, wrap="none", state="disabled", relief="flat", font=("TkFixedFont", 9))
         self.log.pack(fill="both", expand=True, pady=(12, 0))
@@ -271,11 +304,15 @@ def main() -> None:
                 ui.line(tr("fallback", variant=variant))
                 variant = "cpu"
                 install(home, variant, wheel, ui)
+            keep_exiftool(home)
             marker.write_text(json.dumps({"wheel": stamp, "variant": variant}))
+            fetch_models(home, ui)
         ui.run(work, tr("intro", why=why))
     py = home / "venv" / ("Scripts/pythonw.exe" if sys.platform == "win32" else "bin/python")
     env = {**os.environ}
-    exiftool = bundle() / "exiftool"
+    exiftool = home / "exiftool"
+    if not exiftool.exists():   # installé par une version d'avant
+        keep_exiftool(home)
     if exiftool.exists():
         env["TAXONERO_EXIFTOOL"] = str(exiftool)
     args = [str(py), "-m", "taxonero", "desktop"]

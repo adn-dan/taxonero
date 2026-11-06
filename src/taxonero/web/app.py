@@ -19,7 +19,7 @@ from .. import logbuffer, store
 from ..autoconfirm import auto_threshold, calibrate, group_reliability
 from ..config import Settings
 from ..sources import source_path
-from ..worker import MAX_FAILURES, SKIPPED_NOT, Worker
+from ..worker import MAX_FAILURES, SKIPPED_NOT, Worker, models_on_disk
 from . import identify, review, settings, species
 from .context import fail, make_context
 
@@ -166,6 +166,7 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
             "source": s.source, "source_path": str(path) if (path := source_path(s)) else None,
             "manual": s.detection == "manual",   # détection manuelle : rien n'est « en file »
             "can_pick": picker is not None,      # bureau : bouton « Parcourir… »
+            "models_on_disk": models_on_disk(s),  # sinon ~5 Go à télécharger au premier usage, annoncés
             "langs": list(s.langs),
             # Langues dont l'interface est traduite (catalogues static/i18n) ; les autres : noms d'espèces seulement.
             "ui_langs": sorted(f.stem for f in (STATIC / "i18n").glob("*.json")),

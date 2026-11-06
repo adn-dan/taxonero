@@ -168,7 +168,8 @@ Feedback welcome (GitHub issue, with what **Settings > AI models** shows).
 | Docker Desktop, macOS or Windows | CPU | untested |
 | Desktop, Linux x86 | CPU | tested (Fedora); .deb, .rpm and AppImage: install and first launch checked |
 | Desktop, Linux | NVIDIA, AMD, Intel | untested |
-| Desktop, Windows (x86 and ARM) | CPU, NVIDIA, AMD, Intel | untested |
+| Desktop, Windows x86 | NVIDIA (RTX 4070) | installer and identification checked |
+| Desktop, Windows | CPU, AMD, Intel; ARM | untested |
 | Desktop, macOS (Apple Silicon) | Apple GPU (Metal) | untested |
 
 A GPU that reports itself available but crashes on first use blocks nothing: at startup, a small test
@@ -295,7 +296,7 @@ the YAML `image: taxonero:<variant>` and `pull_policy: never`.
 The same program, on your computer, without Docker or a server. Like ComfyUI Desktop or Invoke, the app is a small
 launcher (~35 MB: uv, the program, ExifTool), the same for every machine of a given system; on first launch it
 installs, in the user folder, the PyTorch build matching the detected GPU (a few minutes, ~2 to 5 GB depending on
-the GPU, progress shown in a small window), then the AI models are downloaded on first use. One executable per GPU would have weighed several GB
+the GPU, progress shown in a small window), then the AI models (~5 GB, in the same window). One executable per GPU would have weighed several GB
 (CUDA PyTorch) and exceeded the 2 GB per-file limit of GitHub releases.
 
 | Detected GPU | Windows | Linux | PyTorch installed |
@@ -323,7 +324,7 @@ Download: the [**Releases**](https://github.com/adn-dan/taxonero/releases) page 
 | any Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, then run it |
 
 The Linux packages were checked (install and first launch on Debian 13, Fedora 44 and Ubuntu 24.04); the Windows
-installer and the macOS app are built automatically but untested (see "Test status"). Uninstalling leaves the data
+installer on Windows 11 x86; the macOS app is built automatically but untested (see "Test status"). Uninstalling leaves the data
 folder below (models, PyTorch: several GB); delete it by hand. Requirements depending on the GPU:
 
 - **NVIDIA**: the usual NVIDIA driver is enough (CUDA comes with PyTorch).

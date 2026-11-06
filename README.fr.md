@@ -170,7 +170,8 @@ Retours bienvenus (issue GitHub, avec ce qu'affiche **Paramètres > Modèles d'I
 | Docker Desktop, macOS ou Windows | processeur | non testé |
 | Bureau, Linux x86 | processeur | testé (Fedora) ; .deb, .rpm et AppImage : installation et premier lancement vérifiés |
 | Bureau, Linux | NVIDIA, AMD, Intel | non testé |
-| Bureau, Windows (x86 et ARM) | processeur, NVIDIA, AMD, Intel | non testé |
+| Bureau, Windows x86 | NVIDIA (RTX 4070) | installeur et identification essayés |
+| Bureau, Windows | processeur, AMD, Intel ; ARM | non testé |
 | Bureau, macOS (Apple Silicon) | GPU Apple (Metal) | non testé |
 
 Un GPU qui se déclare disponible mais plante au premier calcul ne bloque rien : au démarrage, un petit calcul
@@ -299,7 +300,7 @@ Construire l'image sur le NAS à la place : copier les sources, `sudo sh deploy/
 Le même programme, sur ton ordinateur, sans Docker ni serveur. Comme ComfyUI Desktop ou Invoke, l'application est
 un petit lanceur (~35 Mo : uv, le programme, ExifTool), le même pour toutes les machines d'un système ; au premier
 lancement, il installe dans le dossier de l'utilisateur le PyTorch adapté au GPU détecté (quelques minutes,
-~2 à 5 Go selon le GPU, progression dans une petite fenêtre), puis les modèles d'IA se téléchargent au premier usage. Un exécutable par GPU aurait pesé
+~2 à 5 Go selon le GPU, progression dans une petite fenêtre), puis les modèles d'IA (~5 Go, dans la même fenêtre). Un exécutable par GPU aurait pesé
 plusieurs Go (PyTorch CUDA) et dépassé la limite de 2 Go par fichier des versions GitHub.
 
 | GPU détecté | Windows | Linux | PyTorch installé |
@@ -326,8 +327,8 @@ Téléchargement : page [**Releases**](https://github.com/adn-dan/taxonero/relea
 | Fedora, openSUSE | `taxonero-<version>-1.<arch>.rpm` | `sudo dnf install ./taxonero-….rpm` |
 | tout Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, puis le lancer |
 
-Les paquets Linux ont été vérifiés (installation et premier lancement sur Debian 13, Fedora 44 et Ubuntu 24.04) ;
-l'installeur Windows et l'application macOS sont construits automatiquement mais pas essayés (voir « État des
+Les paquets Linux ont été vérifiés (installation et premier lancement sur Debian 13, Fedora 44 et Ubuntu 24.04), l'installeur
+Windows sur Windows 11 x86 ; l'application macOS est construite automatiquement mais pas essayée (voir « État des
 tests »). La désinstallation laisse le dossier de données ci-dessous (modèles, PyTorch : plusieurs Go), à supprimer à
 la main. Prérequis selon le GPU :
 

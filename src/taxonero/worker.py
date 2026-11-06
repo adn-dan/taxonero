@@ -94,6 +94,42 @@ def fetch_model(url: str, dest: Path, sha256: str = "", user_agent: str = "taxon
         tmp.unlink(missing_ok=True)
 
 
+# Plus gros fichier de chaque modèle de Hugging Face (dépôt, fichier, type de dépôt) : présent dans le cache, le
+# modèle est téléchargé. BioCLIP 2 : poids du modèle et empreintes de texte des espèces (jeu TreeOfLife-200M).
+HF_FILES = [("imageomics/bioclip-2", "open_clip_model.safetensors", None),
+            ("imageomics/TreeOfLife-200M", "embeddings/txt_emb_species.npy", "dataset")]
+
+
+def models_on_disk(s: Settings) -> bool:
+    """Modèles déjà téléchargés. Sinon le premier usage commence par ~5 Go de téléchargement, à annoncer."""
+    from huggingface_hub import try_to_load_from_cache
+
+    from .megadetector import VERSION
+    if not (s.detector_path.exists() or (s.data_dir / "models" / f"{VERSION}.weights.pt").exists()):
+        return False
+    files = HF_FILES + ([(s.open_detector_model, "model.safetensors", None)] if s.open_detector else [])
+    return all(isinstance(try_to_load_from_cache(r, f, repo_type=t), str) for r, f, t in files)
+
+
+def fetch_models(s: Settings) -> None:
+    """Télécharge les modèles, chargés sur le processeur puis aussitôt libérés (installation de bureau : tout est
+    prêt au premier usage). Mêmes chemins que l'analyse, donc exactement les fichiers qu'elle demandera."""
+    import gc
+
+    from .megadetector import weights
+    if models_on_disk(s):   # mise à jour de l'application : rien à télécharger
+        return
+    if not s.detector_path.exists():
+        print("MegaDetector", flush=True)
+        weights(s.data_dir / "models", s.user_agent)
+    if s.open_detector:
+        print("OWLv2", flush=True)
+        OpenVocabDetector(s.open_detector_model, device="cpu")
+        gc.collect()
+    print("BioCLIP 2", flush=True)
+    Classifier(device="cpu")
+
+
 def requeue(db: sqlite3.Connection, scope: str) -> int:
     """Remet des photos dans la file d'analyse. failed : abandonnées après échecs ; outdated : analysées
     par une autre version des modèles ; all : toutes. Les détections relues sont conservées."""

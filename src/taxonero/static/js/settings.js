@@ -191,6 +191,7 @@ function sourceCard(m) {
   const browse = STATE.status?.can_pick;   // bureau : boîte de dialogue native, par le serveur
   const opts = m.options.filter(x => x.available || x.id === m.current);
   return `<section class="card" id="srccard"><h2>${t('src.title')}</h2><div class="sub" style="font-size:13px">${t('src.sub')}</div>
+    ${STATE.status?.models_on_disk === false ? `<div class="sub" style="font-size:13px;margin-top:6px">${t('src.models_note')}</div>` : ''}
     <div class="setrow"><div class="lbl"><b>${t('src.kind')}</b>${m.locked ? `<div class="sub">${t('src.locked', { env: '<code>SOURCE</code>' })}</div>` : ''}</div>
       <div class="ctl"><select id="src-kind" class="pill" aria-label="${esc(t('src.kind'))}"${lock}>${opts.map(x => `<option value="${x.id}"${x.id === o.id ? ' selected' : ''}>${esc(t(`src.${x.id}`))}</option>`).join('')}</select></div></div>
     ${o.kind === 'server' ? '' : `<div class="setrow"><div class="lbl"><b>${t(`src.${o.kind}`)}</b><div class="sub">${t(`src.${o.kind}_sub`)}</div></div>

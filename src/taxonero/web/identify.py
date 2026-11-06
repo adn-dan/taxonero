@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from .. import store
 from ..curation import EXCLUDED, cand_json
 from ..pipeline import MAX_SIDE, exif_latlon, open_image
-from ..worker import requeue
+from ..worker import models_on_disk, requeue
 from .context import fail
 
 
@@ -93,4 +93,4 @@ def register(app, c) -> None:
     @app.get("/api/sync/status", dependencies=[Depends(auth)])
     def sync_status():
         return {**w.progress, "analysis_paused": w.analysis_paused, "last_run": json.loads(store.get_state(db, "last_run") or "null"),
-                "models_loaded": w.models_loaded}
+                "models_loaded": w.models_loaded, "models_on_disk": models_on_disk(w.s)}

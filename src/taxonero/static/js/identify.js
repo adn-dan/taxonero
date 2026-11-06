@@ -35,7 +35,8 @@ async function identifyFile(file, place = null) {
   $('#idresult').innerHTML = `<section class="card idphoto waiting"><div class="empty idwait"><span id="idwmsg">${t('det.identifying')}</span><span class="sub" id="idwtime"></span></div>
     <div class="idframe"><img src="${ID.url}" alt=""></div></section>`;
   // Modèles pas encore en mémoire (premier usage depuis le démarrage) : on le dit, l'attente est plus longue.
-  api('/api/sync/status').then(st => { if (req === ID.req && !st.models_loaded && $('#idwmsg')) $('#idwmsg').textContent = t('id.loading_models'); }).catch(() => {});
+  // Pas encore téléchargés (tout premier usage) : plusieurs Go, on le dit aussi.
+  api('/api/sync/status').then(st => { if (req === ID.req && !st.models_loaded && $('#idwmsg')) $('#idwmsg').textContent = t(st.models_on_disk ? 'id.loading_models' : 'id.downloading_models'); }).catch(() => {});
   const t0 = Date.now(), tick = setInterval(() => {
     const el = $('#idwtime'); if (req !== ID.req || !el) return clearInterval(tick);
     el.textContent = new Intl.NumberFormat(LANG, { style: 'unit', unit: 'second', unitDisplay: 'short' }).format(Math.round((Date.now() - t0) / 1000));
