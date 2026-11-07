@@ -1,7 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Icône de Taxonero : la feuille du logo (Material Design Icons « leaf », Apache 2.0) sur la couleur de l'interface. -->
-  <rect x="16" y="16" width="480" height="480" rx="108" fill="#4250af"/>
-  <g transform="translate(88 88) scale(14)">
-    <path fill="#ffffff" d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512">
+  <title>Taxonero</title>
+  <!-- Logo of Taxonero: a tree drawn as circuit traces (the living world, the Tree view, the AI) in the four corners
+       of a detection box (identification). Trunk in the indigo of the Immich wordmark, one branch per colour of the
+       Immich logo, each leaving the trunk in indigo. Source of every other icon file: dev/make_icons.py. -->
+  <defs>
+    <linearGradient id="tx-green" gradientUnits="userSpaceOnUse" x1="32" y1="34" x2="32" y2="17">
+      <stop offset="0.3" stop-color="#4251B0"/><stop offset="0.55" stop-color="#18C249"/></linearGradient>
+    <linearGradient id="tx-blue" gradientUnits="userSpaceOnUse" x1="32" y1="34" x2="22" y2="24">
+      <stop offset="0.15" stop-color="#4251B0"/><stop offset="0.47" stop-color="#1E83F7"/></linearGradient>
+    <linearGradient id="tx-yellow" gradientUnits="userSpaceOnUse" x1="32" y1="34" x2="42" y2="24">
+      <stop offset="0.15" stop-color="#4251B0"/><stop offset="0.47" stop-color="#FFB400"/></linearGradient>
+    <linearGradient id="tx-red" gradientUnits="userSpaceOnUse" x1="32" y1="43" x2="25" y2="36">
+      <stop offset="0.15" stop-color="#4251B0"/><stop offset="0.47" stop-color="#FA2921"/></linearGradient>
+    <linearGradient id="tx-pink" gradientUnits="userSpaceOnUse" x1="32" y1="43" x2="39" y2="36">
+      <stop offset="0.15" stop-color="#4251B0"/><stop offset="0.47" stop-color="#ED79B5"/></linearGradient>
+  </defs>
+  <!-- White tile: readable on light and dark backgrounds -->
+  <rect width="64" height="64" rx="14" fill="#ffffff"/>
+  <!-- Detection box corners -->
+  <path d="M7 17V7h10M47 7h10v10M7 47v10h10M57 47v10H47" fill="none" stroke="#4251B0" stroke-width="3"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Branches, then the trunk over their start -->
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 34V14" stroke="url(#tx-green)"/>
+    <path d="M32 34l-10-10v-8" stroke="url(#tx-blue)"/>
+    <path d="M32 34l10-10v-8" stroke="url(#tx-yellow)"/>
+    <path d="M32 43l-7-7h-9" stroke="url(#tx-red)"/>
+    <path d="M32 43l7-7h9" stroke="url(#tx-pink)"/>
+    <path d="M32 54V34" stroke="#4251B0"/>
   </g>
+  <!-- Pads with their hole at the end of each branch -->
+  <g stroke="#ffffff" stroke-width="1.6">
+    <circle cx="32" cy="12" r="3.6" fill="#18C249"/>
+    <circle cx="22" cy="14" r="3.6" fill="#1E83F7"/>
+    <circle cx="42" cy="14" r="3.6" fill="#FFB400"/>
+    <circle cx="14" cy="36" r="3.6" fill="#FA2921"/>
+    <circle cx="50" cy="36" r="3.6" fill="#ED79B5"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="32" cy="12" r="1.3"/><circle cx="22" cy="14" r="1.3"/><circle cx="42" cy="14" r="1.3"/>
+    <circle cx="14" cy="36" r="1.3"/><circle cx="50" cy="36" r="1.3"/>
+  </g>
+  <!-- Root pad -->
+  <rect x="27" y="53" width="10" height="4" rx="1.5" fill="#4251B0"/>
 </svg>

@@ -43,7 +43,7 @@ svg.ic { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .navback span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .navback span:empty { display: none; }
 #b-undo[hidden], #b-pause[hidden] { display: none; }
 #b-pause.on { background: var(--primary-soft); color: var(--primary); }
-.logo svg { width: 30px; height: 30px; fill: var(--primary); }
+.logo img { width: 32px; height: 32px; border-radius: 7px; }   /* white tile of the logo: also on the dark theme */
 .search { flex: 1; min-width: 0; max-width: 640px; display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: 999px;
           padding: 0 16px; height: 44px; color: var(--muted); }
 .search input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: 15px; }

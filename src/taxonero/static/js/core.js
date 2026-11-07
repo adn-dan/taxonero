@@ -102,13 +102,13 @@ async function loadStatus() {
   const pending = (await api('/api/photos/counts')).pending || 0;   // photos to review (like the filter)
   $('#nb-pending').hidden = !pending; $('#nb-pending').textContent = pending;
   if (!s.immich_configured) {
-    $('#server').innerHTML = `<div><span class="dot bad"></span><b>Immich</b></div><div><a href="#settings">${t('server.not_configured')}</a></div>`;
+    $('#server').innerHTML = `<div><span class="dot bad"></span><b>Immich</b> <span class="sub">· Taxonero ${esc(s.version)}</span></div><div><a href="#settings">${t('server.not_configured')}</a></div>`;
     return;
   }
   const level = !s.writable ? 'bad' : (s.dry_run || s.warnings.length) ? 'warn' : '';
   const name = s.source === 'immich' ? `Immich ${esc(s.immich_version || '?')}` : `${srcTitle(s.source)}</b> <code>${esc(s.source_path)}</code><b>`;
   $('#server').onclick = ev => { if (ev.target.closest('[data-settab]')) { const a = ev.target.closest('[data-settab]').dataset; openSetTab(a.settab, a.anchor); } };
-  $('#server').innerHTML = `<div><span class="dot ${level}"></span><b>${name}</b></div>
+  $('#server').innerHTML = `<div><span class="dot ${level}"></span><b>${name}</b> <span class="sub">· Taxonero ${esc(s.version)}</span></div>
     <div>${s.writable ? t('server.compatible') : t('server.readonly')} · ${s.dry_run ? t('server.dry_run') : s.writes_paused ? `<a href="#settings" data-settab="source">${t('server.paused')}</a>` : t('server.writing')}</div>
     <div>${s.manual ? `<a href="#settings">${t('server.manual')}</a>` : `<a href="#photos?filter=all">${t('server.analyzed', { done: s.analyzed, n: s.assets })}</a>`}</div>
     ${s.skipped ? `<div><a href="#settings">${t('server.skipped', { n: s.skipped })}</a></div>` : ''}

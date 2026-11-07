@@ -15,7 +15,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from .. import logbuffer, store
+from .. import __version__, logbuffer, store
 from ..autoconfirm import auto_threshold, calibrate, group_reliability
 from ..config import Settings
 from ..sources import source_path
@@ -166,6 +166,7 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
             "source": s.source, "source_path": str(path) if (path := source_path(s)) else None,
             "manual": s.detection == "manual",   # manual detection: nothing is "queued"
             "can_pick": picker is not None,      # desktop: "Browse…" button
+            "version": __version__,              # of Taxonero, shown next to the source
             "models_on_disk": models_on_disk(s),  # otherwise ~5 GB to download at first use, announced
             "langs": list(s.langs),
             # Languages whose interface is translated (static/i18n catalogues); the others: species names only.

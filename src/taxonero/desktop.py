@@ -112,7 +112,9 @@ def _window(url: str, storage: Path, api: "_Api") -> bool:
         # with pip without build tools.
         if sys.platform.startswith("linux"):
             _fix_qt_permissions(storage)
-        webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False, storage_path=str(storage))   # returns on close
+        # icon: window and task bar on Linux (Windows and macOS take the one of the executable)
+        webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False, storage_path=str(storage),
+                      icon=str(Path(__file__).parent / "static" / "apple-touch-icon.png"))   # returns on close
         return True
     except Exception as e:   # ImportError, or WebViewException (no rendering engine)
         log.error("the application window cannot be opened", exc_info=e)

@@ -1,3 +1,5 @@
+<p align="center"><img src="packaging/icons/taxonero.svg" width="128" alt="Logo de Taxonero"></p>
+
 # Taxonero
 
 [English](README.md) · **Français**
@@ -175,9 +177,9 @@ Retours bienvenus (issue GitHub, avec ce qu'affiche **Paramètres > Modèles d'I
 | Docker Desktop, macOS ou Windows | processeur | non testé |
 | Bureau, Linux x86 | processeur | testé (Fedora) ; .deb, .rpm et AppImage : installation et premier lancement vérifiés |
 | Bureau, Linux | NVIDIA, AMD, Intel | non testé |
-| Bureau, Windows x86 | NVIDIA (RTX 4070) | installeur et identification essayés |
+| Bureau, Windows 11 x86 | NVIDIA (RTX 4070) | testé, fonctionne |
 | Bureau, Windows | processeur, AMD, Intel ; ARM | non testé |
-| Bureau, macOS (Apple Silicon) | GPU Apple (Metal) | non testé |
+| Bureau, macOS (Apple Silicon) | GPU Apple (Metal) | fonctionne sur un Mac M4 d'après un utilisateur (pas vérifié par moi) |
 
 Un GPU qui se déclare disponible mais plante au premier calcul ne bloque rien : au démarrage, un petit calcul
 d'essai tourne dans un processus séparé, et s'il échoue l'analyse se fait sur le processeur (raison affichée dans
@@ -302,6 +304,15 @@ l'image à chaque déploiement (`pull_policy: always`), donc la dernière versio
 Construire l'image sur le NAS à la place : copier les sources, `sudo sh deploy/truenas/build.sh
 /mnt/POOL/apps/taxonero/data`, puis dans le YAML `image: taxonero:<variante>` et `pull_policy: never`.
 
+Icône dans la liste des apps : une app personnalisée reçoit une icône générique. Comme l'indique le
+[guide Jellyfin pour TrueNAS](https://jellyfin.org/docs/general/installation/advanced/truenas) (TrueNAS 24.10 et
+plus récent), ajouter une ligne `icon` à ses métadonnées dans le shell de TrueNAS (app nommée `taxonero`), puis
+**Edit** > *Save* :
+
+```sh
+sudo sed -i -e '/^  icon:/d' -e '/^metadata:/a\  icon: https://raw.githubusercontent.com/adn-dan/taxonero/main/packaging/icons/taxonero.png' /mnt/.ix-apps/app_configs/taxonero/metadata.yaml
+```
+
 ### Édition de bureau (Windows, macOS, Linux ; x86 et ARM)
 
 Le même programme, sur ton ordinateur, sans Docker ni serveur. Comme ComfyUI Desktop ou Invoke, l'application est
@@ -335,8 +346,8 @@ Téléchargement : page [**Releases**](https://github.com/adn-dan/taxonero/relea
 | tout Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, puis le lancer |
 
 Les paquets Linux ont été vérifiés (installation et premier lancement sur Debian 13, Fedora 44 et Ubuntu 24.04), l'installeur
-Windows sur Windows 11 x86 ; l'application macOS est construite automatiquement mais pas essayée (voir « État des
-tests »). La désinstallation laisse le dossier de données ci-dessous (modèles, PyTorch : plusieurs Go), à supprimer à
+Windows sur Windows 11 x86, et l'application macOS fonctionne sur un Mac M4 d'après un utilisateur (voir « État
+des tests »). La désinstallation laisse le dossier de données ci-dessous (modèles, PyTorch : plusieurs Go), à supprimer à
 la main. Prérequis selon le GPU :
 
 - **NVIDIA** : le pilote NVIDIA habituel suffit (CUDA est installé avec PyTorch).

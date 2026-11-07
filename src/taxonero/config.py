@@ -7,6 +7,8 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from . import __version__
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -83,7 +85,7 @@ class Settings(BaseSettings):
         rest = [x.strip() for x in self.names_langs.split(",") if x.strip() and x.strip() != self.names_lang]
         return (self.names_lang, *rest)
     write_description: bool = True
-    user_agent: str = "taxonero/0.1 (https://github.com/adn-dan/taxonero)"
+    user_agent: str = f"taxonero/{__version__} (https://github.com/adn-dan/taxonero)"
 
     # Auto-confirmation: 'rule' (default), 'calibrated', 'fixed' or 'off'.
     #   rule       : confidence >= AUTO_CONFIRM_THRESHOLD, species observed nearby (green badge) and

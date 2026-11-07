@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="512" height="512">
+  <title>Taxonero</title>
+  <!-- Small sizes (browser tab, 16 to 32 px): the tree of taxonero.svg alone, thick traces and plain pads, without the
+       detection corners or the holes, which would only blur at this size. -->
+  <rect width="16" height="16" rx="3.5" fill="#ffffff"/>
+  <g fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 8.6V3.6" stroke="#18C249"/>
+    <path d="M8 8.6 5.4 6V3.9" stroke="#1E83F7"/>
+    <path d="M8 8.6 10.6 6V3.9" stroke="#FFB400"/>
+    <path d="M8 10.8 6.2 9H3.6" stroke="#FA2921"/>
+    <path d="M8 10.8 9.8 9h2.6" stroke="#ED79B5"/>
+    <path d="M8 14V8.6" stroke="#4251B0"/>
+  </g>
+  <g>
+    <circle cx="8" cy="3" r="1.4" fill="#18C249"/>
+    <circle cx="5.4" cy="3.4" r="1.4" fill="#1E83F7"/>
+    <circle cx="10.6" cy="3.4" r="1.4" fill="#FFB400"/>
+    <circle cx="3.1" cy="9" r="1.4" fill="#FA2921"/>
+    <circle cx="12.9" cy="9" r="1.4" fill="#ED79B5"/>
+  </g>
+</svg>

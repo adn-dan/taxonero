@@ -1,3 +1,5 @@
+<p align="center"><img src="packaging/icons/taxonero.svg" width="128" alt="Taxonero logo"></p>
+
 # Taxonero
 
 **English** · [Français](README.fr.md)
@@ -172,9 +174,9 @@ Feedback welcome (GitHub issue, with what **Settings > AI models** shows).
 | Docker Desktop, macOS or Windows | CPU | untested |
 | Desktop, Linux x86 | CPU | tested (Fedora); .deb, .rpm and AppImage: install and first launch checked |
 | Desktop, Linux | NVIDIA, AMD, Intel | untested |
-| Desktop, Windows x86 | NVIDIA (RTX 4070) | installer and identification checked |
+| Desktop, Windows 11 x86 | NVIDIA (RTX 4070) | tested, works |
 | Desktop, Windows | CPU, AMD, Intel; ARM | untested |
-| Desktop, macOS (Apple Silicon) | Apple GPU (Metal) | untested |
+| Desktop, macOS (Apple Silicon) | Apple GPU (Metal) | reported working on a Mac M4 (user feedback, not checked by me) |
 
 A GPU that reports itself available but crashes on first use blocks nothing: at startup, a small test
 computation runs in a separate process, and if it fails the analysis runs on the CPU (reason shown in
@@ -297,6 +299,14 @@ pulled again at each deployment (`pull_policy: always`), hence the latest `lates
 on the NAS instead: copy the sources, `sudo sh deploy/truenas/build.sh /mnt/POOL/apps/taxonero/data`, then in
 the YAML `image: taxonero:<variant>` and `pull_policy: never`.
 
+Icon in the app list: a custom app gets a generic icon. As described in the
+[Jellyfin guide for TrueNAS](https://jellyfin.org/docs/general/installation/advanced/truenas) (TrueNAS 24.10 and
+later), add an `icon` line to its metadata in the TrueNAS shell (app named `taxonero`), then **Edit** > *Save*:
+
+```sh
+sudo sed -i -e '/^  icon:/d' -e '/^metadata:/a\  icon: https://raw.githubusercontent.com/adn-dan/taxonero/main/packaging/icons/taxonero.png' /mnt/.ix-apps/app_configs/taxonero/metadata.yaml
+```
+
 ### Desktop edition (Windows, macOS, Linux; x86 and ARM)
 
 The same program, on your computer, without Docker or a server. Like ComfyUI Desktop or Invoke, the app is a small
@@ -330,7 +340,7 @@ Download: the [**Releases**](https://github.com/adn-dan/taxonero/releases) page 
 | any Linux | `Taxonero-<version>-<arch>.AppImage` | `chmod +x`, then run it |
 
 The Linux packages were checked (install and first launch on Debian 13, Fedora 44 and Ubuntu 24.04); the Windows
-installer on Windows 11 x86; the macOS app is built automatically but untested (see "Test status"). Uninstalling leaves the data
+installer on Windows 11 x86, and the macOS app was reported to work on a Mac M4 (see "Test status"). Uninstalling leaves the data
 folder below (models, PyTorch: several GB); delete it by hand. Requirements depending on the GPU:
 
 - **NVIDIA**: the usual NVIDIA driver is enough (CUDA comes with PyTorch).

@@ -141,6 +141,9 @@ def test_settings_immich_connection(page):
     page.goto(page.url.split("#")[0] + "#settings")
     page.wait_for_selector("#immcard")
     assert page.is_disabled("#imm-key")                          # key from .env: not editable here
+    from taxonero import __version__
+    server = page.locator("#server").text_content()               # sidebar: source and version of Taxonero
+    assert "Immich" in server and f"Taxonero {__version__}" in server
     page.click("#imm-test")
     page.wait_for_selector("#imm-state .immst.ok")
     assert page.locator("#imm-perms code.perm.off").count() == 0
@@ -912,3 +915,11 @@ def test_two_phase_progress_bars(page, dev_app):
         _no_overflow(page)
     finally:
         w.progress.update(running=False, step=None, phases=None, active=None, done=0, total=0)
+
+def test_logo_and_tab_icon_load(page):
+    """Logo in the top bar and browser tab icon (dev/make_icons.py): served, and drawn by the browser."""
+    page.wait_for_function("document.querySelector('.logo img').complete")
+    assert page.evaluate("document.querySelector('.logo img').naturalWidth") > 0
+    for href in page.evaluate("[...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map(l => l.href)"):
+        assert page.request.get(href).ok, href
+    assert not page.errors, page.errors
