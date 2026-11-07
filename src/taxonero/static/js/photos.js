@@ -279,8 +279,11 @@ function tileStatus(a) {
   if (pending) out.push(`<span class="pending">${t('tile.pending', { n: pending })}</span>`);
   if (ok.length) out.push(`<span class="ok">✓ ${ok.some(d => d.confirmed_by === 'user') ? t('tile.confirmed') : t('tile.auto')}</span>`);
   if (!live.length && a.detections.length) out.push(`<span class="rej">${t('tile.rejected')}</span>`);
-  if (!a.analyzed_at && !STATE.status?.manual) out.push(a.fail_count >= (STATE.status?.max_failures ?? 3)
-    ? `<span class="rej" title="${esc(a.last_error || '')}">${t('tile.failed')}</span>` : `<span>${t('tile.queued')}</span>`);
+  // Not analysed: left out by a setting (reason, the setting in the tooltip), given up after failures, or queued.
+  if (!a.analyzed_at && !STATE.status?.manual) out.push(a.skipped
+    ? `<span title="${esc(t('tile.skipped_hint'))}">${t(`tile.skipped_${a.skipped}`)}</span>`
+    : a.fail_count >= (STATE.status?.max_failures ?? 3)
+      ? `<span class="rej" title="${esc(a.last_error || '')}">${t('tile.failed')}</span>` : `<span>${t('tile.queued')}</span>`);
   return out.join('');
 }
 

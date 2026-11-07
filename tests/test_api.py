@@ -31,6 +31,19 @@ def test_all_filter_includes_unanalysed(client):
     assert c.get("/api/photos/counts").json()["all"] == db.execute("SELECT count(*) FROM asset").fetchone()[0]
 
 
+def test_skipped_photo_says_why_instead_of_waiting(client, dev_app):
+    """A photo left out by a setting (people, RAW with a JPG, video) is not "waiting for analysis": its reason."""
+    c, db = client
+    s, _ = dev_app
+    aid = db.execute("SELECT asset_id FROM asset WHERE kind IS NOT 'VIDEO' AND twin_of IS NULL LIMIT 1").fetchone()[0]
+    db.execute("UPDATE asset SET analyzed_at = NULL, people = 2 WHERE asset_id = ?", (aid,))
+    db.commit()
+    s.skip_people = True
+    assert c.get(f"/api/assets/{aid}").json()["skipped"] == "people"
+    s.skip_people = False
+    assert c.get(f"/api/assets/{aid}").json()["skipped"] is None   # setting off: it is analysed, so waiting
+
+
 def test_delete_reframe_and_exact_undo(client):
     c, db = client
     det = dict(db.execute("SELECT * FROM detection WHERE status = 'confirmed' AND confirmed_by = 'auto' LIMIT 1").fetchone())

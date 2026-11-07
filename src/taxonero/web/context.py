@@ -185,6 +185,11 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
         a["detections"] = [det_json(r, threshold) for r in db.execute(
             "SELECT * FROM detection WHERE asset_id = ? AND status != 'deleted' ORDER BY status = 'rejected', w * h DESC", (asset_id,))]
         a["immich_link"] = source_link(asset_id)
+        # Why a photo is left out of the analysis by the settings (same rule as worker.SKIPPED_NOT), None otherwise:
+        # shown instead of "waiting for analysis", which it is not.
+        a["skipped"] = ("video" if a.get("kind") == "VIDEO" and not s.analyze_videos
+                        else "raw_twin" if s.skip_raw_twins and a.get("twin_of")
+                        else "people" if s.skip_people and (a.get("people") or 0) > 0 else None)
         return a
 
     def set_status(det_id: int, status: str, key: int | None = None, rank: str | None = None):
