@@ -3076,3 +3076,25 @@ def test_backups_keep_no_api_key_of_added_accounts(tmp_path, monkeypatch):
     with pytest.raises(KeyError):
         w.set_source_key("nope", "good")
     w.client.close()
+
+
+def test_migration_adds_a_column_named_in_an_old_comment(tmp_path):
+    """A database of 0.2.x: its asset table has no 'source' column, but a comment of its CREATE text says "source"
+    (0.3.0 skipped the column and stopped at start)."""
+    import sqlite3
+
+    from taxonero import store
+    body = store.SCHEMA.split("CREATE TABLE IF NOT EXISTS asset (", 1)[1].split(");", 1)[0]
+    lines = [ln for ln in body.splitlines() if not ln.strip().startswith(("source ", "series_id "))]
+    old = "CREATE TABLE asset (\n    -- a GPS of the source replaces them" + "\n".join(lines) + "\n    dropped INTEGER\n);"
+    path = tmp_path / "taxonero.sqlite"
+    raw = sqlite3.connect(path)
+    raw.executescript(old)
+    raw.execute("INSERT INTO asset (asset_id) VALUES ('a')")
+    raw.commit()
+    raw.close()
+    db = store.connect(path)
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(asset)")}
+    assert {"source", "series_id"} <= cols
+    assert db.execute("SELECT source FROM asset WHERE asset_id = 'a'").fetchone()["source"] == ""
+    assert {"asset_source", "asset_series"} <= {r["name"] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}

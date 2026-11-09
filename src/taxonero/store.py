@@ -161,14 +161,14 @@ def connect(path: str | Path) -> sqlite3.Connection:
 def _migrate(db: sqlite3.Connection) -> None:
     """Add the columns that appeared since the database was created (never any removal)."""
     for table in ("asset", "detection"):
+        # The real columns only: the CREATE text of an older database may name a column in a comment.
         have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
-        create = db.execute("SELECT sql FROM sqlite_master WHERE name = ?", (table,)).fetchone()["sql"]
         for line in SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table} (", 1)[1].split(");", 1)[0].splitlines():
             line = line.split("--", 1)[0].strip().rstrip(",")
             if not line or line.split()[0].upper() in ("PRIMARY", "UNIQUE", "FOREIGN"):
                 continue
             col = line.split()[0]
-            if col not in have and col not in create:
+            if col not in have:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {line.replace('NOT NULL', '')}")
     # Indexes on columns added by a migration: created after it (an older database does not have them yet
     # when the schema is applied).
