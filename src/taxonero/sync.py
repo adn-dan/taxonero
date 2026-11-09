@@ -109,8 +109,13 @@ def _epoch(iso: str | None) -> float:
 class Syncer:
     def __init__(self, db: sqlite3.Connection, client: ImmichClient, tag_root: str = "Nature", lang: str = "fr",
                  write_description: bool = True, write_gap: float = WRITE_GAP, settle_seconds: float = SETTLE_SECONDS,
-                 verify_rounds: int = 2, checkpoint=None, progress=None):
+                 verify_rounds: int = 2, checkpoint=None, progress=None, source: str = ""):
         self.db, self.client = db, client
+        # Source written to ('' the main one): this Syncer only handles its photos and its records. Those of an added
+        # source have their own kinds ("tag@<id>"…): tag ids are those of each Immich account, a file source names its
+        # tags by their value (the same in two folders), and a version without several sources ignores them.
+        self.source = source
+        self.k = {k: k if not source else f"{k}@{source}" for k in ("tag", "tag_asset", "description")}
         # Called between two photos (nothing half written): cycle stop requested by the dashboard (worker._checkpoint).
         # A photo not synchronised yet is at the next cycle (asset_sync not updated).
         self.checkpoint = checkpoint or (lambda: None)
@@ -124,7 +129,7 @@ class Syncer:
         self.missing: list[str] = []   # photos not found in Immich (deleted) during this pass
         self.remaining = 0             # uninstall: photos not cleaned up yet
 
-    # -- utilitaires ---------------------------------------------------------
+    # -- helpers -------------------------------------------------------------
 
     def _tags(self) -> dict[str, str]:
         if self._tag_ids is None:
@@ -151,6 +156,7 @@ class Syncer:
     def _record(self, kind: str, immich_id: str, asset_id: str, value: str) -> None:
         """Record a tag (or a tag set on a photo). A tag deleted by hand in Immich then created again by the tool
         changes id: the old record of the same value is replaced, otherwise the removal would target a vanished id."""
+        kind = self.k[kind]
         self.db.execute("DELETE FROM written WHERE kind = ? AND asset_id = ? AND value = ? AND immich_id != ?",
                         (kind, asset_id, value, immich_id))
         store.record_written(self.db, kind, immich_id, asset_id, value)
@@ -162,11 +168,11 @@ class Syncer:
         """{value: id} of the tags created by the tool, according to Immich (existing: {value: id}). Records of a tag that
         no longer exists in Immich (deleted by hand) are erased; they no longer match anything."""
         ours: dict[str, str] = {}
-        for r in self.db.execute("SELECT immich_id, value FROM written WHERE kind = 'tag'").fetchall():
+        for r in self.db.execute("SELECT immich_id, value FROM written WHERE kind = ?", (self.k["tag"],)).fetchall():
             if existing.get(r["value"]) == r["immich_id"]:
                 ours[r["value"]] = r["immich_id"]
             elif not self.client.dry_run:
-                self.db.execute("DELETE FROM written WHERE kind = 'tag' AND immich_id = ?", (r["immich_id"],))
+                self.db.execute("DELETE FROM written WHERE kind = ? AND immich_id = ?", (self.k["tag"], r["immich_id"]))
         self.db.commit()   # before the calls to Immich that follow (see _record)
         return ours
 
@@ -200,7 +206,7 @@ class Syncer:
         want = {tag_value(t, self.tag_root, self.lang) for t in taxa}
         actual = {t["value"]: t["id"] for t in asset.get("tags", [])}
         ours = {r["value"]: r["immich_id"] for r in self.db.execute(
-            "SELECT immich_id, value FROM written WHERE kind = 'tag_asset' AND asset_id = ?", (aid,))}
+            "SELECT immich_id, value FROM written WHERE kind = ? AND asset_id = ?", (self.k["tag_asset"], aid))}
         add = sorted(want - actual.keys())
         remove = {v: actual[v] for v in ours if v not in want and v in actual}
         return add, remove, taxa
@@ -226,7 +232,7 @@ class Syncer:
         for v, tid in remove.items():
             self._write(aid, self.client.untag_assets, tid, [aid])
             if not self.client.dry_run:
-                self.db.execute("DELETE FROM written WHERE kind = 'tag_asset' AND immich_id = ? AND asset_id = ?", (tid, aid))
+                self.db.execute("DELETE FROM written WHERE kind = ? AND immich_id = ? AND asset_id = ?", (self.k["tag_asset"], tid, aid))
                 self.db.commit()   # before the next call to Immich (see _record)
             stats.tags_removed += 1
         self.db.commit()
@@ -239,7 +245,7 @@ class Syncer:
         if new.strip() != current.strip():
             self._write(aid, self.client.set_description, aid, new)
             if not self.client.dry_run:
-                store.record_written(self.db, "description", aid, aid, json.dumps(bool(taxa)))
+                store.record_written(self.db, self.k["description"], aid, aid, json.dumps(bool(taxa)))
                 self.db.commit()
             stats.descriptions += 1
 
@@ -249,8 +255,9 @@ class Syncer:
         ids = [r["asset_id"] for r in self.db.execute(
             "SELECT c.asset_id FROM (SELECT asset_id FROM detection WHERE status = 'confirmed' "
             "  UNION SELECT r.asset_id FROM asset r JOIN detection d ON d.asset_id = r.twin_of WHERE d.status = 'confirmed' "
-            "  UNION SELECT asset_id FROM written WHERE kind IN ('tag_asset', 'description')) c "
-            "LEFT JOIN asset a ON a.asset_id = c.asset_id WHERE a.missing_at IS NULL")]
+            "  UNION SELECT asset_id FROM written WHERE kind IN (?, ?)) c "
+            "LEFT JOIN asset a ON a.asset_id = c.asset_id WHERE a.missing_at IS NULL AND COALESCE(a.source, '') = ?",
+            (self.k["tag_asset"], self.k["description"], self.source))]
         if full:
             return ids
         done = {r["asset_id"]: r["wanted"] for r in self.db.execute("SELECT asset_id, wanted FROM asset_sync")}
@@ -365,7 +372,7 @@ class Syncer:
         existing = self._tags()
         ours = self._ours(existing)
         used: set[str] = set()
-        for r in self.db.execute("SELECT DISTINCT value FROM written WHERE kind = 'tag_asset'"):
+        for r in self.db.execute("SELECT DISTINCT value FROM written WHERE kind = ?", (self.k["tag_asset"],)):
             v = r["value"] or ""
             used.update(v.rsplit("/", i)[0] for i in range(v.count("/") + 1))
         unused = [v for v in ours if v not in used]
@@ -382,7 +389,7 @@ class Syncer:
                 log.warning("tag %s not deleted", value, exc_info=True)
                 continue
             existing.pop(value, None)
-            self.db.execute("DELETE FROM written WHERE kind = 'tag' AND immich_id = ?", (ours[value],))
+            self.db.execute("DELETE FROM written WHERE kind = ? AND immich_id = ?", (self.k["tag"], ours[value]))
             self.db.commit()   # before the next call to Immich (see _record)
             n += 1
         self.db.commit()
@@ -393,7 +400,8 @@ class Syncer:
     def same_server(self) -> bool:
         """False if no recorded tag exists on this server: another Immich or another account. Immich would answer "not
         found" everywhere, which would look like deleted photos and erase the records without removing anything."""
-        ids = {r["immich_id"] for r in self.db.execute("SELECT immich_id FROM written WHERE kind IN ('tag', 'tag_asset')")}
+        ids = {r["immich_id"] for r in self.db.execute("SELECT immich_id FROM written WHERE kind IN (?, ?)",
+                                                       (self.k["tag"], self.k["tag_asset"]))}
         self._tag_ids = None
         return not ids or bool(ids & set(self._tags().values()))
 
@@ -426,9 +434,9 @@ class Syncer:
             store.set_state(self.db, store.WRITES_PAUSED, "1")
             self.db.commit()
         tags: dict[str, set[str]] = {}
-        for r in self.db.execute("SELECT immich_id, asset_id FROM written WHERE kind = 'tag_asset'").fetchall():
+        for r in self.db.execute("SELECT immich_id, asset_id FROM written WHERE kind = ?", (self.k["tag_asset"],)).fetchall():
             tags.setdefault(r["asset_id"], set()).add(r["immich_id"])
-        described = {r["asset_id"] for r in self.db.execute("SELECT asset_id FROM written WHERE kind = 'description'").fetchall()}
+        described = {r["asset_id"] for r in self.db.execute("SELECT asset_id FROM written WHERE kind = ?", (self.k["description"],)).fetchall()}
         pending = sorted(set(tags) | described)
         failures = 0
         for _ in range(UNINSTALL_ROUNDS):
@@ -448,7 +456,8 @@ class Syncer:
                 if wrote:
                     again.append(aid)
                 elif not dry:
-                    self.db.execute("DELETE FROM written WHERE kind IN ('tag_asset', 'description') AND asset_id = ?", (aid,))
+                    self.db.execute("DELETE FROM written WHERE kind IN (?, ?) AND asset_id = ?",
+                                    (self.k["tag_asset"], self.k["description"], aid))
                     self.db.execute("DELETE FROM asset_sync WHERE asset_id = ?", (aid,))   # to be written again if resumed
                     self.db.commit()
             pending = again
@@ -456,7 +465,8 @@ class Syncer:
                 break
             time.sleep(self.write_gap * 2)
         if not dry:
-            self.remaining = self.db.execute("SELECT count(DISTINCT asset_id) FROM written WHERE kind IN ('tag_asset', 'description')").fetchone()[0]
+            self.remaining = self.db.execute("SELECT count(DISTINCT asset_id) FROM written WHERE kind IN (?, ?)",
+                                             (self.k["tag_asset"], self.k["description"])).fetchone()[0]
             if self.remaining:
                 log.warning("%d photo(s) not cleaned up yet: tags kept, run the removal again", self.remaining)
                 return stats
@@ -466,7 +476,8 @@ class Syncer:
         # sub-tags with their parent).
         self._tag_ids = None   # read again: the user may have created some in the meantime
         if self.client.dry_run:
-            ours = {r["value"]: r["immich_id"] for r in self.db.execute("SELECT immich_id, value FROM written WHERE kind = 'tag'")}
+            ours = {r["value"]: r["immich_id"] for r in self.db.execute("SELECT immich_id, value FROM written WHERE kind = ?",
+                                                                        (self.k["tag"],))}
             all_values = set(ours)
         else:   # records of tags deleted by hand in Immich erased by _ours
             existing = self._tags()
@@ -483,9 +494,9 @@ class Syncer:
                 continue
             all_values.discard(value)
             stats.tags_deleted += 1
-            done.append(("tag", ours[value], ""))
+            done.append((self.k["tag"], ours[value], ""))
         if not self.client.dry_run:
             self.db.executemany("DELETE FROM written WHERE kind = ? AND immich_id = ? AND asset_id = ?", done)
-            self.db.execute("DELETE FROM asset_sync")
+            self.db.execute("DELETE FROM asset_sync WHERE asset_id IN (SELECT asset_id FROM asset WHERE source = ?)", (self.source,))
             self.db.commit()
         return stats

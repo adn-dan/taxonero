@@ -23,7 +23,11 @@ if sys.platform == "darwin":
     coll = COLLECT(exe, a.binaries, a.datas, name="taxonero")
     app = BUNDLE(coll, name="Taxonero.app", icon=str(ICONS / "taxonero.icns"), bundle_identifier="io.github.adn-dan.taxonero",
                  version=VERSION, info_plist={"CFBundleDisplayName": "Taxonero", "CFBundleShortVersionString": VERSION,
-                                              "NSHighResolutionCapable": True})
+                                              "NSHighResolutionCapable": True,
+                                              # Apple Photos source: keywords and description written by Photos, through
+                                              # AppleScript; macOS shows this reason when it asks for the permission.
+                                              "NSAppleEventsUsageDescription":
+                                                  "Taxonero writes the species found as keywords and description in Photos."})
 else:
     exe = EXE(pyz, a.scripts, a.binaries, a.datas, name="taxonero", console=False,
               icon=str(ICONS / "taxonero.ico") if sys.platform == "win32" else None)

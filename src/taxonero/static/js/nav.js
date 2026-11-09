@@ -3,7 +3,7 @@
    photo replace the history entry (replaceState); changing page or opening the viewer adds one.
    NAV.stack mirrors the browser history (which gives no access to the neighbouring entries): title and position of
    each page, for the Back button of the top bar, which thus stays in agreement with the mouse button. */
-const SCOPE_INT = ['taxon', 'month', 'year'], SCOPE_KEYS = [...SCOPE_INT, 'rank', 'name', 'country', 'city', 'camera', 'day'];
+const SCOPE_INT = ['taxon', 'month', 'year'], SCOPE_KEYS = [...SCOPE_INT, 'rank', 'name', 'country', 'city', 'camera', 'day', 'source'];
 const NAV = { stack: [], idx: 0, base: null, parent: null, settling: false };
 try {
   const saved = JSON.parse(sessionStorage.getItem('nav') || 'null');
@@ -157,7 +157,7 @@ function applyQuery(view, q) {
   if (view === 'photos') {
     const scope = readScope(q), scoped = Object.keys(scope).length > 0;
     const filter = q.get('filter') || (scoped ? 'all' : P.userFilter);
-    setGridState({ filter, group: q.get('group') || '', sort: q.get('sort') || P.userSort, base: +q.get('base') || 0, scope, embedded: false });
+    setGridState({ filter, kinds: q.get('kinds') || '', group: q.get('group') || '', sort: q.get('sort') || P.userSort, base: +q.get('base') || 0, scope, embedded: false });
     if (!q.get('filter')) setQuery({ filter });
   }
   if (view !== 'species') return;

@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS asset (
     people       INTEGER,       -- people recognised by Immich in the photo (NULL: not asked yet)
     twin_of      TEXT,          -- RAW paired with a JPG of the same shot: id of the JPG (analysed instead)
     geo_user     INTEGER,       -- 1: lat/lon entered by hand (photo without GPS), a GPS from the source replaces them
-    series_id    TEXT           -- series (burst): id of its first photo; NULL for a single photo (series.py)
+    series_id    TEXT,          -- series (burst): id of its first photo; NULL for a single photo (series.py)
+    source       TEXT NOT NULL DEFAULT ''   -- photo source: '' the main one, otherwise the id of an added source
 );
 
 CREATE TABLE IF NOT EXISTS detection (
@@ -84,7 +85,7 @@ CREATE TABLE IF NOT EXISTS taxon (
 
 -- Record of every object written to Immich (for rebuild / uninstall).
 CREATE TABLE IF NOT EXISTS written (
-    kind         TEXT NOT NULL,                 -- 'tag' | 'tag_asset' | 'description'
+    kind         TEXT NOT NULL,                 -- 'tag' | 'tag_asset' | 'description'; '…@<id>' for an added source
     immich_id    TEXT NOT NULL,                 -- tag id, or asset id for a description
     asset_id     TEXT NOT NULL DEFAULT '',
     value        TEXT,
@@ -172,6 +173,7 @@ def _migrate(db: sqlite3.Connection) -> None:
     # Indexes on columns added by a migration: created after it (an older database does not have them yet
     # when the schema is applied).
     db.execute("CREATE INDEX IF NOT EXISTS asset_series ON asset(series_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS asset_source ON asset(source)")
     db.commit()
 
 
@@ -188,16 +190,20 @@ def set_state(db: sqlite3.Connection, key: str, value: str) -> None:
     db.commit()
 
 
-def upsert_asset(db: sqlite3.Connection, a: dict, with_people: bool = False) -> bool:
+def upsert_asset(db: sqlite3.Connection, a: dict, with_people: bool = False, source: str = "") -> bool:
     """Save an Immich asset. Return True if it is new or if its file changed.
-    with_people: the response was requested with withPeople (otherwise Immich still returns an empty list)."""
+    with_people: the response was requested with withPeople (otherwise Immich still returns an empty list).
+    source: the source it comes from ('' the main one). An id already known from another source is left to it
+    (False): the same Immich account added twice, for instance."""
     exif = a.get("exifInfo") or {}
-    row = db.execute("SELECT checksum FROM asset WHERE asset_id = ?", (a["id"],)).fetchone()
+    row = db.execute("SELECT checksum, source FROM asset WHERE asset_id = ?", (a["id"],)).fetchone()
+    if row is not None and row["source"] != source:
+        return False
     changed = row is None or row["checksum"] != a.get("checksum")
     db.execute(
         """INSERT INTO asset (asset_id, checksum, file_name, taken_at, lat, lon, make, model, lens, width, height,
-                              city, state, country, kind, people)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              city, state, country, kind, people, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(asset_id) DO UPDATE SET
              checksum=excluded.checksum, file_name=excluded.file_name, taken_at=excluded.taken_at,
              lat=CASE WHEN excluded.lat IS NULL AND asset.geo_user = 1 THEN asset.lat ELSE excluded.lat END,
@@ -213,7 +219,7 @@ def upsert_asset(db: sqlite3.Connection, a: dict, with_people: bool = False) -> 
         (a["id"], a.get("checksum"), a.get("originalFileName"), exif.get("dateTimeOriginal"),
          exif.get("latitude"), exif.get("longitude"), exif.get("make"), exif.get("model"), exif.get("lensModel"),
          exif.get("exifImageWidth"), exif.get("exifImageHeight"), exif.get("city"), exif.get("state"), exif.get("country"),
-         a.get("type") or "IMAGE", len(a.get("people") or []) if with_people else None),
+         a.get("type") or "IMAGE", len(a.get("people") or []) if with_people else None, source),
     )
     return changed
 
@@ -232,12 +238,12 @@ def _split(name: str | None) -> tuple[str, str]:
 def link_raw_twins(db: sqlite3.Connection) -> int:
     """Link each RAW to the image of the same shot: same file name without the extension and same capture
     time (to the second). A RAW on its own is still analysed normally. Return the number of RAW files linked."""
-    others: dict[tuple[str, str], str] = {}
-    raws: list[tuple[str, tuple[str, str], str | None]] = []
-    for r in db.execute("SELECT asset_id, file_name, taken_at, twin_of FROM asset "
+    others: dict[tuple[str, str, str], str] = {}
+    raws: list[tuple[str, tuple[str, str, str], str | None]] = []
+    for r in db.execute("SELECT asset_id, file_name, taken_at, twin_of, source FROM asset "
                         "WHERE missing_at IS NULL AND kind IS NOT 'VIDEO' AND taken_at IS NOT NULL"):
         stem, ext = _split(r["file_name"])
-        key = (stem, r["taken_at"][:19])
+        key = (stem, r["taken_at"][:19], r["source"])   # within a source: the sources are kept apart
         if ext in RAW_EXT:
             raws.append((r["asset_id"], key, r["twin_of"]))
         elif stem:

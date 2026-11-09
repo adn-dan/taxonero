@@ -1,6 +1,12 @@
 # syntax=docker/dockerfile:1
 
 FROM python:3.12-slim
+# Image description (OCI), and its icon for the platforms that read it from a label (Unraid).
+LABEL org.opencontainers.image.title="Taxonero" \
+      org.opencontainers.image.description="Self-hosted AI species identification for your photos: Immich, local folders or photo apps" \
+      org.opencontainers.image.source="https://github.com/adn-dan/taxonero" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      net.unraid.docker.icon="https://raw.githubusercontent.com/adn-dan/taxonero/main/packaging/icons/taxonero.png"
 # Compute hardware (--build-arg GPU=...): the three models (MegaDetector, OWLv2, BioCLIP) run in PyTorch,
 # hence on the same GPU, whatever it is. Weights are downloaded at first launch into /data.
 #   cuda12 (default): NVIDIA, driver >= 525; torch 2.11 cu128
@@ -22,7 +28,7 @@ RUN case "$GPU" in \
       rocm)   idx=rocm7.2; torch="torch==2.14.1 torchvision==0.29.1" ;; \
       xpu)    idx=xpu;     torch="torch==2.14.1 torchvision==0.29.1" ;; \
       cpu)    idx=cpu;     torch="torch==2.14.1 torchvision==0.29.1" ;; \
-      *) echo "GPU=$GPU inconnu : cuda12 | cuda13 | rocm | xpu | cpu" >&2; exit 1 ;; \
+      *) echo "unknown GPU=$GPU: cuda12 | cuda13 | rocm | xpu | cpu" >&2; exit 1 ;; \
     esac \
     && pip install --no-cache-dir $torch --index-url https://download.pytorch.org/whl/$idx \
     && pip install --no-cache-dir onnxruntime==1.31.0

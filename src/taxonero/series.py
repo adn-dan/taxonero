@@ -76,14 +76,15 @@ def assign(db: sqlite3.Connection) -> int:
     """Compute the series of the whole photo library (asset.series_id: id of the first photo of the series; NULL for
     a single photo). Return the number of photos whose series changed."""
     rows = [dict(r) for r in db.execute(
-        "SELECT asset_id, taken_at, lat, lon, make, model, series_id FROM asset WHERE missing_at IS NULL AND taken_at IS NOT NULL")]
+        "SELECT asset_id, taken_at, lat, lon, make, model, series_id, source FROM asset WHERE missing_at IS NULL AND taken_at IS NOT NULL")]
     for r in rows:   # unknown camera or unreadable date: never in a series
         r["t"] = seconds(r["taken_at"]) if r["make"] or r["model"] else None
     stale = [(r["asset_id"],) for r in rows if r["t"] is None and r["series_id"]]
-    rows = sorted((r for r in rows if r["t"] is not None), key=lambda r: (r["make"] or "", r["model"] or "", r["t"]))
+    # Per source as well: the same shots in two sources (a folder also imported into Immich) are not a burst.
+    rows = sorted((r for r in rows if r["t"] is not None), key=lambda r: (r["source"], r["make"] or "", r["model"] or "", r["t"]))
     cameras: dict[tuple, list[dict]] = {}
     for r in rows:
-        cameras.setdefault((r["make"], r["model"]), []).append(r)
+        cameras.setdefault((r["source"], r["make"], r["model"]), []).append(r)
     wanted: dict[str, str | None] = {}
     for same_camera in cameras.values():
         for chain in chains(same_camera):

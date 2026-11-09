@@ -5,7 +5,7 @@ const FILTERS = [
 ];
 const P = { filter: 'pending', userFilter: 'pending', userSort: 'date', scope: {}, embedded: false, key: '', onStar: null, scopeNames: {},
   assets: [], counts: {}, more: false, loading: false,
-  sort: 'date', group: '', groups: [], sel: new Set(), allSel: false, excl: new Set(), selecting: false, lastSel: null,
+  sort: 'date', group: '', groups: [], kinds: '', kindCounts: {}, sel: new Set(), allSel: false, excl: new Set(), selecting: false, lastSel: null,
   shown: 0, byYear: false, lastSection: null, sectionN: 0, seq: 0,
   // Stacked series (bursts): one "×N" tile per series, in date order. members: tile -> photos.
   stack: true, members: new Map(), lastLead: null,
@@ -13,7 +13,12 @@ const P = { filter: 'pending', userFilter: 'pending', userSort: 'date', scope: {
   base: 0, months: [] };
 // Group (Species page) of a raw value returned by the server: class, or kingdom for plants and fungi.
 const rawGroup = v => groupOf({ lineage: { class: v, phylum: v, kingdom: v } }).id;
-const groupParam = () => P.groups.filter(x => rawGroup(x.group) === P.group).map(x => x.group).join(',');
+// What was detected (animal, plant, fungus, microbe): several can be chosen, a photo matches if it shows one of them.
+const KINDS = [{ id: 'animal', icon: '🐾' }, { id: 'plant', icon: '🌿' }, { id: 'fungus', icon: '🍄' }, { id: 'microbe', icon: '🦠' }];
+const kindList = () => P.kinds ? P.kinds.split(',') : [];
+const kindParam = () => kindList().map(k => `kind:${k}`).join(',');
+// Both travel in the group parameter (server: split_group), so every list, count and bulk action gets them.
+const groupParam = () => [kindParam(), ...P.groups.filter(x => rawGroup(x.group) === P.group).map(x => x.group)].filter(Boolean).join(',');
 // Sorting by confidence only applies to photos awaiting review; elsewhere, by date.
 const sortOf = () => ['pending', 'audit'].includes(P.filter) ? P.sort : 'date';
 const scopeQS = () => { const q = new URLSearchParams(); Object.entries(P.scope).forEach(([k, v]) => q.set(k, v)); const s = q.toString(); return s ? `&${s}` : ''; };
@@ -42,10 +47,11 @@ async function loadPhotos(base = 0) {
   // Overlapping loads (filter changed before the end of the previous one): only the last one is shown.
   const seq = ++P.seq;
   P.base = base;
-  const groups = await api(`/api/photos/groups?filter=${P.filter}${scopeQS()}`);
+  const [groups, kindCounts] = await Promise.all([api(`/api/photos/groups?filter=${P.filter}&group=${encodeURIComponent(kindParam())}${scopeQS()}`),
+    api(`/api/photos/kinds?filter=${P.filter}${scopeQS()}`).catch(() => ({}))]);
   if (seq !== P.seq) return;
-  P.groups = groups;
-  if (P.group && !groupParam()) P.group = '';   // group absent from this filter
+  [P.groups, P.kindCounts] = [groups, kindCounts];
+  if (P.group && !P.groups.some(x => rawGroup(x.group) === P.group)) P.group = '';   // group absent from this filter
   const [counts, assets, months] = await Promise.all([api(`/api/photos/counts?group=${encodeURIComponent(groupParam())}${scopeQS()}`), api(photosURL(0)),
     api(`/api/photos/months?filter=${P.filter}&group=${encodeURIComponent(groupParam())}${scopeQS()}`).catch(() => [])]);
   if (seq !== P.seq) return;
@@ -64,11 +70,11 @@ $('#pfilters').onclick = e => {
   loadPhotos();
 };
 /* State of the grid (from the address); the selection does not survive a change of list. */
-const gridKey = () => { const k = JSON.stringify([P.filter, P.group, P.scope]); if (k !== P.key) { P.key = k; setSelecting(false); } };
+const gridKey = () => { const k = JSON.stringify([P.filter, P.kinds, P.group, P.scope]); if (k !== P.key) { P.key = k; setSelecting(false); } };
 function setGridState(st) { Object.assign(P, st); gridKey(); }
 /* Grid moved into a record (species, rank): same tiles, selection and actions as the Photos page. */
 function embedGrid(slot, scope, onStar) {
-  setGridState({ filter: 'all', group: '', sort: 'date', base: 0, scope, embedded: true, onStar: onStar || null });
+  setGridState({ filter: 'all', kinds: '', group: '', sort: 'date', base: 0, scope, embedded: true, onStar: onStar || null });
   slot.append($('#pblock'));
   return loadPhotos(0);
 }
@@ -83,6 +89,7 @@ function scopeLabel(k, v) {
   if (k === 'day') return fmtDate(`${v}T12:00:00`);
   if (k === 'month') return monthName(v);
   if (k === 'camera') return v || t('stats.unknown_camera');
+  if (k === 'source') return (STATE.status?.sources || []).find(x => x.id === v)?.label ?? v;
   return String(v);
 }
 function scopeChips() {
@@ -102,13 +109,31 @@ function renderTools() {
     ? `<button class="chip${P.group ? '' : ' on'}" data-g="">${t('photos.all_groups')}</button>` + groupChips(GROUPS.filter(g => agg.has(g.id)), P.group,
       g => `<button class="chip${P.group === g.id ? ' on' : ''}" data-g="${g.id}">${g.icon} ${esc(g.name)}<span class="n">${agg.get(g.id)}</span></button>`, g => agg.get(g.id))
     : '';
+  // Kinds: shown when the list mixes several of them (or one is chosen), each one a toggle.
+  const chosen = kindList(), present = KINDS.filter(k => P.kindCounts[k.id] || chosen.includes(k.id));
+  const kinds = present.length > 1 || chosen.length
+    ? `<span class="pkinds" role="group" aria-label="${esc(t('photos.kinds'))}" title="${esc(t('photos.kinds_hint'))}">${present.map(k =>
+      `<button class="chip${chosen.includes(k.id) ? ' on' : ''}" data-kind="${k.id}" aria-pressed="${chosen.includes(k.id)}">${k.icon} ${t(`kind.${k.id}`)}<span class="n">${P.kindCounts[k.id] ?? 0}</span></button>`).join('')}</span>`
+    : '';
+  // Several sources: one chip each (the chosen one shows as a removable scope chip).
+  const srcs = STATE.status?.sources || [];
+  const sources = srcs.length > 1 && !P.scope.source && !P.embedded
+    ? `<span class="pkinds" role="group" aria-label="${esc(t('photos.source'))}">${srcs.map(x =>
+      `<button class="chip" data-source="${esc(x.id)}" title="${esc(t('photos.source'))}">${esc(x.label)}</button>`).join('')}</span>`
+    : '';
   // On the left what filters, on the right what changes the display.
-  $('#ptools').innerHTML = `<div class="pgroups">${scopeChips()}${groups}</div><div class="pview">`
+  $('#ptools').innerHTML = `<div class="pgroups">${scopeChips()}${sources}${kinds}${groups}</div><div class="pview">`
     + (['pending', 'audit'].includes(P.filter) ? `<select id="psort" title="${esc(t('photos.sort'))}">${sorts.map(k => `<option value="${k}"${P.sort === k ? ' selected' : ''}>${t(`sort.${k}`)}</option>`).join('')}</select>` : '')
     + (P.filter === 'failed' && P.counts.failed ? `<button class="btn" id="b-requeue">${t('photos.requeue')}</button>` : '')
     + (!P.embedded && sortOf() === 'date' && P.months.length > 1 ? `<select id="pgoto" title="${esc(t('photos.goto'))}"><option value="">${t('photos.goto')}</option>${P.months.map(x =>
         `<option value="${x.m ?? ''}">${esc(monthLabel(x.m))} (${fmtN(x.n)})</option>`).join('')}</select>` : '')
     + (sortOf() === 'date' ? `<button class="chip${P.stack ? ' on' : ''}" id="b-stack" title="${esc(t('photos.stack_sub'))}">${t('photos.stack')}</button>` : '') + '</div>';
+  $$('#ptools [data-source]').forEach(b => b.onclick = () => { setQuery({ source: b.dataset.source, base: null }); reloadPage(); });
+  $$('#ptools [data-kind]').forEach(b => b.onclick = () => {
+    const k = b.dataset.kind, list = kindList();
+    P.kinds = KINDS.map(x => x.id).filter(x => x === k ? !list.includes(x) : list.includes(x)).join(',');
+    gridKey(); if (!P.embedded) setQuery({ kinds: P.kinds || null, base: null }); loadPhotos();
+  });
   $$('#ptools [data-g]').forEach(b => b.onclick = () => { P.group = b.dataset.g; gridKey(); if (!P.embedded) setQuery({ group: P.group, base: null }); loadPhotos(); });
   $$('#ptools [data-unscope]').forEach(b => b.onclick = () => {
     const k = b.dataset.unscope; setQuery({ [k]: null, ...(k === 'rank' ? { name: null } : {}) }); reloadPage(); });
@@ -225,7 +250,7 @@ $('#selbar').onclick = async e => {
   if (k === 'none') { setSelecting(false); return; }
   if (k === 'invert') { invertSel(); return; }
   if (k === 'export') { exportSelection().catch(fail); return; }
-  const sel = P.allSel ? { filter: P.filter, every: true, group: groupParam(), scope: P.scope, exclude: [...P.excl] } : { filter: P.filter, asset_ids: [...P.sel] };
+  const sel = P.allSel ? { filter: P.filter, every: true, group: groupParam(), scope: P.scope, exclude: [...P.excl] } : { filter: P.filter, group: kindParam(), asset_ids: [...P.sel] };
   if (k === 'loc') {
     const p = await pickLocation({ canClear: true }); if (!p) return;
     try {

@@ -6,8 +6,8 @@
 
 Identification des espèces dans tes photos par IA, auto-hébergée (oiseaux, mammifères, reptiles, amphibiens,
 insectes, araignées, poissons, plantes, champignons et lichens) : une photothèque [Immich](https://immich.app), un
-dossier local ou un logiciel photo (darktable, Lightroom Classic, RawTherapee, RapidRAW). **Tes photos ne sont
-jamais modifiées.**
+dossier local ou un logiciel photo (darktable, Lightroom Classic, RawTherapee, RapidRAW, Apple Photos), ou
+plusieurs à la fois. **Tes photos ne sont jamais modifiées.**
 
 <table>
 <tr>
@@ -45,7 +45,8 @@ jamais modifiées.**
   autour d'un point coûte une requête GBIF par zone de 1° pour toutes les espèces à la fois (gardée
   180 jours), et non une par candidat.
 - Dashboard au style d'Immich (mêmes couleurs, police, barre latérale) : page Photos avec filtres
-  (à relire, validées auto, validées par moi, rejetées, sans détection) et visionneuse plein écran
+  (à relire, validées auto, validées par moi, rejetées, sans détection), par ce qui a été détecté
+  (animaux, plantes, champignons, cumulables) et par groupe, et visionneuse plein écran
   pilotable au clavier, rectangles cliquables qui ouvrent l'article Wikipédia ou
   Wikispecies dans un panneau latéral, noms communs en 15 langues, boîtes dessinées à la main,
   page Espèces (vue Grille par groupe, ou vue Arbre de toutes les branches, règne > embranchement > classe > ordre > famille > espèce ; filtres par groupe et Liste rouge UICN),
@@ -405,6 +406,7 @@ bibliothèque n'est jamais modifiée, et ses réglages utiles sont vérifiés (a
 | `lightroom` (Windows, macOS) | celles du catalogue `.lrcat` (`CATALOG_PATH`), relu Lightroom fermé | `photo.xmp` à côté des RAW | Catalog Settings : « Automatically write changes into XMP », puis Metadata > « Read Metadata from Files » |
 | `rawtherapee` | un dossier (`PHOTOS_DIR`) | `photo.xmp` ou `photo.nef.xmp`, selon son réglage | Préférences > Métadonnées : « XMP sidecar synchronization » sur « read » (mots-clés et description repris à l'export) |
 | `rapidraw` | un dossier (`PHOTOS_DIR`) | `photo.xmp` | synchronisation XMP active (Réglages) |
+| `applephotos` (macOS) | celles de la photothèque `.photoslibrary` (`CATALOG_PATH`) | aucun : mots-clés et description écrits par Photos lui-même | ouvrir cette photothèque dans Photos, et autoriser Taxonero à contrôler Photos (macOS le demande une fois) |
 
 Limites connues :
 - Lightroom Classic ne lit les métadonnées d'un JPEG, TIFF, HEIC ou DNG que dans le fichier lui-même, jamais
@@ -415,6 +417,24 @@ Limites connues :
   code source).
 - darktable réécrit ses XMP à partir de sa base : modifier une photo avant d'avoir accepté la relecture des XMP
   au démarrage efface les mots-clés écrits ici (ils sont reposés à la synchronisation quotidienne).
+- Apple Photos : la photothèque est lue avec [osxphotos](https://github.com/RhetTbull/osxphotos), sans jamais
+  modifier sa base ; les images analysées sont les aperçus que Photos garde dans la photothèque (les originaux
+  peuvent rester dans iCloud). Photos n'a pas de mots-clés hiérarchiques : chaque tag est écrit en un seul
+  mot-clé (`Nature/Aves/Paridae/Mésange charbonnière`), pour ne jamais retirer un mot-clé à toi. AppleScript
+  agit sur la photothèque ouverte dans Photos : une autre photothèque reste en lecture seule. Pas de vidéos. Ce
+  connecteur n'a été testé qu'avec une simulation d'osxphotos et de Photos, pas sur un Mac.
+
+### Plusieurs sources
+
+Paramètres > Source des photos > **Autres sources** : en plus de la source principale, un deuxième compte Immich
+(adresse et clé API), un autre dossier ou un logiciel photo. Chaque source garde ses photos et reçoit ses propres
+résultats (tags dans son Immich, XMP dans son dossier) ; Taxonero retient d'où vient chaque photo, sans rien
+écrire de plus dans l'image. La page Photos propose un filtre par source, et la visionneuse indique la source de
+la photo. Une même photo présente dans deux sources (un dossier aussi importé dans Immich) est analysée et relue
+dans chacune. Retirer une source masque ses photos et leurs validations, qui reviennent si elle est rajoutée ; ce
+qui y a déjà été écrit reste en place (pour un compte Immich, « Annuler ce qui a été écrit dans Immich »
+le nettoie d'abord ; il traite tous les comptes Immich).
+Dans Docker, un dossier ajouté doit être monté dans le conteneur, comme `PHOTOS_DIR`.
 
 ### Options
 

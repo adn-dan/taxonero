@@ -60,7 +60,8 @@ function drawViewer() {
   const a = cur(); if (!a) { leaveViewer(); return; }
   $('#vdone').hidden = true;
   setNavTitle(curDet()?.taxon ? shortName(curDet().taxon) : a.file_name || t('nav.photos'));
-  $('#v-title').textContent = `${V.i + 1} / ${V.list.length} · ${a.kind === 'VIDEO' ? `▶ ${t('video.keyframe')} · ` : ''}${a.file_name || ''}`;
+  $('#v-title').textContent = `${V.i + 1} / ${V.list.length} · ${a.kind === 'VIDEO' ? `▶ ${t('video.keyframe')} · ` : ''}${a.file_name || ''}`
+    + (a.source_label ? ` · ${a.source_label}` : '');   // several sources: where it comes from
   $('#v-immich').hidden = !a.immich_link; if (a.immich_link) $('#v-immich').href = a.immich_link;
   $('#v-prev').style.visibility = V.i > 0 ? '' : 'hidden';
   $('#v-next').style.visibility = V.i < V.list.length - 1 || (V.list === P.assets && P.more) ? '' : 'hidden';

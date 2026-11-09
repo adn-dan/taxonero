@@ -96,7 +96,7 @@ function otherNames(tx) {
 
 /* ============================== state & navigation ============================== */
 const STATE = { view: 'photos', status: null };
-const srcTitle = id => id === 'local' ? t('local.title') : t(`src.${id}`);   // name of the photo source
+const srcTitle = id => id === 'local' ? t('local.title') : tOr(`src.${id}`, id);   // name of the photo source
 async function loadStatus() {
   const s = STATE.status = await api('/api/status');
   const pending = (await api('/api/photos/counts')).pending || 0;   // photos to review (like the filter)
@@ -106,7 +106,8 @@ async function loadStatus() {
     return;
   }
   const level = !s.writable ? 'bad' : (s.dry_run || s.warnings.length) ? 'warn' : '';
-  const name = s.source === 'immich' ? `Immich ${esc(s.immich_version || '?')}` : `${srcTitle(s.source)}</b> <code>${esc(s.source_path)}</code><b>`;
+  const name = !s.main_configured && s.sources?.length ? esc(s.sources[0].label)   // only added sources
+    : s.source === 'immich' ? `Immich ${esc(s.immich_version || '?')}` : `${srcTitle(s.source)}</b> <code>${esc(s.source_path)}</code><b>`;
   $('#server').onclick = ev => { if (ev.target.closest('[data-settab]')) { const a = ev.target.closest('[data-settab]').dataset; openSetTab(a.settab, a.anchor); } };
   $('#server').innerHTML = `<div><span class="dot ${level}"></span><b>${name}</b> <span class="sub">· Taxonero ${esc(s.version)}</span></div>
     <div>${s.writable ? t('server.compatible') : t('server.readonly')} · ${s.dry_run ? t('server.dry_run') : s.writes_paused ? `<a href="#settings" data-settab="source">${t('server.paused')}</a>` : t('server.writing')}</div>

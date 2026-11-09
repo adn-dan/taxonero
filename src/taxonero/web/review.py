@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .. import series, store
 from ..autoconfirm import auto_threshold
-from ..curation import EXCLUDED, cand_json, relocate
+from ..curation import DETECTION_GROUP, EXCLUDED, cand_json, relocate
 from ..immich.client import is_missing
 from ..pipeline import SMALL_CROP_PX, Box, crop, crop_side, decide, load_original, open_image, rerank
 from ..taxonomy import Taxonomy
@@ -35,7 +35,7 @@ def register(app, c) -> None:
         if not db.execute("SELECT 1 FROM asset WHERE asset_id = ?", (asset_id,)).fetchone():
             raise HTTPException(404)
         try:
-            data = w.client.thumbnail(asset_id, "thumbnail" if size == "thumbnail" else "preview")
+            data = w.client_for(asset_id).thumbnail(asset_id, "thumbnail" if size == "thumbnail" else "preview")
         except Exception as e:
             if is_missing(e):
                 fail(404, "photo_deleted", "photo deleted from Immich")
@@ -79,6 +79,7 @@ def register(app, c) -> None:
         day: str | None = None      # AAAA-MM-JJ
         month: int | None = None    # 1 to 12, all years
         year: int | None = None
+        source: str | None = None   # "main" or the id of an added source (several sources)
 
     # Photos page filters: SQL condition on the asset (alias a).
     PHOTO_FILTERS = {
@@ -104,6 +105,7 @@ def register(app, c) -> None:
     # Group: classes (Aves, Insecta…) or kingdoms (Plantae, Fungi) of the top candidate of a detection,
     # comma separated (reptiles are spread over several classes). Without a class (bony
     # fishes in GBIF), the phylum.
+    KINDS = ("animal", "plant", "fungus", "microbe")   # values of curation.DETECTION_GROUP
     GROUP_EXPR = ("CASE WHEN json_extract(d.candidates, '$[0].lineage.kingdom') IN ('Plantae', 'Fungi') "
                   "THEN json_extract(d.candidates, '$[0].lineage.kingdom') "
                   "ELSE COALESCE(json_extract(d.candidates, '$[0].lineage.class'), json_extract(d.candidates, '$[0].lineage.phylum')) END")
@@ -121,6 +123,9 @@ def register(app, c) -> None:
                 fail(400, "unknown_rank", "unknown rank")
             parts.append(confirmed.format("JOIN taxon t ON t.gbif_key = d.taxon_key", f"json_extract(t.data, '$.lineage.{sc.rank}') = ?"))
             args.append(sc.name)
+        if sc.source:
+            parts.append("a.source = ?")
+            args.append("" if sc.source == "main" else sc.source)
         for value, sql in ((sc.country, "a.country = ?"), (sc.city, "a.city = ?"),
                            (sc.camera, "trim(coalesce(a.make, '') || ' ' || coalesce(a.model, '')) = ?"),
                            (sc.day, "substr(a.taken_at, 1, 10) = ?"), (sc.month, "CAST(strftime('%m', a.taken_at) AS INTEGER) = ?"),
@@ -138,11 +143,27 @@ def register(app, c) -> None:
         extra, extra_args = scope_where(scope) if scope else ("", ())
         if extra:
             where, args = f"{where} AND {extra}", extra_args
-        groups = [g for g in group.split(",") if g]
+        kinds, groups = split_group(group)
+        if kinds:
+            where, args = (f"{where} AND EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id "
+                           f"AND {kept(filter)} AND {DETECTION_GROUP} IN ({', '.join('?' * len(kinds))}))",
+                           (*args, *kinds))
         if not groups:
             return where, args
         return (f"{where} AND EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND d.status != 'deleted' "
                 f"AND {GROUP_EXPR} IN ({', '.join('?' * len(groups))}))", (*args, *groups))
+
+    def kept(filter: str) -> str:
+        """Detections that tell what a photo shows: not the rejected ones (wrong box), except in the Rejected filter."""
+        return "d.status != 'deleted'" if filter == "rejected" else "d.status NOT IN ('rejected', 'deleted')"
+
+    def split_group(group: str) -> tuple[list[str], list[str]]:
+        """The group parameter of the Photos page: "kind:animal,kind:plant" (what was detected: animal, plant, fungus
+        or microbe, several allowed, any of them) and raw group values (class, or kingdom for plants and fungi). Kept in a
+        single parameter so that every list, count and bulk action of the grid gets both."""
+        items = [g for g in group.split(",") if g]
+        kinds = [g[5:] for g in items if g.startswith("kind:") and g[5:] in KINDS]
+        return kinds, [g for g in items if not g.startswith("kind:")]
 
     @app.get("/api/photos", dependencies=[Depends(auth)])
     def photos(filter: str = "pending", limit: int = Query(300, ge=1, le=1000), offset: int = Query(0, ge=0),
@@ -172,14 +193,27 @@ def register(app, c) -> None:
             "ORDER BY m IS NULL, m DESC", args)]
 
     @app.get("/api/photos/groups", dependencies=[Depends(auth)])
-    def photo_groups(filter: str = "pending", scope: PhotoScope = Depends()):
-        """Groups present in a filter, with their number of photos (chips of the Photos page)."""
+    def photo_groups(filter: str = "pending", group: str = "", scope: PhotoScope = Depends()):
+        """Groups present in a filter, with their number of photos (chips of the Photos page). With kinds in group
+        ("kind:plant"), only the groups of the detections of these kinds."""
+        kinds, _ = split_group(group)
         where, args = photo_where(filter, "", scope)
+        only = f"AND {DETECTION_GROUP} IN ({', '.join('?' * len(kinds))}) " if kinds else ""
         rows = db.execute(
             f"SELECT g, count(DISTINCT asset_id) AS n FROM (SELECT d.asset_id, {GROUP_EXPR} AS g "
-            f"  FROM detection d JOIN asset a ON a.asset_id = d.asset_id WHERE d.status != 'deleted' AND {where}) "
-            "WHERE g IS NOT NULL GROUP BY g ORDER BY n DESC", args).fetchall()
+            f"  FROM detection d JOIN asset a ON a.asset_id = d.asset_id WHERE d.status != 'deleted' {only}AND {where}) "
+            "WHERE g IS NOT NULL GROUP BY g ORDER BY n DESC", (*kinds, *args)).fetchall()
         return [{"group": r["g"], "n": r["n"]} for r in rows]
+
+    @app.get("/api/photos/kinds", dependencies=[Depends(auth)])
+    def photo_kinds(filter: str = "pending", scope: PhotoScope = Depends()):
+        """Photos of a filter with at least one animal, plant, fungus or microbe detected (not rejected): the kind
+        chips of the Photos page. A photo with an animal and a plant counts in both."""
+        where, args = photo_where(filter, "", scope)
+        rows = db.execute(
+            f"SELECT g, count(DISTINCT asset_id) AS n FROM (SELECT d.asset_id, {DETECTION_GROUP} AS g "
+            f"  FROM detection d JOIN asset a ON a.asset_id = d.asset_id WHERE {kept(filter)} AND {where}) GROUP BY g", args).fetchall()
+        return {r["g"]: r["n"] for r in rows}
 
     @app.get("/api/assets/{asset_id}", dependencies=[Depends(auth)])
     def get_asset(asset_id: str):
@@ -249,7 +283,7 @@ def register(app, c) -> None:
         x, y = min(max(0.0, b.x), 0.98), min(max(0.0, b.y), 0.98)
         box = Box(x, y, max(0.02, min(1 - x, b.w)), max(0.02, min(1 - y, b.h)), 1.0, "manual", None, "manual")
         try:
-            image = open_image(w.client.thumbnail(asset_id, "preview"))
+            image = open_image(w.client_for(asset_id).thumbnail(asset_id, "preview"))
         except Exception as e:
             if is_missing(e):
                 fail(404, "photo_deleted", "photo deleted from Immich")
@@ -464,7 +498,9 @@ def register(app, c) -> None:
         - reset: confirmed or rejected detections put back to review;
         - taxon: this taxon confirmed on the detection awaiting review of each photo; a photo without a detection gets a
           "whole image" detection; a photo with several subjects to review is left (skipped);
-        - reanalyze: photos put back in the analysis queue (next cycle; reviewed detections kept)."""
+        - reanalyze: photos put back in the analysis queue (next cycle; reviewed detections kept).
+        With kinds chosen (group "kind:plant"), only the detections of these kinds: the bird of a photo selected
+        under Plants stays as it is."""
         if body.action not in ("confirm", "reject", "reset", "delete", "taxon", "reanalyze"):
             fail(400, "unknown_action", "unknown action")
         ids = selected(body)
@@ -486,9 +522,12 @@ def register(app, c) -> None:
                    "reset": "status IN ('confirmed', 'rejected')",
                    "delete": "status != 'deleted'",
                    "reject": "status IN ('pending', 'confirmed')"}[body.action]
+        kinds, _ = split_group(body.group)
+        if kinds:
+            targets = f"{targets}) AND ({DETECTION_GROUP} IN ({', '.join('?' * len(kinds))})"
         changed, created, skipped, now = [], [], 0, time.time()
         for aid in ids:
-            rows = db.execute(f"SELECT {', '.join(SNAPSHOT)} FROM detection WHERE asset_id = ? AND ({targets})", (aid,)).fetchall()
+            rows = db.execute(f"SELECT {', '.join(SNAPSHOT)} FROM detection WHERE asset_id = ? AND ({targets})", (aid, *kinds)).fetchall()
             if body.action == "reject" and any(r["status"] == "pending" for r in rows):
                 rows = [r for r in rows if r["status"] == "pending"]
             if body.action == "taxon":

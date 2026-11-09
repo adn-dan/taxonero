@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taxonero"
-version = "0.2.2"
+version = "0.3.0"
 description = "Self-hosted AI species identification for your photos: Immich, local folders or photo apps. Never modifies your pictures."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,7 +26,8 @@ dependencies = [
 [project.optional-dependencies]
 cpu = ["onnxruntime>=1.18"]
 # Desktop edition: application window (taxonero desktop); on Linux with Qt (PyQt6 and its WebEngine).
-desktop = ["pywebview>=6.1", "pywebview[qt]>=6.1; sys_platform == 'linux'"]
+# macOS: Apple Photos source, read with osxphotos (its library) and written through Photos with photoscript (AppleScript).
+desktop = ["pywebview>=6.1", "pywebview[qt]>=6.1; sys_platform == 'linux'", "osxphotos>=0.78; sys_platform == 'darwin'"]
 dev = ["pytest>=8", "playwright>=1.48"]   # browser tests: then "playwright install firefox"
 
 [project.scripts]

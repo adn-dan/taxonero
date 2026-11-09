@@ -568,6 +568,7 @@ td small { color: var(--muted); }
 /* Photos page: tools, selection, bulk review */
 .ptools { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin: -6px 0 16px; }
 .pgroups, .pview { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .pgroups { flex: 1 1 auto; min-width: 0; } .pview { margin-left: auto; }
+.pkinds { display: flex; gap: 8px; align-items: center; } .pkinds:not(:last-child) { padding-right: 8px; border-right: 1px solid var(--line); } .pkinds .chip { flex: none; }
 .ptools:not(:has(button, select)) { display: none; }
 .ptools .chip { padding: 4px 12px; font-size: 12px; }
 .ptools select { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink-2); }

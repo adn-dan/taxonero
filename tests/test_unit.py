@@ -1521,7 +1521,7 @@ def test_backbone_one_connection_per_thread(tmp_path):
 
 @pytest.mark.parametrize("gps,expected", [
     (((0, 0), (0, 0), (0, 0)), (None, None)),      # 0/0 : NaN
-    (((200, 1), (0, 1), (0, 1)), (None, None)),    # hors limites
+    (((200, 1), (0, 1), (0, 1)), (None, None)),    # out of range
     (((45, 1), (30, 1), (0, 1)), (45.5, 45.5)),
 ])
 def test_exif_latlon_rejects_invalid_gps(gps, expected):
@@ -1859,7 +1859,7 @@ class _UndoClient:
 def _undo_db(tmp_path, rows):
     from taxonero import store
     db = store.connect(tmp_path / "u.sqlite")
-    db.executemany("INSERT INTO written VALUES (?, ?, ?, ?, 1)", rows)
+    db.executemany("INSERT INTO written (kind, immich_id, asset_id, value, written_at) VALUES (?, ?, ?, ?, 1)", rows)
     db.commit()
     return db
 
@@ -2587,7 +2587,7 @@ def test_tags_are_written_while_the_analysis_goes_on(tmp_path):
     w.db.execute("INSERT INTO asset (asset_id) VALUES ('c')")   # analysed, nothing confirmed
     w.db.commit()
     im = FakeImmich(["a", "b", "c"])
-    im.write_gap, w.client = 0, im
+    im.write_gap, im.writable, w.client = 0, True, im
     w.progress["phases"] = {"analyze": [0, 0, 0], "geo": [0, 0, 0]}
     tags = _TagWriter(w)
     tags.add(["a", "c"])
@@ -2688,3 +2688,391 @@ def test_exiftool_found_in_the_installer_copy_without_the_launcher(tmp_path, mon
     (other / "exiftool.exe").write_bytes(b"")
     monkeypatch.setenv("TAXONERO_EXIFTOOL", str(other))                      # the launcher's folder comes first
     assert exiftool.command() == [str(other / "exiftool.exe")]
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_two_folders_as_two_sources(tmp_path):
+    """Several sources: a folder added next to the main one. Same file name in both (no id clash), each photo read
+    and written in its own source, records kept per source, deletions checked per source; removing the source hides
+    its photos, adding it again brings them back with their reviews, and a restart reopens it."""
+    import json
+    import shutil
+    from pathlib import Path
+    from taxonero import store
+    from taxonero.config import Settings
+    from taxonero.pipeline import Analysis, Box, Candidate, Decision
+    from taxonero.worker import Worker
+
+    src = Path(__file__).parent.parent / "dev" / "photos" / "inat_141438356.jpg"
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    for d in (a_dir, b_dir):
+        d.mkdir()
+        shutil.copy(src, d / "img.jpg")
+        old = __import__("time").time() - 3600   # changed an hour ago (otherwise left alone for 10 min)
+        __import__("os").utime(d / "img.jpg", (old, old))
+
+    class Fake:
+        def analyze(self, data, lat=None, lon=None, original=None, fallback=None, groups=None):
+            c = Candidate("Circus hudsonius", .9, {"kingdom": "Animalia"}, 1, "Circus hudsonius", posterior=.9, prior=.9)
+            return [Analysis(Box(.1, .1, .5, .5, .9, "animal"), Decision(1, "Circus hudsonius", "species", .9, .8, "green", [c]))]
+
+    s = Settings(source="local", photos_dir=a_dir, data_dir=tmp_path / "data", dry_run=False, auto_confirm="off", gbif_local=False)
+    s.data_dir.mkdir()
+    w = Worker(s, analyzer=Fake())
+    for bad, why in (({"type": "local", "path": str(a_dir)}, "main"), ({"type": "local", "path": str(tmp_path / "x")}, "not found"),
+                     ({"type": "nope", "path": str(b_dir)}, "not available"), ({"type": "immich", "url": "http://x"}, "required")):
+        with pytest.raises(ValueError, match=why):
+            w.add_source(bad)
+    added = w.add_source({"type": "local", "path": str(b_dir), "label": "Phone"})
+    sid = added["id"]
+    assert added["label"] == "Phone" and added["writable"] and sid.startswith("s")
+    with pytest.raises(ValueError, match="already"):
+        w.add_source({"type": "local", "path": str(b_dir)})
+    assert w.check() and w.scan() == 2
+    rows = {r["source"]: r["asset_id"] for r in w.db.execute("SELECT asset_id, source FROM asset")}
+    assert set(rows) == {"", sid} and rows[""] != rows[sid]                 # same "img.jpg", two photos
+    assert w.client_for(rows[sid]) is w.extras[sid] and w.client_for(rows[""]) is w.client
+    assert w.client_for(rows[sid]).thumbnail(rows[sid], "thumbnail")
+
+    store.save_taxon(w.db, 1, json.dumps({"scientific_name": "Circus hudsonius", "rank": "species", "vernacular": {"fr": "Busard"},
+                                          "lineage": {"class": "Aves", "family": "Accipitridae", "genus": "Circus"}, "v": 99}))
+    w.db.commit()
+    assert w.analyze() == 2
+    w.db.execute("UPDATE detection SET status = 'confirmed', confirmed_by = 'user'")
+    w.db.commit()
+    assert w.sync().assets == 2
+    assert (a_dir / "img.jpg.xmp").exists() and (b_dir / "img.jpg.xmp").exists()
+    written = {r["kind"] for r in w.db.execute("SELECT kind FROM written")}
+    assert {"tag", f"tag@{sid}", "tag_asset", f"tag_asset@{sid}"} <= written   # same tag value, kept apart
+    assert w.extras[sid].get_asset(rows[sid])["tags"]
+
+    shutil.copy(src, b_dir / "other.jpg")   # an empty folder is never taken as "everything deleted"
+    (b_dir / "img.jpg").unlink()                                             # deleted from the added folder only
+    w.reconcile(force=True)
+    hidden = lambda aid: w.db.execute("SELECT missing_at FROM asset WHERE asset_id = ?", (aid,)).fetchone()[0] is not None
+    assert hidden(rows[sid]) and not hidden(rows[""])
+    shutil.copy(src, b_dir / "img.jpg")
+    w.scan()
+    assert not hidden(rows[sid])
+
+    w.remove_source(sid)
+    assert hidden(rows[sid]) and not hidden(rows[""]) and sid not in w.extras
+    with pytest.raises(FileNotFoundError):
+        w.client_for(rows[sid])
+    assert w.add_source({"type": "local", "path": str(b_dir)})["id"] == sid      # same source: same id
+    w.scan()
+    assert not hidden(rows[sid])
+    assert w.db.execute("SELECT status FROM detection WHERE asset_id = ?", (rows[sid],)).fetchone()[0] == "confirmed"
+
+    w.client.close()
+    for c in w.extras.values():
+        c.close()
+    w2 = Worker(s, analyzer=Fake())                                          # restart: the added source is reopened
+    assert list(w2.extras) == [sid] and w2.client_for(rows[sid]) is w2.extras[sid]
+    w2.client.close()
+    w2.extras[sid].close()
+
+
+def test_records_stay_readable_by_the_previous_version(tmp_path):
+    """Going back to 0.2.x after this version must keep working: the table of what was written keeps its columns
+    (0.2.x inserts 5 values), the main source's records are unchanged, and those of an added source have their own kinds,
+    which 0.2.x ignores (it only reads 'tag', 'tag_asset' and 'description')."""
+    from taxonero import store
+    from taxonero.sync import Syncer
+    db = store.connect(tmp_path / "db.sqlite")
+    assert [r["name"] for r in db.execute("PRAGMA table_info(written)")] == ["kind", "immich_id", "asset_id", "value", "written_at"]
+    db.execute("INSERT OR REPLACE INTO written VALUES (?, ?, ?, ?, ?)", ("tag", "t1", "", "Nature", 1.0))   # as 0.2.x does
+    Syncer(db, None, source="s1")._record("tag", "t1", "", "Nature")       # same tag value, in an added source
+    assert sorted(r[0] for r in db.execute("SELECT kind FROM written")) == ["tag", "tag@s1"]
+    assert db.execute("SELECT count(*) FROM written WHERE kind = 'tag'").fetchone()[0] == 1
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_sources_api_and_photo_filter(tmp_path):
+    """Settings > Other sources: added, listed (never with the API key), refused with a reason, removed; the Photos
+    page filters by source and the viewer says where a photo comes from."""
+    from PIL import Image
+    s, w = _local_worker(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    Image.new("RGB", (64, 48), (200, 10, 10)).save(other / "x.jpg")
+    c = _web(s, w)
+    assert c.get("/api/sources").json()["extra"] == [] and c.get("/api/status").json()["sources"] == []
+    r = c.post("/api/sources/extra", json={"type": "local", "path": str(tmp_path / "nowhere")})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_source"
+    r = c.post("/api/sources/extra", json={"type": "local", "path": str(other), "label": "Garden"})
+    assert r.status_code == 200
+    extra = r.json()["extra"]
+    assert [(x["label"], x["type"], x["writable"]) for x in extra] == [("Garden", "local", True)]
+    sid = extra[0]["id"]
+    w.scan()
+    assert c.get("/api/sources").json()["extra"][0]["photos"] == 1
+    status = c.get("/api/status").json()
+    assert [x["id"] for x in status["sources"]] == ["main", sid]
+    ids = lambda **q: {a["asset_id"] for a in c.get("/api/photos", params={"filter": "all", **q}).json()}
+    assert len(ids()) == 3 and len(ids(source="main")) == 2 and len(ids(source=sid)) == 1
+    (aid,) = ids(source=sid)
+    assert c.get(f"/api/assets/{aid}").json()["source_label"] == "Garden"
+    assert c.get(f"/api/thumb/{aid}", params={"size": "thumbnail"}).status_code == 200
+    assert c.delete("/api/sources/extra/nope").status_code == 404
+    assert c.delete(f"/api/sources/extra/{sid}").json()["extra"] == []
+    assert len(ids()) == 2 and c.get(f"/api/thumb/{aid}").status_code == 404   # hidden with its source
+    # An Immich account is never sent back with its key.
+    w.extra_specs.append({"id": "s0", "type": "immich", "url": "http://imm", "key": "secret-key", "label": ""})
+    assert "secret-key" not in c.get("/api/sources").text
+    w.client.close()
+
+
+def _fake_apple_photos(monkeypatch, lib, photos, open_in_photos=True, running=True, loads=None):
+    """osxphotos and photoscript replaced by fakes with the same interface (they only run on macOS): photos is
+    {uuid: dict of PhotoInfo attributes}; keywords and description are those Photos holds (written by photoscript)."""
+    import sys
+    import types
+    from datetime import datetime, timezone
+    from taxonero.sources import applephotos
+
+    class Info:
+        def __init__(self, uuid, d):
+            self.uuid, self._d = uuid, d
+
+        def __getattr__(self, k):
+            return self._d[k]
+
+        @property
+        def keywords(self):
+            return list(self._d["keywords"])
+
+        @property
+        def description(self):
+            return self._d["description"]
+
+    class PhotosDB:
+        def __init__(self, dbfile=None):
+            assert dbfile == str(lib)
+            if loads is not None:
+                loads.append(1)
+
+        def photos(self, images=True, movies=True):
+            return [Info(u, d) for u, d in photos.items()]
+
+    class Photo:
+        def __init__(self, uuid):
+            assert running, "AppleScript would start Photos"
+            if not open_in_photos or uuid not in photos:
+                raise ValueError(f"Invalid photo id: {uuid}")
+            self._d = photos[uuid]
+
+        keywords = property(lambda self: list(self._d["keywords"]), lambda self, v: self._d.update(keywords=list(v)))
+        description = property(lambda self: self._d["description"], lambda self, v: self._d.update(description=v))
+
+    monkeypatch.setitem(sys.modules, "osxphotos", types.SimpleNamespace(PhotosDB=PhotosDB))
+    monkeypatch.setitem(sys.modules, "photoscript", types.SimpleNamespace(Photo=Photo))
+    monkeypatch.setattr(applephotos, "MACOS", True)
+    monkeypatch.setattr(applephotos, "_photos_running", lambda: running)
+    return datetime(2026, 5, 1, 9, 30, tzinfo=timezone.utc)
+
+
+def test_apple_photos_source(tmp_path, monkeypatch):
+    """Apple Photos (macOS): photos read from the library (place, date, people), images from the previews Photos keeps,
+    keywords and description written through Photos and removed when rejected, a keyword of the user left alone;
+    a library that is not the one open in Photos is read only."""
+    import json
+    import types
+    from PIL import Image
+    from taxonero import store
+    from taxonero.config import Settings
+    from taxonero.pipeline import Analysis, Box, Candidate, Decision
+    from taxonero.worker import Worker
+
+    lib = tmp_path / "Photos Library.photoslibrary"
+    (lib / "resources" / "derivatives").mkdir(parents=True)
+    (lib / "database").mkdir()
+    (lib / "database" / "Photos.sqlite").write_bytes(b"v1")
+    prev = lib / "resources" / "derivatives" / "A_1_105_c.jpeg"
+    Image.new("RGB", (1600, 1200), (30, 140, 60)).save(prev)
+    place = types.SimpleNamespace(address=types.SimpleNamespace(city="Arles", state_province="PACA", country="France"))
+    exif = types.SimpleNamespace(camera_make="Apple", camera_model="iPhone 15", lens_model=None)
+    photos = {}
+    when = _fake_apple_photos(monkeypatch, lib, photos)
+    photos.update({
+        "A": dict(exif_info=exif, location=(43.67, 4.63), place=place, width=4032, height=3024, fingerprint="fa",
+                  original_filesize=1, original_filename="IMG_1.HEIC", persons=[], date=when, date_modified=when,
+                  description="Holiday", keywords=["Vacances"], path=None, path_derivatives=[str(prev)]),
+        "B": dict(exif_info=None, location=(None, None), place=None, width=10, height=10, fingerprint=None,
+                  original_filesize=2, original_filename="IMG_2.HEIC", persons=["_UNKNOWN_"], date=when, date_modified=None,
+                  description="", keywords=[], path=None, path_derivatives=[str(prev)])})
+
+    class Fake:
+        def analyze(self, data, lat=None, lon=None, original=None, fallback=None, groups=None):
+            c = Candidate("Circus hudsonius", .9, {"kingdom": "Animalia"}, 1, "Circus hudsonius", posterior=.9, prior=.9)
+            return [Analysis(Box(.1, .1, .5, .5, .9, "animal"), Decision(1, "Circus hudsonius", "species", .9, .8, "green", [c]))]
+
+    s = Settings(source="applephotos", catalog_path=lib, data_dir=tmp_path / "data", dry_run=False, auto_confirm="off",
+                 gbif_local=False, skip_people=True, analysis_window="")
+    s.data_dir.mkdir()
+    w = Worker(s, analyzer=Fake())
+    assert w.check() and w.client.writable and not w.client.warnings
+    assert w.scan() == 2
+    rows = {r["file_name"]: dict(r) for r in w.db.execute("SELECT * FROM asset")}
+    a = rows["IMG_1.HEIC"]
+    assert (a["city"], a["country"], a["taken_at"], a["make"], a["people"]) == ("Arles", "France", "2026-05-01T09:30:00", "Apple", 0)
+    assert rows["IMG_2.HEIC"]["people"] == 1                                 # a face: skipped like with Immich
+    assert min(Image.open(__import__("io").BytesIO(w.client.thumbnail(a["asset_id"], "thumbnail"))).size) == 250
+    store.save_taxon(w.db, 1, json.dumps({"scientific_name": "Circus hudsonius", "rank": "species", "vernacular": {"fr": "Busard"},
+                                          "lineage": {"class": "Aves", "family": "Accipitridae", "genus": "Circus"}, "v": 99}))
+    w.db.commit()
+    w.analyze()
+    w.db.execute("UPDATE detection SET status = 'confirmed', confirmed_by = 'user'")
+    w.db.commit()
+    w.sync()
+    kw = photos["A"]["keywords"]
+    assert kw[0] == "Vacances" and kw[1].startswith("Nature/Aves/") and len(kw) == 2
+    assert photos["A"]["description"].startswith("Holiday") and "Busard" in photos["A"]["description"]
+    w.db.execute("UPDATE detection SET status = 'rejected'")
+    w.db.commit()
+    w.sync()
+    assert photos["A"]["keywords"] == ["Vacances"] and photos["A"]["description"].strip() == "Holiday"
+
+    _fake_apple_photos(monkeypatch, lib, photos, open_in_photos=False)    # another library open in Photos
+    assert not w.check() and not w.client.errors and "not the one open in Photos" in w.client.warnings[0]
+    _fake_apple_photos(monkeypatch, lib, photos, running=False)            # Photos closed: never started by Taxonero
+    assert not w.check() and "not open" in w.client.warnings[0]
+    assert w.client.get_asset(a["asset_id"])["tags"] == [{"id": "Vacances", "value": "Vacances"}]   # still readable
+
+    loads = []                                                               # the library is read again only when changed
+    _fake_apple_photos(monkeypatch, lib, photos, loads=loads)
+    w.client._photos = {}
+    w.check(), w.scan(), w.reconcile(force=True)
+    assert len(loads) == 1
+    (lib / "database" / "Photos.sqlite").write_bytes(b"v22")
+    w.scan()
+    assert len(loads) == 2
+    w.client.close()
+
+
+def test_apple_photos_only_on_macos(tmp_path):
+    from taxonero.sources import available
+    from taxonero.sources.applephotos import ApplePhotos
+    import sys
+    assert {o["id"]: o["available"] for o in available("desktop")}["applephotos"] == (sys.platform == "darwin")
+    lib = tmp_path / "x.photoslibrary"
+    lib.mkdir()
+    src = ApplePhotos(lib, tmp_path)
+    if sys.platform != "darwin":
+        assert not src.check() and "macOS only" in src.errors[0]
+    src.close()
+
+
+def test_an_unreachable_source_does_not_stop_the_others(tmp_path):
+    """An added Immich account that does not answer: the main source is still read, the failing one is reported and
+    its photos are not taken for deleted; if every source fails, the error is raised as before."""
+    import httpx
+    s, w = _local_worker(tmp_path)
+
+    class Down:
+        writable, dry_run, errors, warnings = False, True, [], []
+
+        def iter_assets(self, **k):
+            raise httpx.ConnectError("unreachable")
+            yield
+
+    w.db.execute("INSERT INTO asset (asset_id, source) VALUES ('far', 'sX')")
+    w.db.commit()
+    w.extras, w.extra_specs = {"sX": Down()}, [{"id": "sX", "type": "immich", "url": "http://far", "key": "k", "label": ""}]
+    assert w.scan() == 2 and "unreachable" in w.scan_errors["sX"]
+    w.reconcile(force=True)
+    assert w.db.execute("SELECT missing_at FROM asset WHERE asset_id = 'far'").fetchone()[0] is None   # not "deleted"
+    w.sync()                                                                 # read-only source: skipped, no error
+    w.s.source, w.s.immich_url = "immich", ""                                # only the failing source left
+    with pytest.raises(httpx.ConnectError):
+        w.scan()
+    w.client.close()
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_only_added_sources_and_no_double_source(tmp_path):
+    """No main source set (Immich left empty) but a folder added: the cycle runs on it and the dashboard names it;
+    a folder or an Immich account cannot be both the main source and an added one."""
+    from PIL import Image
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    folder = tmp_path / "f"
+    folder.mkdir()
+    Image.new("RGB", (64, 48), (1, 2, 3)).save(folder / "a.jpg")
+    s = Settings(source="immich", immich_url="", immich_api_key="", data_dir=tmp_path, gbif_local=False,
+                 dashboard_no_auth=True)
+
+    class NoAnalyzer:
+        def analyze(self, *a, **k):
+            return []
+    w = Worker(s, analyzer=NoAnalyzer())
+    assert not w.configured
+    sid = w.add_source({"type": "local", "path": str(folder), "label": "Folder"})["id"]
+    assert w.configured and not w.main_configured
+    report = w.run_once(manual=True)
+    assert report["scanned"] == 1 and not report.get("errors")
+    st = _web(s, w).get("/api/status").json()
+    assert st["writable"] and [x["id"] for x in st["sources"]] == [sid]
+    w.env_source = False                                                     # as if chosen in the dashboard
+    with pytest.raises(ValueError, match="already an added source"):
+        w.set_source("local", str(folder))
+    w.extra_specs = [*w.extra_specs, {"id": "s9", "type": "immich", "url": "http://imm", "key": "k", "label": ""}]
+    assert w.connect("http://imm", "k")["code"] == "duplicate"
+    w.extras[sid].close()
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_a_file_name_with_a_line_break_does_not_stop_the_scan(tmp_path):
+    """ExifTool reads its arguments one per line: such a name cannot be given to it. It used to stop the reading of
+    its whole batch (200 photos), at every cycle; it is now skipped alone."""
+    from PIL import Image
+    from taxonero.sources.local import LocalFolder
+    ph = tmp_path / "ph"
+    ph.mkdir()
+    Image.new("RGB", (32, 32)).save(ph / "ok.jpg")
+    Image.new("RGB", (32, 32)).save(ph / "bad\nname.jpg", "JPEG")
+    src = LocalFolder(ph, tmp_path)
+    assert [a["originalFileName"] for a in src.iter_assets()] == ["ok.jpg"] and src.count_files() == 1
+    src.close()
+
+
+def test_backups_keep_no_api_key_of_added_accounts(tmp_path, monkeypatch):
+    """Backups leave out every Immich API key, those of the added accounts too; after a restore the account asks for
+    its key again, and a new key keeps the same source (its photos and reviews)."""
+    import json
+    import sqlite3
+    from taxonero import store
+    s, w = _local_worker(tmp_path, backup_keep=2)
+
+    class Client:
+        writable, dry_run, version, errors, warnings = True, True, "3.3.5", [], []
+
+        def __init__(self, key):
+            self.key = key
+
+        def check(self):
+            self.errors = [] if self.key == "good" else ["HTTP 401"]
+            return not self.errors
+
+        def status(self):
+            return {"version": self.version, "errors": self.errors, "warnings": []}
+
+        def close(self):
+            pass
+    monkeypatch.setattr("taxonero.worker.make_extra", lambda spec, s: Client(spec["key"]))
+    spec = {"id": "s1", "type": "immich", "url": "http://far", "key": "secret-key-123", "label": ""}
+    w.extra_specs, w.extras = [spec], {"s1": Client("secret-key-123")}
+    store.set_state(w.db, "sources", json.dumps([spec]))
+    dest = w.backup(force=True)
+    saved = sqlite3.connect(dest).execute("SELECT value FROM state WHERE key = 'sources'").fetchone()[0]
+    assert "secret-key-123" not in dest.read_bytes().decode("latin-1") and json.loads(saved)[0]["key"] == ""
+    assert json.loads(store.get_state(w.db, "sources"))[0]["key"] == "secret-key-123"   # the live database keeps it
+    w.extra_specs = [{**spec, "key": ""}]                                    # as after a restore
+    assert w.sources_status(w.db)[0]["key_missing"]
+    with pytest.raises(ValueError, match="401"):
+        w.set_source_key("s1", "wrong")
+    assert w.set_source_key("s1", "good")["id"] == "s1"
+    assert w.extra_specs[0]["key"] == "good" and not w.sources_status(w.db)[0]["key_missing"]
+    with pytest.raises(KeyError):
+        w.set_source_key("nope", "good")
+    w.client.close()

@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
@@ -23,8 +24,8 @@ from . import backbone, hardware, ranges, series, store, wiki
 from .config import EDITABLE, Settings, apply_overrides
 from .immich.client import is_missing, is_transient, probe
 from .pipeline import _contained, _iou, Analysis, Analyzer, Box, Classifier, Detector, image_quality, open_image, OpenVocabDetector
-from .sources import SOURCES, available, check_path, make_source, source_path
-from .sync import WRITE_GAP, Syncer
+from .sources import SOURCES, available, check_path, extra_id, make_extra, make_source, source_path
+from .sync import WRITE_GAP, Syncer, SyncStats
 from .taxonomy import HIGHER, NAMES_VERSION, TAXON_VERSION, Taxonomy, tidy_names, to_json
 from .autoconfirm import audit_pick, auto_threshold, blocked_groups, should_auto_confirm
 from .curation import EXCLUDED, cand_json, candidate_filter, drop_unwanted, prune_pending
@@ -175,9 +176,8 @@ class _TagWriter:
     def _run(self) -> None:
         w, s = self.w, self.w.s
         db = store.connect(s.db_path)
+        syncers: dict[str, Syncer] = {}   # one per source, made at its first photo
         try:
-            syncer = Syncer(db, w.client, s.tag_root, s.names_lang, s.write_description,
-                            write_gap=getattr(w.client, "write_gap", WRITE_GAP), checkpoint=w._checkpoint)
             end = False
             while not end:
                 ids = [self.q.get()]
@@ -188,12 +188,18 @@ class _TagWriter:
                         break
                 end = None in ids
                 ids = [a for a in ids if a]
-                if ids:
-                    syncer.sync_all(asset_ids=ids, full=False)
-                    for aid in syncer.missing:
-                        w.mark_missing(aid, db)
-                    syncer.missing.clear()
-                    self.done += len(ids)
+                by_source: dict[str, list[str]] = {}
+                for a in ids:
+                    by_source.setdefault(w._owner.get(a, ""), []).append(a)
+                for sid, group in by_source.items():
+                    client = w.client if not sid else w.extras.get(sid)
+                    if client is not None and client.writable:   # read-only source: nothing to write
+                        syncer = syncers.get(sid) or syncers.setdefault(sid, w.syncer(sid, client, db, checkpoint=w._checkpoint))
+                        syncer.sync_all(asset_ids=group, full=False)
+                        for aid in syncer.missing:
+                            w.mark_missing(aid, db)
+                        syncer.missing.clear()
+                    self.done += len(group)
                     self._show()
         except Interrupted:   # setting from the dashboard: stops, the next cycle resumes
             pass
@@ -232,6 +238,18 @@ class Worker:
             s.photos_dir = Path(saved_source.get("photos_dir") or s.photos_dir)
             s.catalog_path = Path(saved_source["catalog_path"]) if saved_source.get("catalog_path") else s.catalog_path
         self.client = make_source(s)
+        # Sources added in the dashboard (id -> client), besides the main one (id ''): see add_source.
+        self.extra_specs: list[dict] = json.loads(store.get_state(self.db, "sources") or "[]")
+        self.extras: dict = {}
+        for spec in self.extra_specs:
+            try:
+                self.extras[spec["id"]] = make_extra(spec, s)
+            except Exception:   # Immich client, folder: rebuilt at the next start; its photos wait meanwhile
+                log.exception("source %s not opened", spec.get("id"))
+        # Source of each photo of an added source (photos of the main one are not listed): image reads and writes go
+        # to its client.
+        self._owner: dict[str, str] = {r["asset_id"]: r["source"] for r in
+                                       self.db.execute("SELECT asset_id, source FROM asset WHERE source != ''")}
         self.tx = Taxonomy(self.db, langs=s.langs, user_agent=s.user_agent, backbone=s.backbone_path if s.gbif_local else None)
         self._analyzer = analyzer
         self._device: str | None = None   # device of the loaded models (None: provided from outside)
@@ -242,7 +260,8 @@ class Worker:
         self._models_used = 0.0   # last request for the models (time.monotonic), to unload them when idle
         self._stages_kept: dict[str, list] = {}   # time per stage of unloaded models (Settings page)
         # Original for small subjects: None until tried, True if obtained, False without the asset.download permission.
-        self._original_ok: bool | None = None
+        self._original_ok: dict[str, bool] = {}   # per source: Immich key allowed to download originals
+        self.scan_errors: dict[str, str] = {}     # sources that did not answer at the last scan (id -> error)
         self.backbone_state = {"state": "waiting" if s.gbif_local else "off"}   # local GBIF taxonomy (Settings)
         self._speed: list[float] = []   # time per photo of the latest photos (s), whole analysis or AI part (two phases)
         self._speed_geo: list[float] = []   # same for the geographic check (second phase)
@@ -294,6 +313,12 @@ class Worker:
             if copy.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone():
                 copy.execute(f"DELETE FROM {table}")
         copy.execute("DELETE FROM state WHERE key = 'immich'")   # the API key does not travel with backups
+        # Nor those of the added Immich accounts: kept without their key, to be entered again (Settings > Other sources).
+        row = copy.execute("SELECT value FROM state WHERE key = 'sources'").fetchone()
+        specs = json.loads(row[0] or "[]") if row else []
+        if any(x.get("key") for x in specs):
+            copy.execute("UPDATE state SET value = ? WHERE key = 'sources'",
+                         (json.dumps([{**x, "key": ""} if x.get("key") else x for x in specs]),))
         copy.execute("DELETE FROM inferred")   # AI results waiting for the check: made again after a restore
         copy.commit()
         copy.execute("VACUUM")
@@ -302,7 +327,7 @@ class Worker:
         for old in sorted(folder.glob("taxonero-*.sqlite"))[:-keep]:
             old.unlink()
         store.set_state(self.db, "last_backup", today)
-        log.info("sauvegarde : %s (%d Ko)", dest.name, dest.stat().st_size // 1024)
+        log.info("backup: %s (%d KB)", dest.name, dest.stat().st_size // 1024)
         return dest
 
     def _checkpoint(self) -> None:
@@ -400,8 +425,152 @@ class Worker:
                 log.exception("model unloading failed")
 
     @property
-    def configured(self) -> bool:
+    def main_configured(self) -> bool:
         return self.s.source != "immich" or bool(self.s.immich_url and self.s.immich_api_key)
+
+    @property
+    def configured(self) -> bool:
+        return self.main_configured or bool(self.extras)
+
+    def all_sources(self) -> list[tuple[str, object]]:
+        """(id, client) of each source to go through: the main one ('') if it is set, then the added ones."""
+        return ([("", self.client)] if self.main_configured else []) + list(self.extras.items())
+
+    def client_for(self, asset_id: str):
+        """Client of the source of a photo. A photo of a removed source: FileNotFoundError, like a deleted photo."""
+        sid = self._owner.get(asset_id, "")
+        if not sid:
+            return self.client
+        if sid not in self.extras:
+            raise FileNotFoundError(asset_id)
+        return self.extras[sid]
+
+    def source_type(self, sid: str) -> str:
+        return self.s.source if not sid else next((x["type"] for x in self.extra_specs if x["id"] == sid), "")
+
+    def immich_sources(self) -> list[tuple[str, object]]:
+        """Immich accounts among the sources: those the removal (Settings > Undo) cleans up."""
+        return [(sid, c) for sid, c in self.all_sources() if self.source_type(sid) == "immich"]
+
+    @staticmethod
+    def _key(name: str, sid: str) -> str:
+        """State key (last scan…) of a source: unchanged for the main one."""
+        return f"{name}@{sid}" if sid else name
+
+    def source_label(self, sid: str) -> str:
+        """Name of a source in the dashboard and the logs: its label, its folder or its server."""
+        immich = lambda url: f"Immich ({urlsplit(url).netloc or url})" if url else "Immich"
+        if not sid:
+            return str(source_path(self.s) or immich(self.s.immich_url))
+        spec = next((x for x in self.extra_specs if x["id"] == sid), None)
+        if not spec:
+            return sid
+        return spec.get("label") or spec.get("path") or immich(spec.get("url", ""))
+
+    def sources_status(self, db) -> list[dict]:
+        """Added sources, for the dashboard (the main one has its own panel): never the API key. db: the connection
+        of the calling thread (the dashboard has its own)."""
+        counts = dict(db.execute("SELECT source, count(*) FROM asset WHERE missing_at IS NULL GROUP BY source").fetchall())
+        out = []
+        for spec in self.extra_specs:
+            c = self.extras.get(spec["id"])
+            st = c.status() if c else {"errors": ["not opened"], "warnings": []}
+            out.append({"id": spec["id"], "type": spec["type"], "label": self.source_label(spec["id"]),
+                        "path": spec.get("path"), "url": spec.get("url"), "photos": counts.get(spec["id"], 0),
+                        "writable": bool(c and c.writable), "version": st.get("version"),
+                        "key_missing": spec["type"] == "immich" and not spec.get("key"),   # backup restored
+                        "errors": st.get("errors", []), "warnings": st.get("warnings", [])})
+        return out
+
+    def add_source(self, spec: dict) -> dict:
+        """Source added from the dashboard: an Immich account ({"type": "immich", "url", "key"}) or a folder or library
+        ({"type", "path"}), with an optional label. Opened and checked first: nothing is saved if it does not answer.
+        Its photos come in at the next cycle; the same source removed then added again gets its reviews back."""
+        kind = spec.get("type", "")
+        if not any(o["id"] == kind and o["available"] for o in available(self.s.edition)):
+            raise ValueError(f"source not available here: {kind}")
+        clean = {"type": kind, "label": str(spec.get("label") or "").strip()[:80]}
+        if kind == "immich":
+            clean["url"], clean["key"] = str(spec.get("url") or "").strip().rstrip("/"), str(spec.get("key") or "").strip()
+            if not clean["url"] or not clean["key"]:
+                raise ValueError("Immich address and API key required")
+            if clean["url"] == self.s.immich_url and clean["key"] == self.s.immich_api_key and self.s.source == "immich":
+                raise ValueError("this Immich account is already the main source")
+        else:
+            chosen = Path(str(spec.get("path") or "")).expanduser()
+            if reason := check_path(kind, chosen):
+                raise ValueError(reason)
+            clean["path"] = str(chosen)
+            if self.s.source == kind and source_path(self.s) == chosen:
+                raise ValueError("this folder is already the main source")
+        clean["id"] = extra_id(clean)
+        if clean["id"] in self.extras:
+            raise ValueError("source already added")
+        client = make_extra(clean, self.s)
+        try:
+            client.check()
+        except Exception:
+            client.close()
+            raise
+        if client.errors:
+            client.close()
+            raise ValueError(" ; ".join(client.errors))
+        with self._idle():
+            # Replaced, not changed in place: the dashboard may be reading them from another thread.
+            self.extras = {**self.extras, clean["id"]: client}
+            self.extra_specs = [*self.extra_specs, clean]
+            store.set_state(self.db, "sources", json.dumps(self.extra_specs))
+        log.info("photo source added: %s %s", kind, self.source_label(clean["id"]))
+        self._wake.set()   # its photos come in now rather than at the next cycle
+        return {"id": clean["id"], "label": self.source_label(clean["id"]), "writable": client.writable}
+
+    def set_source_key(self, sid: str, key: str) -> dict:
+        """New API key for an added Immich account (key changed in Immich, or backup restored without the keys): checked
+        first, the source keeps its id, hence its photos and their reviews."""
+        spec = next((x for x in self.extra_specs if x["id"] == sid), None)
+        if spec is None:
+            raise KeyError(sid)
+        key = key.strip()
+        if spec["type"] != "immich" or not key:
+            raise ValueError("API key required")
+        new = {**spec, "key": key}
+        client = make_extra(new, self.s)
+        try:
+            client.check()
+        except Exception:
+            client.close()
+            raise
+        if client.errors:
+            client.close()
+            raise ValueError(" ; ".join(client.errors))
+        with self._idle():
+            old = self.extras.get(sid)
+            self.extras = {**self.extras, sid: client}
+            self.extra_specs = [new if x["id"] == sid else x for x in self.extra_specs]
+            store.set_state(self.db, "sources", json.dumps(self.extra_specs))
+        if old:
+            threading.Timer(30, old.close).start()
+        log.info("API key changed for %s", self.source_label(sid))
+        return {"id": sid, "label": self.source_label(sid), "writable": client.writable}
+
+    def remove_source(self, sid: str) -> None:
+        """Source removed from the dashboard: its photos are hidden (with their reviews, which come back if it is added
+        again). What was already written in it stays there: Settings > Undo removes it first."""
+        if sid not in self.extras and not any(x["id"] == sid for x in self.extra_specs):
+            raise KeyError(sid)
+        with self._idle():
+            client = self.extras.get(sid)
+            self.extras = {k: v for k, v in self.extras.items() if k != sid}
+            self.extra_specs = [x for x in self.extra_specs if x["id"] != sid]
+            self.scan_errors.pop(sid, None)
+            store.set_state(self.db, "sources", json.dumps(self.extra_specs))
+            self.db.execute("UPDATE asset SET missing_at = ? WHERE source = ? AND missing_at IS NULL", (time.time(), sid))
+            self.db.commit()
+            for key in ("last_scan", "last_scan_video", "last_reconcile"):
+                store.set_state(self.db, self._key(key, sid), "")   # added again: everything listed again
+        if client:
+            threading.Timer(30, client.close).start()
+        log.info("photo source removed: %s", sid)
 
     def credentials(self, url: str, api_key: str) -> tuple[str, str]:
         """(url, key) of a connection entered in the dashboard; environment values take precedence. Empty key:
@@ -421,6 +590,8 @@ class Worker:
             url, api_key = self.credentials(url, api_key)
         except ValueError as e:
             return {"code": "key_required", "errors": [str(e)]}
+        if any(x["type"] == "immich" and x.get("url") == url and x.get("key") == api_key for x in self.extra_specs):
+            return {"code": "duplicate", "errors": ["this Immich account is already an added source: remove it there first"]}
         # Normal timeout (30 s): this client is then used for analysis (heavy originals), not only for the test.
         client, state = probe(url, api_key, dry_run=self.s.dry_run, timeout=30.0)
         if client is None:
@@ -431,7 +602,7 @@ class Worker:
                 store.set_state(self.db, "immich", json.dumps(saved))
                 self.s.immich_url, self.s.immich_api_key = url, api_key
                 old, self.client = self.client, client
-                self._original_ok = None
+                self._original_ok = {}
                 self.check()
         except Busy:
             client.close()
@@ -446,11 +617,15 @@ class Worker:
             raise ValueError("DRY_RUN is set in the environment (server edition)")
         with self._idle():
             before = self.s.dry_run
-            self.s.dry_run = self.client.dry_run = bool(value)
+            for _, c in [("", self.client), *self.extras.items()]:
+                c.dry_run = bool(value)
+            self.s.dry_run = bool(value)
             try:
                 self.check()
             except Exception:   # source unreachable: setting unchanged, especially when enabling writes
-                self.s.dry_run = self.client.dry_run = before
+                for _, c in [("", self.client), *self.extras.items()]:
+                    c.dry_run = before
+                self.s.dry_run = before
                 raise
             store.set_state(self.db, "dry_run", "1" if value else "0")
 
@@ -469,6 +644,8 @@ class Worker:
                 chosen = Path(path or "").expanduser()
                 if reason := check_path(source, chosen):
                     raise ValueError(reason)
+                if any(x["type"] == source and Path(x.get("path", "")) == chosen for x in self.extra_specs):
+                    raise ValueError("this folder is already an added source: remove it there first")
                 if where == "folder":
                     self.s.photos_dir = chosen
                 else:
@@ -517,10 +694,18 @@ class Worker:
                 self._wake.set()
 
     def check(self) -> bool:
-        if not self.configured:
+        """State of each source (version, rights, warnings); True if the main one can be written."""
+        self._original_ok = {}   # asset.download permission possibly added since a 403
+        for sid, c in self.extras.items():
+            try:
+                c.check()
+            except Exception as e:   # unreachable: its photos wait, the other sources go on
+                c.errors, c.writable = [f"{type(e).__name__}: {e}"], False
+            for e in c.errors:
+                log.error("source %s: %s", self.source_label(sid), e)
+        if not self.main_configured:
             store.set_state(self.db, "writable", "0")
             return False
-        self._original_ok = None   # asset.download permission possibly added since a 403
         ok = self.client.check()
         for w in self.client.warnings:
             log.warning("compatibility: %s", w)
@@ -597,7 +782,10 @@ class Worker:
         for r in rows:
             self.db.commit()
             self._checkpoint()
-            a = self.client.get_asset(r["asset_id"], missing_ok=True)
+            try:
+                a = self.client_for(r["asset_id"]).get_asset(r["asset_id"], missing_ok=True)
+            except FileNotFoundError:   # removed source
+                a = None
             if a is None:
                 self.mark_missing(r["asset_id"])
                 continue
@@ -612,73 +800,116 @@ class Worker:
         return ("IMAGE", "VIDEO") if self.s.analyze_videos else ("IMAGE",)
 
     def scan(self) -> int:
-        """Fetch the assets new or changed since the last scan. One marker per type: enabling
-        videos later fetches all of them at the next cycle."""
-        n = 0
-        # Progress: files walked out of the total for a file source (known in advance), otherwise a counter of the
-        # photos received (Immich gives no total for "changed since").
-        walked = hasattr(self.client, "count_files")
+        """Fetch the assets new or changed since the last scan, source after source. One marker per type and per
+        source: enabling videos later fetches all of them at the next cycle. A source that does not answer is
+        skipped (logged, in the cycle report) and the others go on; if every source fails, the error is raised."""
+        n, errors = 0, []
+        sources = self.all_sources()
+        # Progress: files walked out of the total when every source is a file source (known in advance), otherwise a
+        # counter of the photos received (Immich gives no total for "changed since").
+        walked = all(hasattr(c, "count_files") for _, c in sources)
         if walked:
-            self.progress["total"] = self.client.count_files()
-            self.client.on_file = self._tick
+            total = 0
+            for sid, c in sources:
+                try:
+                    total += c.count_files()
+                except Exception:   # unreachable: reported by its scan below
+                    pass
+            self.progress["total"] = total
+        for sid, client in sources:
+            try:
+                n += self._scan_source(sid, client, walked)
+            except Interrupted:
+                raise
+            except Exception as e:
+                self.db.rollback()
+                if len(sources) == 1:
+                    raise
+                log.warning("source %s not read: %s", self.source_label(sid), e)
+                errors.append(e)
+                self.scan_errors[sid] = str(e)
+            else:
+                self.scan_errors.pop(sid, None)
+        if errors and len(errors) == len(sources):
+            raise errors[0]
+        return n
+
+    def _scan_source(self, sid: str, client, walked: bool) -> int:
+        n = 0
+        if walked:
+            client.on_file = self._tick
         try:
             for kind in self.kinds():
-                key = "last_scan" if kind == "IMAGE" else "last_scan_video"
+                key = self._key("last_scan" if kind == "IMAGE" else "last_scan_video", sid)
                 since = store.get_state(self.db, key)
                 started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                for a in self.client.iter_assets(updated_after=since or None, kind=kind, with_people=True):
+                for a in client.iter_assets(updated_after=since or None, kind=kind, with_people=True):
                     # Stopping point; marker not advanced: the next scan picks these photos up again.
                     self._checkpoint() if walked else self._tick()
-                    if store.upsert_asset(self.db, a, with_people=True):
+                    if store.upsert_asset(self.db, a, with_people=True, source=sid):
                         n += 1
+                    if sid:
+                        self._owner[a["id"]] = sid
                 self.db.commit()
                 store.set_state(self.db, key, started)
         finally:
             if walked:
-                self.client.on_file = None
+                client.on_file = None
         return n
 
     def reconcile(self, force: bool = False) -> dict | None:
-        """Once a day: full list of Immich photos (without EXIF, hence light) to spot
-        those deleted or moved to the trash. They are hidden, not erased: a restored
-        photo comes back with its reviews. Also reads the people of each photo again: Immich recognises
-        faces after import, without changing the modification date that scan() follows."""
-        last = float(store.get_state(self.db, "last_reconcile") or 0)
+        """Once a day: full list of the photos of each source (without EXIF, hence light) to spot those deleted or
+        moved to the trash. They are hidden, not erased: a restored photo comes back with its reviews. Also reads
+        the people of each photo again: Immich recognises faces after import, without changing the modification
+        date that scan() follows. A source that did not answer at this cycle's scan is left for the next one."""
+        out: dict | None = None
+        for sid, client in self.all_sources():
+            if sid in self.scan_errors:
+                continue
+            r = self._reconcile_source(sid, client, force)
+            if r:
+                out = {k: (out or {}).get(k, 0) + v for k, v in r.items()}
+        return out
+
+    def _reconcile_source(self, sid: str, client, force: bool) -> dict | None:
+        key = self._key("last_reconcile", sid)
+        last = float(store.get_state(self.db, key) or 0)
         # Database from before people were counted: one pass right away, without waiting for the next day.
-        unknown = self.db.execute("SELECT 1 FROM asset WHERE people IS NULL AND missing_at IS NULL "
-                                  "AND (? OR kind IS NOT 'VIDEO') LIMIT 1", (self.s.analyze_videos,)).fetchone()
+        unknown = self.db.execute("SELECT 1 FROM asset WHERE people IS NULL AND missing_at IS NULL AND source = ? "
+                                  "AND (? OR kind IS NOT 'VIDEO') LIMIT 1", (sid, self.s.analyze_videos)).fetchone()
         if not force and not unknown and time.time() - last < DAILY:
             return None
         self._step("reconcile")
         # Videos disabled: they are not listed, hence hidden like missing photos.
         listed = {}
         for kind in self.kinds():
-            for a in self.client.iter_assets(with_exif=False, size=1000, kind=kind, with_people=True):
+            for a in client.iter_assets(with_exif=False, size=1000, kind=kind, with_people=True):
                 self._tick()   # counter of the photos listed (no total known in advance)
                 listed[a["id"]] = len(a.get("people") or [])
         present = listed.keys()
-        local = {r["asset_id"]: r["missing_at"] for r in self.db.execute("SELECT asset_id, missing_at FROM asset")}
+        local = {r["asset_id"]: r["missing_at"] for r in self.db.execute("SELECT asset_id, missing_at FROM asset WHERE source = ?", (sid,))}
         if not present and local:
-            log.warning("Immich returns no photo: deletion check skipped")
+            log.warning("%s returns no photo: deletion check skipped", self.source_label(sid))
             return None
         gone = [a for a, m in local.items() if a not in present and m is None]
         back = [a for a, m in local.items() if a in present and m is not None]
         now = time.time()
         self.db.executemany("UPDATE asset SET missing_at = ? WHERE asset_id = ?", [(now, a) for a in gone])
         self.db.executemany("UPDATE asset SET missing_at = NULL WHERE asset_id = ?", [(a,) for a in back])
-        self.db.executemany("UPDATE asset SET people = ? WHERE asset_id = ? AND people IS NOT ?",
-                            [(n, a, n) for a, n in listed.items()])
+        self.db.executemany("UPDATE asset SET people = ? WHERE asset_id = ? AND source = ? AND people IS NOT ?",
+                            [(n, a, sid, n) for a, n in listed.items()])
         self.db.commit()
-        store.set_state(self.db, "last_reconcile", str(now))
+        store.set_state(self.db, key, str(now))
         if gone or back:
-            log.info("photos missing from Immich: %d, back: %d", len(gone), len(back))
+            log.info("photos missing from %s: %d, back: %d", self.source_label(sid), len(gone), len(back))
         return {"missing": len(gone), "back": len(back)}
 
     def original(self, asset_id: str, kind: str | None = None) -> bytes | None:
         """Original for small subjects; None without the asset.download permission (noted once), and
         never for a video (heavy file, and Immich's key frame is already at full preview size). Deleted
         photo (is_missing): the exception propagates, so that the caller says so instead of blaming the permission."""
-        if self._original_ok is False:
+        sid = self._owner.get(asset_id, "")
+        if self._original_ok.get(sid) is False:
             return None
         if kind is None:
             row = self.db.execute("SELECT kind FROM asset WHERE asset_id = ?", (asset_id,)).fetchone()
@@ -686,14 +917,14 @@ class Worker:
         if kind == "VIDEO":
             return None
         try:
-            data = self.client.original(asset_id)
-            self._original_ok = True
+            data = self.client_for(asset_id).original(asset_id)
+            self._original_ok[sid] = True
             return data
         except httpx.HTTPStatusError as e:
             if is_missing(e):
                 raise
             if e.response.status_code in (401, 403):
-                self._original_ok = False
+                self._original_ok[sid] = False
                 log.info("no asset.download permission: small subjects identified on the preview")
             return None
         except (OSError, ValueError) as e:   # local folder: RAW without an embedded preview, unreadable file
@@ -777,7 +1008,7 @@ class Worker:
                     log.debug("names unavailable for %s", c.name, exc_info=True)
 
     def _analyze_asset(self, asset_id: str, lat: float | None, lon: float | None) -> list[Analysis]:
-        data = self.client.thumbnail(asset_id, self.s.thumbnail_size)
+        data = self.client_for(asset_id).thumbnail(asset_id, self.s.thumbnail_size)
         analyzer = self.analyzer
         out = analyzer.analyze(data, lat, lon, original=lambda: self.original(asset_id), fallback=self.s.full_image_fallback,
                                groups=self.s.groups)
@@ -796,7 +1027,7 @@ class Worker:
             "detector_providers": det.providers if det else None,
             "open_detector": self.s.open_detector, "open_detector_model": self.s.open_detector_model,
             "open_mode": hardware.open_mode(self.s.open_detector_mode, hw["device"]),
-            "original": self._original_ok,
+            "original": self._original_ok.get(""),
             "analyzer_id": ANALYZER_ID,
             "taxonomy": {**self.backbone_state, "local": self.tx.local is not None},
             # Where the time goes: ms per photo for each stage (stages overlap, see analyze()).
@@ -870,10 +1101,10 @@ class Worker:
             analyzer.open_detector.batch = max(1, chunk // 2)
         piped = hasattr(analyzer, "infer_many")
         finish = (lambda *a: self._keep(*a, db=db)) if infer_only and piped else self._finish
-        load = lambda r: open_image(self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)) if piped else \
-            self.client.thumbnail(r["asset_id"], self.s.thumbnail_size)
+        load = lambda r: open_image(self.client_for(r["asset_id"]).thumbnail(r["asset_id"], self.s.thumbnail_size)) if piped else \
+            self.client_for(r["asset_id"]).thumbnail(r["asset_id"], self.s.thumbnail_size)
         # Previews downloaded ahead: enough at once to keep a large GPU batch fed, at least 4.
-        with ThreadPoolExecutor(max(4, min(16, chunk)), thread_name_prefix="apercu") as pool, \
+        with ThreadPoolExecutor(max(4, min(16, chunk)), thread_name_prefix="preview") as pool, \
                 ThreadPoolExecutor(1, thread_name_prefix="gpu") as gpu:
             fetch = lambda r: pool.submit(load, r)
             pending = [fetch(r) for r in rows[:chunk * 2]]
@@ -1132,11 +1363,16 @@ class Worker:
 
     def undo_summary(self, db) -> dict:
         """What the removal would touch (traces in the database, without calling Immich) and how far it got."""
-        q = lambda sql: db.execute(sql).fetchone()[0]
-        return {"photos": q("SELECT count(DISTINCT asset_id) FROM written WHERE kind IN ('tag_asset', 'description')"),
-                "tags": q("SELECT count(*) FROM written WHERE kind = 'tag'"),
-                "descriptions": q("SELECT count(*) FROM written WHERE kind = 'description'"),
-                "paused": self.writes_paused(db), "dry_run": self.s.dry_run, "source": self.s.source, **self.undo}
+        # Only what was written to an Immich account (the removal does not touch folders or photo applications);
+        # the records of an added source have their own kinds ("tag@<id>", see Syncer).
+        ids = [sid for sid, _ in self.immich_sources()]
+        kinds = lambda *ks: [k if not sid else f"{k}@{sid}" for sid in ids for k in ks] or [""]
+        q = lambda sql, ks: db.execute(sql.format(", ".join("?" * len(ks))), ks).fetchone()[0]
+        return {"photos": q("SELECT count(DISTINCT asset_id) FROM written WHERE kind IN ({})", kinds("tag_asset", "description")),
+                "tags": q("SELECT count(*) FROM written WHERE kind IN ({})", kinds("tag")),
+                "descriptions": q("SELECT count(*) FROM written WHERE kind IN ({})", kinds("description")),
+                "paused": self.writes_paused(db), "dry_run": self.s.dry_run,
+                "source": "immich" if ids else self.s.source, **self.undo}
 
     def writes_paused(self, db=None) -> bool:
         return store.get_state(db or self.db, store.WRITES_PAUSED) == "1"
@@ -1159,12 +1395,17 @@ class Worker:
         def run():
             log.warning("removal requested: %d photo(s) to clean up in Immich", total)
             try:
+                summed, remaining = SyncStats(), 0
                 with self._idle():
-                    syncer = Syncer(self.db, self.client, self.s.tag_root, self.s.names_lang, self.s.write_description,
-                                    write_gap=getattr(self.client, "write_gap", WRITE_GAP), checkpoint=tick)
-                    stats = syncer.uninstall()
-                self.undo.update(state="done", stats=asdict(stats), remaining=syncer.remaining)
-                log.warning("removal finished: %s, remaining photos: %d", stats, syncer.remaining)
+                    # Every Immich account, the removed ones excepted (their client is gone).
+                    for sid, client in self.immich_sources():
+                        syncer = self.syncer(sid, client, checkpoint=tick)
+                        stats = syncer.uninstall()
+                        remaining += syncer.remaining
+                        for k, v in asdict(stats).items():
+                            setattr(summed, k, getattr(summed, k) + v)
+                self.undo.update(state="done", stats=asdict(summed), remaining=remaining)
+                log.warning("removal finished: %s, remaining photos: %d", summed, remaining)
             except Interrupted:
                 self.undo.update(state="interrupted")
                 log.warning("removal interrupted: running it again resumes where it stopped")
@@ -1174,26 +1415,37 @@ class Worker:
 
         threading.Thread(target=run, daemon=True, name="removal").start()
 
+    def syncer(self, sid: str, client, db=None, **kw) -> Syncer:
+        """Writer of the results to one source (its photos and its records only)."""
+        return Syncer(db or self.db, client, self.s.tag_root, self.s.names_lang, self.s.write_description,
+                      write_gap=getattr(client, "write_gap", WRITE_GAP), source=sid, **kw)
+
     def sync(self):
+        """Results written to each writable source; the stats of all of them added up."""
         if self.writes_paused():
             log.info("writes suspended after a removal: nothing is written")
             return None
-        if not self.client.writable:
-            log.warning("Immich server not validated: synchronisation suspended (read-only)")
-            return None
         last_full = float(store.get_state(self.db, "last_full_sync") or 0)
         full = time.time() - last_full >= DAILY
-        syncer = Syncer(self.db, self.client, self.s.tag_root, self.s.names_lang, self.s.write_description,
-                        write_gap=getattr(self.client, "write_gap", WRITE_GAP), checkpoint=self._checkpoint,
-                        progress=self._sync_progress)
-        try:
-            stats = syncer.sync_all(full=full)
-        finally:   # even after a stop (Interrupted)
-            for aid in syncer.missing:
-                self.mark_missing(aid)
-        if full and not self.client.dry_run:
+        total, wrote = SyncStats(), False
+        for sid, client in self.all_sources():
+            if not client.writable:
+                log.warning("%s not validated: synchronisation suspended (read-only)", self.source_label(sid) or "Immich")
+                continue
+            syncer = self.syncer(sid, client, checkpoint=self._checkpoint, progress=self._sync_progress)
+            try:
+                stats = syncer.sync_all(full=full)
+            finally:   # even after a stop (Interrupted)
+                for aid in syncer.missing:
+                    self.mark_missing(aid)
+            wrote = True
+            for k, v in asdict(stats).items():
+                setattr(total, k, getattr(total, k) + v)
+        if not wrote:
+            return None
+        if full and not self.s.dry_run:
             store.set_state(self.db, "last_full_sync", str(time.time()))
-        return stats
+        return total
 
     def _sync_progress(self, done: int, total: int, phases: int) -> None:
         """Progress of the tag writing (Syncer): done and total in work units, phases units per photo (read,
@@ -1205,7 +1457,7 @@ class Worker:
         row = self.db.execute("SELECT quality FROM image_quality WHERE asset_id = ?", (asset_id,)).fetchone()
         if row:
             return row["quality"]
-        q = image_quality(Image.open(io.BytesIO(self.client.thumbnail(asset_id, "thumbnail"))))
+        q = image_quality(Image.open(io.BytesIO(self.client_for(asset_id).thumbnail(asset_id, "thumbnail"))))
         self.db.execute("INSERT OR REPLACE INTO image_quality VALUES (?, ?)", (asset_id, q))
         self.db.commit()
         return q
@@ -1276,6 +1528,8 @@ class Worker:
             report["writable"] = self.check()
             self._step("scan")
             report["scanned"] = self.scan()
+            for sid, e in self.scan_errors.items():   # a source that did not answer: the others went on
+                report.setdefault("errors", {})[f"scan {self.source_label(sid)}"] = e
             report["reconciled"] = self.reconcile()
             report["skipped"] = self.apply_skips()
             self._soft(report, "taxa_refreshed", self.refresh_taxa)
@@ -1380,7 +1634,7 @@ class Worker:
         if thread:
             thread.start()
         # Tags of the photos confirmed by the check, written as they come (not during a removal, nor read-only).
-        tags = _TagWriter(self) if not self.writes_paused() and self.client.writable else None
+        tags = _TagWriter(self) if not self.writes_paused() and any(c.writable for _, c in self.all_sources()) else None
         try:
             while True:
                 if thread and not thread.is_alive():   # AI part over: GPU given back, the check goes on alone
@@ -1511,8 +1765,8 @@ class Worker:
 
     def loop(self) -> None:
         self.loop_started = True
-        threading.Thread(target=self.install_backbone, daemon=True, name="taxonomie-gbif").start()
-        threading.Thread(target=self._watch_idle_models, daemon=True, name="modeles-inactifs").start()
+        threading.Thread(target=self.install_backbone, daemon=True, name="gbif-taxonomy").start()
+        threading.Thread(target=self._watch_idle_models, daemon=True, name="idle-models").start()
         while True:
             self.last_activity = time.time()
             more = False
@@ -1529,7 +1783,7 @@ class Worker:
                 # No Immich connection yet: check again soon, to start as soon as it is entered.
                 more = bool(report.get("more")) or report.get("configured") is False or retry
                 if report.get("configured") is not False and not report.get("busy"):
-                    log.info("cycle : %s", report)
+                    log.info("cycle: %s", report)
             except Exception:
                 log.exception("cycle failed")
             # Wait interrupted by _idle: cycle stopped for a setting, restarted right away.

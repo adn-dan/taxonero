@@ -76,7 +76,13 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
     # URL of the "open in Immich" links: may change when the connection is set from the dashboard.
     public_immich = lambda: (s.immich_public_url or s.immich_url).rstrip("/")
     # Link to the photo in its source (Immich); none for a folder or a photo application.
-    source_link = lambda aid: f"{public_immich()}/photos/{aid}" if s.source == "immich" else None
+    def source_link(aid: str) -> str | None:
+        """The photo in Immich (main account, or an added one); None for a folder or a photo application."""
+        sid = w._owner.get(aid, "")
+        if not sid:
+            return f"{public_immich()}/photos/{aid}" if s.source == "immich" else None
+        spec = next((x for x in w.extra_specs if x["id"] == sid), None)
+        return f"{spec['url']}/photos/{aid}" if spec and spec["type"] == "immich" else None
 
     # Against brute force: wrong passwords per IP address, over a sliding window. Beyond the limit,
     # every attempt from this address is refused without being checked (even a right one) until the window ends.
@@ -185,6 +191,8 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
         a["detections"] = [det_json(r, threshold) for r in db.execute(
             "SELECT * FROM detection WHERE asset_id = ? AND status != 'deleted' ORDER BY status = 'rejected', w * h DESC", (asset_id,))]
         a["immich_link"] = source_link(asset_id)
+        # Where it comes from, when there are several sources (viewer).
+        a["source_label"] = (w.source_label(a.get("source") or "") or s.source) if w.extras else None
         # Why a photo is left out of the analysis by the settings (same rule as worker.SKIPPED_NOT), None otherwise:
         # shown instead of "waiting for analysis", which it is not.
         a["skipped"] = ("video" if a.get("kind") == "VIDEO" and not s.analyze_videos

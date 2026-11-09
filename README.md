@@ -6,7 +6,8 @@
 
 Self-hosted AI species identification for your photos (birds, mammals, reptiles, amphibians, insects, spiders,
 fish, plants, fungi and lichens): an [Immich](https://immich.app) library, a local folder or a photo application
-(darktable, Lightroom Classic, RawTherapee, RapidRAW). **Your pictures are never modified.**
+(darktable, Lightroom Classic, RawTherapee, RapidRAW, Apple Photos), or several at once. **Your pictures are
+never modified.**
 
 <table>
 <tr>
@@ -43,7 +44,8 @@ fish, plants, fungi and lichens): an [Immich](https://immich.app) library, a loc
   results; the GPU is released as soon as the AI part is over. Presence around
   a point costs one GBIF request per 1° area for all species at once (cached 180 days), not one per candidate.
 - Dashboard styled like Immich (same colors, font, sidebar): Photos page with filters (to review,
-  auto-confirmed, confirmed by me, rejected, no detection) and a keyboard-driven full-screen viewer;
+  auto-confirmed, confirmed by me, rejected, no detection), by what was detected (animals, plants, fungi,
+  combinable) and by group, and a keyboard-driven full-screen viewer;
   clickable boxes that open the Wikipedia or Wikispecies article in a side panel; common names in
   15 languages; boxes drawn by hand; Species page (Grid view per group, or Tree view of every branch, kingdom > phylum > class >
   order > family > species; filters by group and IUCN Red List);
@@ -396,6 +398,7 @@ changed, and the settings it needs are checked (warning in Settings otherwise).
 | `lightroom` (Windows, macOS) | those in the `.lrcat` catalog (`CATALOG_PATH`), read with Lightroom closed | `photo.xmp` next to RAW files | Catalog Settings: "Automatically write changes into XMP", then Metadata > "Read Metadata from Files" |
 | `rawtherapee` | a folder (`PHOTOS_DIR`) | `photo.xmp` or `photo.nef.xmp`, per its setting | Preferences > Metadata: "XMP sidecar synchronization" set to "read" (keywords and description used on export) |
 | `rapidraw` | a folder (`PHOTOS_DIR`) | `photo.xmp` | XMP sync on (Settings) |
+| `applephotos` (macOS) | those of the `.photoslibrary` library (`CATALOG_PATH`) | none: keywords and description written by Photos itself | open this library in Photos, and allow Taxonero to control Photos (macOS asks once) |
 
 Known limitations:
 - Lightroom Classic only reads metadata of a JPEG, TIFF, HEIC or DNG from the file itself, which is never
@@ -406,6 +409,22 @@ Known limitations:
   source code).
 - darktable rewrites its XMP files from its database: editing a photo before accepting the XMP reload at
   startup erases the keywords written here (they are written again by the daily synchronization).
+- Apple Photos: the library is read with [osxphotos](https://github.com/RhetTbull/osxphotos), never changing its
+  database; the images analysed are the previews Photos keeps in the library (the originals may stay in iCloud).
+  Photos has no hierarchical keywords: each tag is written as one keyword (`Nature/Aves/Paridae/Great tit`), so
+  that a keyword of yours is never removed. AppleScript acts on the library open in Photos: another library stays
+  read only. No videos. This connector was only tested against a simulation of osxphotos and Photos, not on a Mac.
+
+### Several sources
+
+Settings > Photo source > **Other sources**: besides the main source, a second Immich account (address and API
+key), another folder or a photo application. Each source keeps its photos and gets its own results (tags in its
+Immich, XMP files in its folder); Taxonero remembers where each photo comes from, without writing anything more
+into the picture. The Photos page has a filter per source, and the viewer shows the source of the photo. The same
+photo in two sources (a folder also imported into Immich) is analysed and reviewed in each. Removing a source
+hides its photos and their reviews, which come back if it is added again; what was already written to it stays
+there (for an Immich account, "Undo what was written to Immich" cleans it up first; it covers every Immich
+account). With Docker, an added folder must be mounted in the container, like `PHOTOS_DIR`.
 
 ### Options
 

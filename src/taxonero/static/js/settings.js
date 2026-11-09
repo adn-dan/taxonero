@@ -223,6 +223,66 @@ function bindSource() {
   });
   $('#src-write') && ($('#src-write').onchange = e => put({ dry_run: !e.target.checked }));
 }
+/* Other sources, next to the main one: a second Immich account, another folder, a photo application. Each
+   keeps its photos and gets its own results; removing one hides its photos (they come back if it is added again). */
+function extraCard(m) {
+  if (!m) return '';
+  const opts = m.options.filter(x => x.available);
+  const o = opts.find(x => x.id === SRC.addPick) || opts[0];
+  const browse = STATE.status?.can_pick;
+  const state = x => x.key_missing ? `<span class="bad">✗ ${t('xsrc.key_missing')}</span>`
+    : x.errors.length ? `<span class="bad">✗ ${esc(x.errors[0])}</span>`
+    : x.writable ? `<span class="ok">✓ ${t(m.dry_run ? 'xsrc.dry' : 'xsrc.write')}</span>`
+    : `<span class="warn">⚠️ ${esc(x.warnings[0] || t('xsrc.read'))}</span>`;
+  const list = (m.extra || []).map(x => `<div class="setrow"><div class="lbl"><b>${esc(x.label)}</b>
+      <div class="sub">${esc(srcTitle(x.type))} · ${esc(x.url || x.path || '')} · ${t('count.photos', { n: x.photos })}</div>
+      <div class="sub">${state(x)}</div>
+      ${x.type === 'immich' ? `<div class="srcpath xkey"><input type="password" data-xkeyin="${esc(x.id)}" placeholder="${esc(t('xsrc.key'))}"
+        aria-label="${esc(t('xsrc.key'))}" autocomplete="off"><button class="btn" data-xkey="${esc(x.id)}">${t('xsrc.key_btn')}</button></div>` : ''}</div>
+      <div class="ctl"><button class="btn" data-xremove="${esc(x.id)}">${t('xsrc.remove')}</button></div></div>`).join('');
+  const fields = o.kind === 'server'
+    ? `<input id="xsrc-url" placeholder="https://immich.example.org" aria-label="${esc(t('imm.url'))}" spellcheck="false">
+       <input id="xsrc-key" type="password" placeholder="${esc(t('imm.key'))}" aria-label="${esc(t('imm.key'))}" autocomplete="off">`
+    : `<input id="xsrc-path" aria-label="${esc(t(`src.${o.kind}`))}" spellcheck="false" value="${esc(o.kind === 'folder' ? '' : o.path)}"
+        placeholder="${esc(t(`src.${o.kind}`))}">${browse ? `<button class="btn" id="xsrc-browse">${t('src.browse')}</button>` : ''}`;
+  return `<section class="card" id="xsrccard"><h2>${t('xsrc.title')}</h2><div class="sub" style="font-size:13px">${t('xsrc.sub')}</div>
+    ${list || `<div class="sub" style="margin:10px 0">${t('xsrc.none')}</div>`}
+    <div class="setrow stack"><div class="lbl"><b>${t('xsrc.add')}</b></div>
+      <div class="ctl srcpath"><select id="xsrc-kind" class="pill" aria-label="${esc(t('src.kind'))}">${opts.map(x =>
+        `<option value="${x.id}"${x.id === o.id ? ' selected' : ''}>${esc(srcTitle(x.id))}</option>`).join('')}</select>
+        ${fields}<input id="xsrc-label" placeholder="${esc(t('xsrc.label'))}" aria-label="${esc(t('xsrc.label'))}">
+        <button class="btn primary" id="xsrc-add">${t('xsrc.add_btn')}</button></div></div></section>`;
+}
+function bindExtra() {
+  if (!$('#xsrccard')) return;
+  const done = async r => { SRC = r; renderSettings(); loadStatus(); };
+  $('#xsrc-kind').onchange = e => { SRC.addPick = e.target.value; renderSettings(); };
+  $('#xsrc-add').onclick = async () => {
+    const body = { type: $('#xsrc-kind').value, label: $('#xsrc-label').value.trim(),
+      ...($('#xsrc-url') ? { url: $('#xsrc-url').value.trim(), key: $('#xsrc-key').value.trim() } : { path: $('#xsrc-path').value.trim() }) };
+    $('#xsrc-add').disabled = true;
+    try { await done(await api('/api/sources/extra', { method: 'POST', body: JSON.stringify(body) })); toast(t('xsrc.added')); }
+    catch (e) { toast(t('set.refused', { msg: esc(e.message) })); $('#xsrc-add').disabled = false; }
+  };
+  $$('#xsrccard [data-xremove]').forEach(b => b.onclick = async () => {
+    if (!confirm(t('xsrc.remove_confirm'))) return;
+    try { await done(await api(`/api/sources/extra/${encodeURIComponent(b.dataset.xremove)}`, { method: 'DELETE' })); toast(t('xsrc.removed')); }
+    catch (e) { toast(t('set.refused', { msg: esc(e.message) })); }
+  });
+  $$('#xsrccard [data-xkey]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.xkey, key = $(`#xsrccard [data-xkeyin="${CSS.escape(id)}"]`).value.trim();
+    if (!key) return;
+    b.disabled = true;
+    try { await done(await api(`/api/sources/extra/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ key }) })); toast(t('xsrc.key_saved')); }
+    catch (e) { toast(t('set.refused', { msg: esc(e.message) })); b.disabled = false; }
+  });
+  $('#xsrc-browse') && ($('#xsrc-browse').onclick = async () => {
+    const o = SRC.options.find(x => x.id === $('#xsrc-kind').value);
+    const r = await api('/api/desktop/pick', { method: 'POST', body: JSON.stringify({ kind: o.kind === 'folder' ? 'folder' : 'file',
+      suffix: o.suffix || '', start: $('#xsrc-path').value.trim() }) }).catch(e => { toast(t('set.refused', { msg: esc(e.message) })); return {}; });
+    if (r.path) $('#xsrc-path').value = r.path;
+  });
+}
 /* "Files" source (folder or photo application): no connection to set; state of the folder or of the
    library, and of the writing of XMP files. */
 function fileCard(m) {
@@ -375,7 +435,7 @@ function renderSettings() {
   // Each language in its own language; "names only" if the interface is not translated (fallback: French).
   const opt = l => `${langName(l, l)}${l !== LANG && langName(l) !== langName(l, l) ? ` (${langName(l)})` : ''}${hasUI(l) ? '' : ` · ${t('set.lang.names_only')}`}`;
   // Tabs: each group of settings goes in the SET_TAB tab (Analysis by default).
-  const tabs = { source: sourceCard(SRC) + immichCard(IMM) + undoCard(), analysis: '', validation: '', models: modelsCard(MODELS), logs: logsCard(),
+  const tabs = { source: sourceCard(SRC) + immichCard(IMM) + extraCard(SRC) + undoCard(), analysis: '', validation: '', models: modelsCard(MODELS), logs: logsCard(),
     general: `<section class="card"><h2>${t('set.group.display')}</h2><div class="setrow"><div class="lbl"><b>${t('set.lang')}</b>
     <div class="sub">${t('set.lang.sub', { tags: esc(langName(e.names_lang).toLocaleLowerCase(LANG)), env: '<code>NAMES_LANG</code>' })}</div></div>
     <div class="ctl"><select id="set-lang" class="pill" aria-label="${esc(t('set.lang'))}">${langs.map(l => `<option value="${esc(l)}"${l === LANG ? ' selected' : ''}>${esc(opt(l))}</option>`).join('')}</select></div></div></section>` };
@@ -402,6 +462,7 @@ function renderSettings() {
   bindSettings();
   bindImmich();
   bindSource();
+  bindExtra();
   bindLogs();
   bindUndo();
   showSetAnchor();

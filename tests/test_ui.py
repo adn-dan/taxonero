@@ -168,6 +168,42 @@ def test_settings_tabs(page):
     _no_overflow(page)
 
 
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_other_sources_card_adds_and_removes_a_folder(page, dev_app, tmp_path):
+    """Settings > Source: a folder added next to Immich, listed with its state, offered as a chip on the Photos page
+    once its photos are in, then removed after confirmation."""
+    import shutil
+    folder = tmp_path / "garden"
+    folder.mkdir()
+    shutil.copy(PHOTO, folder / "x.jpg")
+    base = page.url.split("#")[0]
+    page.goto(base + "#settings")
+    page.wait_for_selector("#xsrccard")
+    page.select_option("#xsrc-kind", "local")
+    page.fill("#xsrc-path", str(tmp_path / "nowhere"))
+    page.click("#xsrc-add")
+    page.wait_for_selector("#toast:has-text('nowhere')", state="attached")       # refused, with the reason
+    page.fill("#xsrc-path", str(folder))
+    page.fill("#xsrc-label", "Garden")
+    page.click("#xsrc-add")
+    page.wait_for_selector("#xsrccard [data-xremove]")
+    assert "Garden" in page.inner_text("#xsrccard")
+    _no_overflow(page)
+    s, w = dev_app
+    w.scan()
+    page.goto(base + "#photos?filter=all")
+    page.wait_for_selector("#ptools [data-source]")
+    page.click("#ptools [data-source]:has-text('Garden')")
+    page.wait_for_function("P.scope.source && P.assets.length === 1")
+    assert "Garden" in page.inner_text("#ptools [data-unscope=source]")
+    page.goto(base + "#settings")
+    page.wait_for_selector("#xsrccard [data-xremove]")
+    page.once("dialog", lambda d: d.accept())
+    page.click("#xsrccard [data-xremove]")
+    page.wait_for_function("!document.querySelector('#xsrccard [data-xremove]')")
+    assert not w.extras and not page.errors, page.errors
+
+
 def test_warning_link_opens_source_tab_with_the_warning(page, dev_app):
     _, w = dev_app
     w.client.warnings = ["test warning"]
@@ -197,7 +233,7 @@ def test_undo_requires_the_typed_word(page, dev_app):
     s, w = dev_app
     db = sqlite3.connect(s.db_path)
     db.execute("DELETE FROM written")
-    db.execute("INSERT INTO written VALUES ('tag', '00000000-0000-4000-8000-000000000000', '', 'Nature', 1)")
+    db.execute("INSERT INTO written (kind, immich_id, asset_id, value, written_at) VALUES ('tag', '00000000-0000-4000-8000-000000000000', '', 'Nature', 1)")
     db.commit()
     page.goto(page.url.split("#")[0] + "#settings")
     page.wait_for_selector("#settab-source[aria-selected=true]")
@@ -513,6 +549,33 @@ def test_other_groups_fold_under_one_chip(page):
     assert page.is_visible(f"#ptools [data-g={bacilli}]")
     page.click("#ptools [data-gmore]")
     assert not page.is_visible(f"#ptools [data-g={bacilli}]")
+    assert not page.errors, page.errors
+
+
+def test_kind_chips_filter_animals_plants_or_both(page):
+    """Animals / Plants / Fungi chips: toggles that add up, kept in the address, counts of the filters updated,
+    the group chips limited to the chosen kinds."""
+    base = page.url.split("#")[0]
+    page.goto(base + "#photos?filter=all")
+    page.wait_for_selector("#ptools [data-kind=plant]")
+    kinds = page.evaluate("P.kindCounts")
+    assert {"animal", "plant"} <= set(kinds)
+    count = lambda: page.evaluate("P.counts.all")
+    page.click("#ptools [data-kind=plant]")
+    page.wait_for_function("P.kinds === 'plant' && P.counts.all === P.kindCounts.plant")
+    assert "kinds=plant" in page.url and page.get_attribute("#ptools [data-kind=plant]", "aria-pressed") == "true"
+    assert page.evaluate("P.groups.every(g => ['Plantae'].includes(g.group))")
+    page.click("#ptools [data-kind=animal]")
+    page.wait_for_function("P.kinds === 'animal,plant'")
+    page.wait_for_function(f"P.counts.all >= {max(kinds['animal'], kinds['plant'])}")
+    both = count()
+    page.goto(base + "#photos?filter=all&kinds=animal,plant")                # from the address
+    page.wait_for_selector("#ptools [data-kind=animal][aria-pressed=true]")
+    page.wait_for_function(f"P.counts.all === {both}")
+    page.click("#ptools [data-kind=animal]")
+    page.click("#ptools [data-kind=plant]")
+    page.wait_for_function("P.kinds === '' && !location.hash.includes('kinds')")
+    _no_overflow(page)
     assert not page.errors, page.errors
 
 

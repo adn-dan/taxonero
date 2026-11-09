@@ -71,7 +71,7 @@ class ImmichClient:
     def close(self) -> None:
         self._http.close()
 
-    # -- garde-fou -----------------------------------------------------------
+    # -- safeguard -----------------------------------------------------------
 
     def check(self) -> bool:
         """Check the server version and spec. Enable writing only if everything is compatible."""
@@ -115,7 +115,7 @@ class ImmichClient:
         for ep, pat in _ROUTES:
             if pat.match(path) and method in ep.method.split("|"):
                 return ep
-        raise ContractViolation(f"{method.upper()} {path} hors contrat")
+        raise ContractViolation(f"{method.upper()} {path} outside the contract")
 
     def _request(self, method: str, path: str, **kw) -> httpx.Response:
         ep = self._endpoint(method, path)
@@ -130,7 +130,7 @@ class ImmichClient:
     def _update_method(self, template: str) -> str:
         return self._methods.get(template, "put")
 
-    # -- lecture -------------------------------------------------------------
+    # -- reading -------------------------------------------------------------
 
     def iter_assets(self, updated_after: str | None = None, size: int = 250, with_exif: bool = True,
                     kind: str = "IMAGE", with_people: bool = False) -> Iterator[dict]:

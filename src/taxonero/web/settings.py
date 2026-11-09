@@ -41,20 +41,22 @@ def register(app, c) -> None:
         state = w.undo_summary(db)
         if state["state"] == "running":
             fail(409, "undo_running", "removal already running")
-        if s.source != "immich":
+        accounts = w.immich_sources()
+        if not accounts:
             fail(409, "local_source", f"source: {s.source} (not Immich)", source=s.source)
         if s.dry_run:
             fail(409, "undo_dry_run", "DRY_RUN=true: nothing can be written to Immich")
-        if not w.client.writable:
+        if not all(c.writable for _, c in accounts):
             fail(409, "undo_readonly", "Immich server not validated (read-only)")
         if not (state["photos"] or state["tags"]):
             fail(409, "undo_empty", "nothing to remove")
-        try:
-            same = Syncer(db, w.client).same_server()
-        except httpx.HTTPError as e:
-            fail(502, "undo_unreachable", f"Immich unreachable: {e}", error=str(e))
-        if not same:
-            fail(409, "undo_other_server", "none of the written tags exists on this server: another Immich or another account?")
+        for sid, c in accounts:
+            try:
+                same = Syncer(db, c, source=sid).same_server()
+            except httpx.HTTPError as e:
+                fail(502, "undo_unreachable", f"Immich unreachable: {e}", error=str(e))
+            if not same:
+                fail(409, "undo_other_server", "none of the written tags exists on this server: another Immich or another account?")
         w.start_uninstall(state["photos"])
         return w.undo_summary(db)
 
@@ -87,10 +89,10 @@ def register(app, c) -> None:
                                **w.client.status()}}
         key = s.immich_api_key
         return {"url": s.immich_url, "key_hint": key[-4:] if len(key) >= 12 else ("…" if key else ""),
-                "from_env": w.env_immich, "configured": w.configured,
+                "from_env": w.env_immich, "configured": w.main_configured,
                 "required": list(REQUIRED_PERMISSIONS), "optional": list(OPTIONAL_PERMISSIONS),
                 "status": {"code": "ok" if w.client.writable else ("readonly" if w.client.version else "missing"),
-                           **w.client.status()} if w.configured else {"code": "missing"}}
+                           **w.client.status()} if w.main_configured else {"code": "missing"}}
 
     # -- photo source (Settings) ------------------------------------------------
 
@@ -109,7 +111,64 @@ def register(app, c) -> None:
         for o in options:
             o["path"] = str(suggested(o) or "")
         return {"current": s.source, "locked": w.env_source, "edition": s.edition, "dry_run": s.dry_run,
-                "dry_run_editable": s.edition == "desktop" and "dry_run" not in s.model_fields_set, "options": options}
+                "dry_run_editable": s.edition == "desktop" and "dry_run" not in s.model_fields_set, "options": options,
+                "extra": w.sources_status(db)}
+
+    class ExtraIn(BaseModel):
+        type: str
+        path: str = ""    # folder or application library
+        url: str = ""     # Immich account
+        key: str = ""
+        label: str = ""
+
+    @app.post("/api/sources/extra", dependencies=[Depends(auth)])
+    def add_extra(body: ExtraIn):
+        """Another source next to the main one: a second Immich account, another folder, a photo application."""
+        try:
+            w.add_source(body.model_dump())
+        except Busy as e:
+            fail(409, "cycle_running", str(e))
+        except ValueError as e:
+            fail(422, "invalid_source", str(e))
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                fail(422, "invalid_source", "Immich refused the API key")
+            fail(502, "source_unreachable", str(e))
+        except (httpx.HTTPError, RuntimeError, OSError) as e:
+            fail(502, "source_unreachable", str(e))
+        return get_sources()
+
+    class KeyIn(BaseModel):
+        key: str
+
+    @app.put("/api/sources/extra/{sid}", dependencies=[Depends(auth)])
+    def extra_key(sid: str, body: KeyIn):
+        """New API key for an added Immich account: same source, its reviews kept."""
+        try:
+            w.set_source_key(sid, body.key)
+        except KeyError:
+            fail(404, "unknown_source", "unknown source")
+        except Busy as e:
+            fail(409, "cycle_running", str(e))
+        except ValueError as e:
+            fail(422, "invalid_source", str(e))
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                fail(422, "invalid_source", "Immich refused the API key")
+            fail(502, "source_unreachable", str(e))
+        except (httpx.HTTPError, RuntimeError, OSError) as e:
+            fail(502, "source_unreachable", str(e))
+        return get_sources()
+
+    @app.delete("/api/sources/extra/{sid}", dependencies=[Depends(auth)])
+    def remove_extra(sid: str):
+        try:
+            w.remove_source(sid)
+        except KeyError:
+            fail(404, "unknown_source", "unknown source")
+        except Busy as e:
+            fail(409, "cycle_running", str(e))
+        return get_sources()
 
     class SourceIn(BaseModel):
         source: str | None = None

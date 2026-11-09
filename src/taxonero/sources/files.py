@@ -101,15 +101,18 @@ class FileSource:
     label = ""          # name shown as the "version" of the source
     write_gap = 0.0     # no write race as with Immich
 
-    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True):
+    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True, sid: str = ""):
         self.root = Path(root)   # photo folder, or library file of the application
         self.dry_run = dry_run
+        # Added source (sid: its id, '' for the main one): its own file list, and photo ids of its own, otherwise two
+        # folders that both hold a "IMG_0001.jpg" would give it the same id.
+        self.sid = sid
         self.version: str | None = None
         self.writable = False
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.thumbs = Path(data_dir) / "local-thumbs"
-        self.db = sqlite3.connect(Path(data_dir) / f"{self.name}-source.sqlite", check_same_thread=False)
+        self.db = sqlite3.connect(Path(data_dir) / f"{self.name}-source{'-' + sid if sid else ''}.sqlite", check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS file (asset_id TEXT PRIMARY KEY, path TEXT UNIQUE, size INTEGER, mtime INTEGER, meta TEXT);
@@ -119,6 +122,7 @@ class FileSource:
         self._lock = threading.Lock()
         self.et = ExifTool()
         self.on_file = None   # called for each file walked (scan progress)
+        self._odd_names: set[str] = set()
 
     # -- to be specified by each source --------------------------------------------------------------------------
 
@@ -161,12 +165,23 @@ class FileSource:
 
     # -- files ------------------------------------------------------------------------------------------------
 
+    def _usable(self):
+        """Photos of the source, without those whose name holds a line break: ExifTool takes its arguments one per
+        line, so such a name cannot be passed to it (and would stop the whole batch). Reported once each."""
+        for key, p in self._files():
+            if "\n" in key or "\r" in key or "\n" in str(p) or "\r" in str(p):
+                if key not in self._odd_names:
+                    self._odd_names.add(key)
+                    log.warning("photo skipped, line break in its name: %r", str(p))
+                continue
+            yield key, p
+
     def count_files(self) -> int:
         """Number of photos of the source (scan progress), without reading their metadata."""
-        return sum(1 for _ in self._files())
+        return sum(1 for _ in self._usable())
 
     def _walk(self):
-        for key, p in self._files():
+        for key, p in self._usable():
             if self.on_file:   # scan progress (Worker.scan), also for unchanged files
                 self.on_file()
             try:
@@ -175,9 +190,8 @@ class FileSource:
                 continue
             yield key, st.st_size, st.st_mtime_ns
 
-    @staticmethod
-    def asset_id(key: str) -> str:
-        return str(uuid.uuid5(NAMESPACE, key))
+    def asset_id(self, key: str) -> str:
+        return str(uuid.uuid5(NAMESPACE, f"{self.sid}:{key}" if self.sid else key))
 
     def _path(self, asset_id: str) -> Path | None:
         with self._lock:

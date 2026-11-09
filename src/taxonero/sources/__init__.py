@@ -10,8 +10,13 @@ reproduce):
 - writing: list_tags, upsert_tags, bulk_tag, untag_assets, count_assets_with_tag, delete_tag, set_description.
 
 "File" sources (files.py): a folder (kind "folder", PHOTOS_DIR) or the library of an application
-(kind "catalog", CATALOG_PATH), results in XMP files next to the photos.
+(kind "catalog", CATALOG_PATH), results in XMP files next to the photos (Apple Photos: in the library, through Photos).
+
+Several sources: the main one (settings above, id '') and the ones added in the dashboard (extra_id, make_extra),
+each with its photos (asset.source) and its writes (written.source).
 """
+
+import hashlib
 
 import importlib
 import sys
@@ -30,6 +35,9 @@ SOURCES = {
                   "default": ".lightroom:default_catalog", "suffix": ".lrcat"},
     "rawtherapee": {"cls": ".rawtherapee:RawTherapee", "kind": "folder", "editions": ("desktop",), "platforms": None},
     "rapidraw": {"cls": ".rapidraw:RapidRaw", "kind": "folder", "editions": ("desktop",), "platforms": None},
+    # A .photoslibrary is a folder that macOS shows as a file: chosen like a library file.
+    "applephotos": {"cls": ".applephotos:ApplePhotos", "kind": "catalog", "editions": ("desktop",), "platforms": ("darwin",),
+                    "default": ".applephotos:default_library", "suffix": ".photoslibrary", "bundle": True},
 }
 
 
@@ -55,7 +63,8 @@ def check_path(source: str, path: Path) -> str | None:
         return f"chemin complet attendu : {path}"
     if spec["kind"] == "folder" and not path.is_dir():
         return f"folder not found: {path}"
-    if spec["kind"] == "catalog" and not (path.is_file() and path.suffix.lower() == spec["suffix"]):
+    if spec["kind"] == "catalog" and not ((path.is_dir() if spec.get("bundle") else path.is_file())
+                                          and path.suffix.lower() == spec["suffix"]):
         return f"{spec['suffix']} file not found: {path}"
     return None
 
@@ -83,3 +92,18 @@ def make_source(s: Settings):
     if s.source == "immich":
         return cls(s.immich_url, s.immich_api_key, dry_run=s.dry_run)
     return cls(source_path(s) or Path(), s.data_dir, dry_run=s.dry_run)
+
+
+def extra_id(spec: dict) -> str:
+    """Id of an added source, from what it is (type and folder, or server and key): the same source removed then
+    added again gets its photos and reviews back."""
+    what = spec.get("url", "").rstrip("/") + "|" + spec.get("key", "") if spec["type"] == "immich" else spec.get("path", "")
+    return "s" + hashlib.sha256(f"{spec['type']}|{what}".encode()).hexdigest()[:8]
+
+
+def make_extra(spec: dict, s: Settings):
+    """Client of an added source: {"id", "type", "path"} or {"id", "type": "immich", "url", "key"}."""
+    cls = _load(SOURCES[spec["type"]]["cls"])
+    if spec["type"] == "immich":
+        return cls(spec["url"], spec["key"], dry_run=s.dry_run)
+    return cls(Path(spec["path"]), s.data_dir, dry_run=s.dry_run, sid=spec["id"])

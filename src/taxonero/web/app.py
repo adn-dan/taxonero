@@ -137,12 +137,19 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
     def status():
         counts = {r["status"]: r["n"] for r in db.execute("SELECT status, count(*) AS n FROM detection GROUP BY status")}
         keep = s.skip_args
+        extra = w.sources_status(db)
         return {
             "immich_version": store.get_state(db, "immich_version"),
-            "writable": store.get_state(db, "writable") == "1",
+            # Main source not set (only added sources): their state instead.
+            "writable": store.get_state(db, "writable") == "1" if w.main_configured else any(x["writable"] for x in extra),
+            "main_configured": w.main_configured,
             "dry_run": s.dry_run,
             "writes_paused": store.get_state(db, store.WRITES_PAUSED) == "1",
-            "warnings": w.client.warnings, "errors": w.client.errors,
+            # Those of the added sources too, named (a second account refused, a folder gone).
+            "warnings": w.client.warnings + [f"{x['label']}: {m}" for x in extra for m in x["warnings"]],
+            "errors": w.client.errors + [f"{x['label']}: {m}" for x in extra for m in x["errors"]],
+            "sources": ([{"id": "main", "label": w.source_label("") or s.source}] if w.main_configured else [])
+            + [{"id": x["id"], "label": x["label"]} for x in extra] if extra else [],
             # Photos to analyse (except skipped photos: people, RAW paired with a JPG, videos if disabled).
             "assets": db.execute(f"SELECT count(*) FROM asset WHERE missing_at IS NULL AND {SKIPPED_NOT}", keep).fetchone()[0],
             "analyzed": db.execute(f"SELECT count(*) FROM asset WHERE analyzed_at IS NOT NULL AND missing_at IS NULL AND {SKIPPED_NOT}",

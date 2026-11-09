@@ -44,6 +44,36 @@ def test_skipped_photo_says_why_instead_of_waiting(client, dev_app):
     assert c.get(f"/api/assets/{aid}").json()["skipped"] is None   # setting off: it is analysed, so waiting
 
 
+def test_photos_filtered_by_what_was_detected(client):
+    """Kind chips of the Photos page: animals, plants or both (any of the chosen kinds), counted per kind, combined
+    with the groups, the lists, the counts and the bulk selection; a rejected box does not count."""
+    c, db = client
+    db.execute("UPDATE detection SET status = 'deleted'")
+    ids = [r[0] for r in db.execute("SELECT asset_id FROM asset ORDER BY asset_id LIMIT 4")]
+    bird = json.dumps([{"name": "Parus major", "gbif_key": 1, "lineage": {"kingdom": "Animalia", "class": "Aves"}}])
+    oak = json.dumps([{"name": "Quercus robur", "gbif_key": 2, "lineage": {"kingdom": "Plantae", "class": "Magnoliopsida"}}])
+    for aid, cands, status, label in ((ids[0], bird, "pending", "animal"), (ids[1], oak, "pending", "plant"),
+                                      (ids[2], bird, "pending", "animal"), (ids[2], oak, "pending", "plant"),
+                                      (ids[3], bird, "rejected", "animal"), (ids[3], None, "pending", "plant")):
+        db.execute("INSERT INTO detection (asset_id, x, y, w, h, box_label, detector, source, status, candidates, created_at) "
+                   "VALUES (?, 0, 0, 1, 1, ?, 'owl', 'auto', ?, ?, '2026-01-01')", (aid, label, status, cands))
+    db.commit()
+    shown = lambda g: sorted(a["asset_id"] for a in c.get("/api/photos", params={"filter": "all", "group": g}).json())
+    assert c.get("/api/photos/kinds", params={"filter": "all"}).json() == {"animal": 2, "plant": 3}
+    assert shown("kind:animal") == sorted(ids[:3:2])
+    assert shown("kind:plant") == sorted(ids[1:])                          # no candidate: the box label tells
+    assert shown("kind:animal,kind:plant") == sorted(ids)
+    assert shown("kind:fungus") == [] and shown("kind:bogus") == sorted(r[0] for r in db.execute("SELECT asset_id FROM asset"))
+    assert c.get("/api/photos/counts", params={"group": "kind:animal"}).json()["all"] == 2
+    # Groups: only those of the chosen kinds, then both filters together.
+    groups = {g["group"] for g in c.get("/api/photos/groups", params={"filter": "all", "group": "kind:plant"}).json()}
+    assert groups == {"Plantae"}
+    assert shown("kind:animal,Plantae") == [ids[2]]
+    r = c.post("/api/photos/bulk", json={"filter": "pending", "every": True, "group": "kind:plant", "action": "reject"})
+    assert r.status_code == 200
+    assert db.execute("SELECT count(*) FROM detection WHERE status = 'pending'").fetchone()[0] == 2   # the two birds left
+
+
 def test_delete_reframe_and_exact_undo(client):
     c, db = client
     det = dict(db.execute("SELECT * FROM detection WHERE status = 'confirmed' AND confirmed_by = 'auto' LIMIT 1").fetchone())

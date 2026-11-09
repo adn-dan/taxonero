@@ -164,7 +164,7 @@ def test_dashboard_undo_keeps_user_data_and_stops_writes(admin, dev_app):
     saved = w.db.execute("SELECT * FROM written").fetchall()
     w.db.execute("UPDATE written SET immich_id = 'autre-' || immich_id WHERE kind IN ('tag', 'tag_asset')")
     w.db.commit()
-    r = c.post("/api/immich/uninstall", json={"confirm": "remove-from-immich"})    # autre serveur : refus, traces intactes
+    r = c.post("/api/immich/uninstall", json={"confirm": "remove-from-immich"})    # another server: refused, records intact
     assert r.status_code == 409 and r.json()["detail"]["code"] == "undo_other_server"
     w.db.execute("DELETE FROM written")
     w.db.executemany("INSERT INTO written VALUES (?, ?, ?, ?, ?)", [tuple(x) for x in saved])
