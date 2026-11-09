@@ -112,15 +112,23 @@ def _window(url: str, storage: Path, api: "_Api") -> bool:
         # with pip without build tools.
         if sys.platform.startswith("linux"):
             _fix_qt_permissions(storage)
-        # icon: window and task bar on Linux (Windows and macOS take the one of the executable)
         webview.start(gui="qt" if sys.platform.startswith("linux") else None, private_mode=False, storage_path=str(storage),
-                      icon=str(Path(__file__).parent / "static" / "apple-touch-icon.png"))   # returns on close
+                      icon=window_icon())   # returns on close
         return True
     except Exception as e:   # ImportError, or WebViewException (no rendering engine)
         log.error("the application window cannot be opened", exc_info=e)
         _error(f"The Taxonero window cannot open on this system ({type(e).__name__}: {e}).\n\n"
                "Run again with --reinstall to repair the installation.")
         return False
+
+
+def window_icon(platform: str = sys.platform) -> str:
+    """Icon of the window and task bar. Windows (WinForms) only reads .ico files: a PNG raises an ArgumentException in a
+    .NET thread, which closes the application without any message. Without an icon, it would take the one of the
+    executable, pythonw.exe of the installed environment, hence the Python logo. Qt (Linux) and Cocoa (macOS Dock) read
+    the PNG."""
+    static = Path(__file__).parent / "static"
+    return str(static / ("app.ico" if platform == "win32" else "apple-touch-icon.png"))
 
 
 def _fix_qt_permissions(storage: Path) -> None:

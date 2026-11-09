@@ -23,14 +23,25 @@ class ExifToolError(RuntimeError):
 def command() -> list[str] | None:
     """ExifTool command: the one shipped with the desktop application ("exiftool" folder of the launcher, or next to the program:
     standalone exiftool.exe on Windows, Perl script elsewhere), otherwise the system one."""
-    base = (Path(os.environ["TAXONERO_EXIFTOOL"]) if os.environ.get("TAXONERO_EXIFTOOL")   # lanceur de bureau
-            else Path(getattr(sys, "_MEIPASS", "")) / "exiftool" if getattr(sys, "frozen", False) else None)
-    if base and (base / "exiftool.exe").exists():
-        return [str(base / "exiftool.exe")]
-    if base and (base / "exiftool").exists() and shutil.which("perl"):
-        return [shutil.which("perl"), str(base / "exiftool")]
+    for base in _bundled():
+        if (base / "exiftool.exe").exists():
+            return [str(base / "exiftool.exe")]
+        if (base / "exiftool").is_file() and shutil.which("perl"):
+            return [shutil.which("perl"), str(base / "exiftool")]
     found = shutil.which("exiftool")
     return [found] if found else None
+
+
+def _bundled() -> list[Path]:
+    """Folders that may hold the ExifTool of the desktop application: the one given by the launcher, the frozen
+    executable, then the copy the installer keeps in the data folder (runtime/exiftool), found even when the application
+    is started by hand (python -m taxonero desktop) without the launcher."""
+    from ..config import user_data_dir
+    found = [Path(os.environ["TAXONERO_EXIFTOOL"])] if os.environ.get("TAXONERO_EXIFTOOL") else []
+    if getattr(sys, "frozen", False):
+        found.append(Path(getattr(sys, "_MEIPASS", "")) / "exiftool")
+    data = Path(os.environ["DATA_DIR"]) if os.environ.get("DATA_DIR") else user_data_dir()   # same rule as the launcher
+    return found + [data / "runtime" / "exiftool"]
 
 
 def available() -> bool:

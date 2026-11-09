@@ -2657,3 +2657,34 @@ def test_area_search_refused_for_load_falls_back_then_retries(monkeypatch):
     busy[0] = False
     tx._busy["area"] = 0                                                       # cooldown over
     assert tx.occurrences_near(1, 47.0, 5.0, 5.0) == 30 and "facet" in Http.calls[-1].params
+
+
+def test_window_icon_is_an_ico_on_windows():
+    """WinForms only reads .ico files: the PNG closed the Windows application at start (ArgumentException in a .NET
+    thread, no message). Every platform gets an existing file of the format it reads."""
+    from PIL import Image
+    from taxonero.desktop import window_icon
+    for platform, fmt in (("win32", "ICO"), ("linux", "PNG"), ("darwin", "PNG")):
+        path = Path(window_icon(platform))
+        assert path.is_file() and Image.open(path).format == fmt
+    with Image.open(window_icon("win32")) as ico:
+        assert {(16, 16), (32, 32), (256, 256)} <= set(ico.info["sizes"])
+
+
+def test_exiftool_found_in_the_installer_copy_without_the_launcher(tmp_path, monkeypatch):
+    """Started by hand (python -m taxonero desktop), without TAXONERO_EXIFTOOL from the launcher: the copy the
+    installer keeps in <data>/runtime/exiftool is used before the PATH."""
+    from taxonero.sources import exiftool
+    monkeypatch.delenv("TAXONERO_EXIFTOOL", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(exiftool.shutil, "which", lambda name: None)
+    assert exiftool.command() is None
+    exe = tmp_path / "runtime" / "exiftool" / "exiftool.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    assert exiftool.command() == [str(exe)]
+    other = tmp_path / "launcher"
+    other.mkdir()
+    (other / "exiftool.exe").write_bytes(b"")
+    monkeypatch.setenv("TAXONERO_EXIFTOOL", str(other))                      # the launcher's folder comes first
+    assert exiftool.command() == [str(other / "exiftool.exe")]

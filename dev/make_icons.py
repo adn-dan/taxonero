@@ -10,7 +10,8 @@ Written files (all committed, so that building needs no SVG renderer):
     packaging/icons/taxonero.icns   macOS: Taxonero.app, .dmg (16 to 1024 px)
     src/taxonero/static/logo.svg            dashboard top bar
     src/taxonero/static/favicon.svg         browser tab
-    src/taxonero/static/apple-touch-icon.png  180 px: phone home screen
+    src/taxonero/static/apple-touch-icon.png  180 px: phone home screen, window icon on Linux and macOS
+    src/taxonero/static/app.ico             window and task bar icon on Windows (a copy of taxonero.ico)
 """
 
 import io
@@ -40,8 +41,9 @@ def main() -> None:
     shutil.copyfile(LOGO, STATIC / "logo.svg")
     shutil.copyfile(SMALL, STATIC / "favicon.svg")
     render(LOGO, 180).save(STATIC / "apple-touch-icon.png", optimize=True)
+    shutil.copyfile(ICONS / "taxonero.ico", STATIC / "app.ico")
     for p in (ICONS / "taxonero.png", ICONS / "taxonero.ico", ICONS / "taxonero.icns", STATIC / "logo.svg",
-              STATIC / "favicon.svg", STATIC / "apple-touch-icon.png"):
+              STATIC / "favicon.svg", STATIC / "apple-touch-icon.png", STATIC / "app.ico"):
         print(f"{p.relative_to(ROOT)}: {p.stat().st_size} bytes")
 
 
