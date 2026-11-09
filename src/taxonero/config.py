@@ -224,7 +224,7 @@ def validate_overrides(s: Settings, values: dict) -> dict:
             try:
                 v = kind(v)
             except (TypeError, ValueError):
-                raise ValueError(f"{k} : nombre attendu") from None
+                raise ValueError(f"{k}: number expected") from None
             lo, hi = BOUNDS[k]
             if not lo <= v <= hi:
                 raise ValueError(f"{k}: between {lo} and {hi}")
