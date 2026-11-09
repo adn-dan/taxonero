@@ -330,7 +330,6 @@
  "nav.settings": "Settings",
  "nav.species": "Species",
  "nav.stats": "Statistics",
- "photos.all_groups": "All groups",
  "photos.empty": "No photos in this filter.",
  "photos.empty_none": "All analyzed photos have at least one detection.",
  "photos.empty_pending": "Nothing to review 🎉",
@@ -702,8 +701,7 @@
  "kind.plant": "Plants",
  "kind.fungus": "Fungi",
  "kind.microbe": "Microbes",
- "photos.kinds": "What was detected",
- "photos.kinds_hint": "Can be combined: a photo shows up if it contains any of the chosen kinds",
+ "photos.kinds_hint": "They add up: a photo shows if it has any of the choices",
  "xsrc.title": "Other sources",
  "xsrc.sub": "A second Immich account, another folder or a photo application, besides the main source. Each source keeps its photos and gets its own results.",
  "xsrc.none": "No other source.",
@@ -724,5 +722,8 @@
  "xsrc.key": "New API key",
  "xsrc.key_btn": "Change the key",
  "xsrc.key_saved": "Key saved",
- "xsrc.key_missing": "API key to enter again (backups do not keep it)"
+ "xsrc.key_missing": "API key to enter again (backups do not keep it)",
+ "photos.groups": "Groups",
+ "photos.clear": "Clear all",
+ "photos.all_sources": "All sources"
 }

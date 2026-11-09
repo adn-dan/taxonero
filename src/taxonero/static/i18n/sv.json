@@ -330,7 +330,6 @@
  "nav.settings": "Inställningar",
  "nav.species": "Arter",
  "nav.stats": "Statistik",
- "photos.all_groups": "Alla grupper",
  "photos.empty": "Inga foton i det här filtret.",
  "photos.empty_none": "Alla analyserade foton har minst en detektion.",
  "photos.empty_pending": "Inget att granska 🎉",
@@ -702,8 +701,7 @@
  "kind.plant": "Växter",
  "kind.fungus": "Svampar",
  "kind.microbe": "Mikrober",
- "photos.kinds": "Vad som upptäcktes",
- "photos.kinds_hint": "Kan kombineras: ett foto visas om det innehåller någon av de valda typerna",
+ "photos.kinds_hint": "Kan kombineras: ett foto visas om det visar något av valen",
  "xsrc.title": "Andra källor",
  "xsrc.sub": "Ett andra Immich-konto, en annan mapp eller en fotoapp, utöver huvudkällan. Varje källa behåller sina foton och får sina egna resultat.",
  "xsrc.none": "Ingen annan källa.",
@@ -724,5 +722,8 @@
  "xsrc.key": "Ny API-nyckel",
  "xsrc.key_btn": "Byt nyckel",
  "xsrc.key_saved": "Nyckel sparad",
- "xsrc.key_missing": "API-nyckeln måste anges igen (säkerhetskopior sparar den inte)"
+ "xsrc.key_missing": "API-nyckeln måste anges igen (säkerhetskopior sparar den inte)",
+ "photos.groups": "Grupper",
+ "photos.clear": "Rensa allt",
+ "photos.all_sources": "Alla källor"
 }

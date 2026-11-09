@@ -344,7 +344,6 @@
  "nav.settings": "Paràmetres",
  "nav.species": "Espècies",
  "nav.stats": "Estadístiques",
- "photos.all_groups": "Tots els grups",
  "photos.empty": "Cap foto en aquest filtre.",
  "photos.empty_none": "Totes les fotos analitzades tenen almenys una detecció.",
  "photos.empty_pending": "Res per revisar 🎉",
@@ -743,8 +742,7 @@
  "kind.plant": "Plantes",
  "kind.fungus": "Fongs",
  "kind.microbe": "Microbis",
- "photos.kinds": "El que s'ha detectat",
- "photos.kinds_hint": "Combinables: una foto apareix si mostra algun dels tipus triats",
+ "photos.kinds_hint": "Acumulables: una foto apareix si mostra alguna de les opcions",
  "xsrc.title": "Altres fonts",
  "xsrc.sub": "Un segon compte d'Immich, una altra carpeta o una aplicació de fotos, a més de la font principal. Cada font conserva les seves fotos i rep els seus propis resultats.",
  "xsrc.none": "Cap altra font.",
@@ -765,5 +763,8 @@
  "xsrc.key": "Nova clau API",
  "xsrc.key_btn": "Canvia la clau",
  "xsrc.key_saved": "Clau desada",
- "xsrc.key_missing": "clau API per tornar a introduir (les còpies de seguretat no la desen)"
+ "xsrc.key_missing": "clau API per tornar a introduir (les còpies de seguretat no la desen)",
+ "photos.groups": "Grups",
+ "photos.clear": "Esborra-ho tot",
+ "photos.all_sources": "Totes les fonts"
 }

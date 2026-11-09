@@ -143,15 +143,19 @@ def register(app, c) -> None:
         extra, extra_args = scope_where(scope) if scope else ("", ())
         if extra:
             where, args = f"{where} AND {extra}", extra_args
-        kinds, groups = split_group(group)
-        if kinds:
-            where, args = (f"{where} AND EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id "
-                           f"AND {kept(filter)} AND {DETECTION_GROUP} IN ({', '.join('?' * len(kinds))}))",
-                           (*args, *kinds))
-        if not groups:
+        match, match_args = chosen(group)
+        if not match:
             return where, args
-        return (f"{where} AND EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND d.status != 'deleted' "
-                f"AND {GROUP_EXPR} IN ({', '.join('?' * len(groups))}))", (*args, *groups))
+        return (f"{where} AND EXISTS (SELECT 1 FROM detection d WHERE d.asset_id = a.asset_id AND {kept(filter)} "
+                f"AND {match})", (*args, *match_args))
+
+    def chosen(group: str) -> tuple[str, tuple]:
+        """Detections (alias d) of the kinds or groups chosen in the group parameter, any of them: "kind:animal,Plantae"
+        is every animal and every plant. Empty when nothing is chosen."""
+        kinds, groups = split_group(group)
+        parts = ([f"{DETECTION_GROUP} IN ({', '.join('?' * len(kinds))})"] if kinds else []) \
+            + ([f"{GROUP_EXPR} IN ({', '.join('?' * len(groups))})"] if groups else [])
+        return (f"({' OR '.join(parts)})" if parts else ""), (*kinds, *groups)
 
     def kept(filter: str) -> str:
         """Detections that tell what a photo shows: not the rejected ones (wrong box), except in the Rejected filter."""
@@ -159,8 +163,8 @@ def register(app, c) -> None:
 
     def split_group(group: str) -> tuple[list[str], list[str]]:
         """The group parameter of the Photos page: "kind:animal,kind:plant" (what was detected: animal, plant, fungus
-        or microbe, several allowed, any of them) and raw group values (class, or kingdom for plants and fungi). Kept in a
-        single parameter so that every list, count and bulk action of the grid gets both."""
+        or microbe) and raw group values (class, or kingdom for plants and fungi), several of each, any of them. Kept in
+        a single parameter so that every list, count and bulk action of the grid gets both."""
         items = [g for g in group.split(",") if g]
         kinds = [g[5:] for g in items if g.startswith("kind:") and g[5:] in KINDS]
         return kinds, [g for g in items if not g.startswith("kind:")]
@@ -193,17 +197,15 @@ def register(app, c) -> None:
             "ORDER BY m IS NULL, m DESC", args)]
 
     @app.get("/api/photos/groups", dependencies=[Depends(auth)])
-    def photo_groups(filter: str = "pending", group: str = "", scope: PhotoScope = Depends()):
-        """Groups present in a filter, with their number of photos (chips of the Photos page). With kinds in group
-        ("kind:plant"), only the groups of the detections of these kinds."""
-        kinds, _ = split_group(group)
+    def photo_groups(filter: str = "pending", scope: PhotoScope = Depends()):
+        """Groups present in a filter, with their kind (animal, plant…) and their number of photos: the Groups menu of
+        the Photos page. Counted without the groups chosen, so that the menu shows what adding one would bring."""
         where, args = photo_where(filter, "", scope)
-        only = f"AND {DETECTION_GROUP} IN ({', '.join('?' * len(kinds))}) " if kinds else ""
         rows = db.execute(
-            f"SELECT g, count(DISTINCT asset_id) AS n FROM (SELECT d.asset_id, {GROUP_EXPR} AS g "
-            f"  FROM detection d JOIN asset a ON a.asset_id = d.asset_id WHERE d.status != 'deleted' {only}AND {where}) "
-            "WHERE g IS NOT NULL GROUP BY g ORDER BY n DESC", (*kinds, *args)).fetchall()
-        return [{"group": r["g"], "n": r["n"]} for r in rows]
+            f"SELECT k, g, count(DISTINCT asset_id) AS n FROM (SELECT d.asset_id, {DETECTION_GROUP} AS k, {GROUP_EXPR} AS g "
+            f"  FROM detection d JOIN asset a ON a.asset_id = d.asset_id WHERE {kept(filter)} AND {where}) "
+            "WHERE g IS NOT NULL GROUP BY k, g ORDER BY n DESC", args).fetchall()
+        return [{"kind": r["k"], "group": r["g"], "n": r["n"]} for r in rows]
 
     @app.get("/api/photos/kinds", dependencies=[Depends(auth)])
     def photo_kinds(filter: str = "pending", scope: PhotoScope = Depends()):
@@ -499,8 +501,8 @@ def register(app, c) -> None:
         - taxon: this taxon confirmed on the detection awaiting review of each photo; a photo without a detection gets a
           "whole image" detection; a photo with several subjects to review is left (skipped);
         - reanalyze: photos put back in the analysis queue (next cycle; reviewed detections kept).
-        With kinds chosen (group "kind:plant"), only the detections of these kinds: the bird of a photo selected
-        under Plants stays as it is."""
+        With kinds or groups chosen (group "kind:plant,Aves"), only the detections of these: the bird of a photo
+        selected under Plants stays as it is."""
         if body.action not in ("confirm", "reject", "reset", "delete", "taxon", "reanalyze"):
             fail(400, "unknown_action", "unknown action")
         ids = selected(body)
@@ -522,12 +524,13 @@ def register(app, c) -> None:
                    "reset": "status IN ('confirmed', 'rejected')",
                    "delete": "status != 'deleted'",
                    "reject": "status IN ('pending', 'confirmed')"}[body.action]
-        kinds, _ = split_group(body.group)
-        if kinds:
-            targets = f"{targets}) AND ({DETECTION_GROUP} IN ({', '.join('?' * len(kinds))})"
+        match, match_args = chosen(body.group)
+        if match:
+            targets = f"{targets}) AND {match} AND (1"
         changed, created, skipped, now = [], [], 0, time.time()
         for aid in ids:
-            rows = db.execute(f"SELECT {', '.join(SNAPSHOT)} FROM detection WHERE asset_id = ? AND ({targets})", (aid, *kinds)).fetchall()
+            rows = db.execute(f"SELECT {', '.join(SNAPSHOT)} FROM detection d WHERE asset_id = ? AND ({targets})",
+                              (aid, *match_args)).fetchall()
             if body.action == "reject" and any(r["status"] == "pending" for r in rows):
                 rows = [r for r in rows if r["status"] == "pending"]
             if body.action == "taxon":

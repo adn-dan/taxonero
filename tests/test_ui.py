@@ -192,10 +192,11 @@ def test_other_sources_card_adds_and_removes_a_folder(page, dev_app, tmp_path):
     s, w = dev_app
     w.scan()
     page.goto(base + "#photos?filter=all")
-    page.wait_for_selector("#ptools [data-source]")
-    page.click("#ptools [data-source]:has-text('Garden')")
+    page.wait_for_selector("#ptools [data-menu=source]")
+    page.click("#ptools [data-menu=source]")
+    page.click("#ptools .mi:has-text('Garden')")
     page.wait_for_function("P.scope.source && P.assets.length === 1")
-    assert "Garden" in page.inner_text("#ptools [data-unscope=source]")
+    assert "Garden" in page.inner_text("#ptools [data-menu=source]") and not page.query_selector("#ptools [data-unscope=source]")
     page.goto(base + "#settings")
     page.wait_for_selector("#xsrccard [data-xremove]")
     page.once("dialog", lambda d: d.accept())
@@ -537,44 +538,39 @@ def test_compare_keyboard_click_zoom_and_plausibility(page, monkeypatch):
     assert not page.errors, page.errors
 
 
-def test_other_groups_fold_under_one_chip(page):
-    """Classes created on the fly: a single "Others" chip, which unfolds them."""
-    page.goto(page.url.split("#")[0] + "#photos")
-    page.wait_for_selector("#pgrid .tile")
-    page.evaluate("P.groups = [{group: 'Aves', n: 5}, {group: 'Bacilli', n: 2}, {group: 'Clostridia', n: 3}]; P.group = ''; renderTools()")
-    assert "5" in page.inner_text("#ptools [data-gmore]")
-    bacilli = page.evaluate("GROUPS.find(g => g.name === 'Bacilli').id")
-    assert not page.is_visible(f"#ptools [data-g={bacilli}]")
-    page.click("#ptools [data-gmore]")
-    assert page.is_visible(f"#ptools [data-g={bacilli}]")
-    page.click("#ptools [data-gmore]")
-    assert not page.is_visible(f"#ptools [data-g={bacilli}]")
-    assert not page.errors, page.errors
-
-
-def test_kind_chips_filter_animals_plants_or_both(page):
-    """Animals / Plants / Fungi chips: toggles that add up, kept in the address, counts of the filters updated,
-    the group chips limited to the chosen kinds."""
+def test_groups_menu_kinds_and_groups_add_up(page):
+    """Groups menu: the kinds (Animals, Plants…) with their groups below, choices that add up and stay in the address,
+    a kind standing for all its groups; the button says what is chosen."""
     base = page.url.split("#")[0]
     page.goto(base + "#photos?filter=all")
-    page.wait_for_selector("#ptools [data-kind=plant]")
+    page.wait_for_selector("#ptools [data-menu=groups]")
     kinds = page.evaluate("P.kindCounts")
     assert {"animal", "plant"} <= set(kinds)
-    count = lambda: page.evaluate("P.counts.all")
-    page.click("#ptools [data-kind=plant]")
+    assert page.is_hidden("#ptools .pmenu[data-for=groups]")
+    page.click("#ptools [data-menu=groups]")
+    page.click("#ptools label:has(input[data-kind=plant])")
     page.wait_for_function("P.kinds === 'plant' && P.counts.all === P.kindCounts.plant")
-    assert "kinds=plant" in page.url and page.get_attribute("#ptools [data-kind=plant]", "aria-pressed") == "true"
-    assert page.evaluate("P.groups.every(g => ['Plantae'].includes(g.group))")
-    page.click("#ptools [data-kind=animal]")
-    page.wait_for_function("P.kinds === 'animal,plant'")
-    page.wait_for_function(f"P.counts.all >= {max(kinds['animal'], kinds['plant'])}")
-    both = count()
-    page.goto(base + "#photos?filter=all&kinds=animal,plant")                # from the address
-    page.wait_for_selector("#ptools [data-kind=animal][aria-pressed=true]")
-    page.wait_for_function(f"P.counts.all === {both}")
-    page.click("#ptools [data-kind=animal]")
-    page.click("#ptools [data-kind=plant]")
-    page.wait_for_function("P.kinds === '' && !location.hash.includes('kinds')")
+    assert "kinds=plant" in page.url
+    assert page.is_visible("#ptools .pmenu[data-for=groups]")                  # stays open while choosing
+    assert "Plantes" in page.inner_text("#ptools [data-menu=groups]")
+    gid = page.evaluate("groupTree().find(k => k.id === 'animal').kids[0].g.id")
+    page.click(f"#ptools label:has(input[data-g={gid}])")                      # a group of animals, with the plants
+    page.wait_for_function(f"P.group === '{gid}' && P.kinds === 'plant' && P.counts.all > P.kindCounts.plant")
+    page.click("#ptools label:has(input[data-kind=animal])")                   # all the animals: the kind replaces its groups
+    page.wait_for_function("P.kinds === 'animal,plant' && P.group === ''")
+    assert page.is_checked(f"#ptools input[data-g={gid}]")
+    page.click(f"#ptools label:has(input[data-g={gid}])")                      # all animals but this group
+    page.wait_for_function(f"P.kinds === 'plant' && P.group !== '' && !P.group.split(',').includes('{gid}')")
+    page.wait_for_function("document.querySelector('#ptools input[data-kind=animal]').indeterminate")
+    page.keyboard.press("Escape")
+    assert page.is_hidden("#ptools .pmenu[data-for=groups]")
+    page.goto(base + "#photos?filter=all&kinds=animal,plant")                 # from the address
+    page.wait_for_function("P.kinds === 'animal,plant' && P.counts.all > 0")
+    page.click("#ptools [data-menu=groups]")
+    page.click("#ptools [data-clear]")
+    page.wait_for_function("P.kinds === '' && P.group === '' && !location.hash.includes('kinds')")
+    page.click("h1:visible")                                                   # a click elsewhere closes it
+    assert page.is_hidden("#ptools .pmenu[data-for=groups]")
     _no_overflow(page)
     assert not page.errors, page.errors
 
@@ -690,7 +686,7 @@ def test_manual_location(page):
     page.wait_for_selector("#viewer:not(.on)", state="attached")
     # in bulk: two photos without GPS, "same place as last time"
     page.click("#pfilters [data-f=all]")
-    page.wait_for_selector("#pgrid .tile")
+    page.wait_for_function("P.done === P.seq")   # tiles of the reloaded list, not the old ones
     nogps = page.evaluate("P.assets.map((a, k) => a.lat == null && a.kind !== 'VIDEO' ? k : -1).filter(k => k >= 0).slice(0, 2)")
     for n, k in enumerate(nogps):
         tile = page.locator(f"#pgrid .tile[data-i='{k}']")

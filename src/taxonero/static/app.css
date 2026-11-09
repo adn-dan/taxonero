@@ -524,7 +524,10 @@ td small { color: var(--muted); }
   .nav { display: flex; width: 100%; } .nav a { flex: 1; flex-direction: column; gap: 2px; padding: 8px 4px; border-radius: 0; font-size: 11px; }
   .nav a .badge { display: none; } .server { display: none; } .logo { width: auto; } .logo span { display: none; }
   /* Filters on a single scrolling line: the photos stay visible without scrolling down. */
-  #pfilters, .pgroups { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } #pfilters .chip, .pgroups .chip { flex: none; } #pfilters { min-width: 0; max-width: 100%; }
+  #pfilters { flex-basis: 100%; max-width: 100%; }
+  /* Menus across the whole tool bar, whatever button opened them; bigger rows for a finger. */
+  .ptools { position: relative; } .pdrop { position: static; }
+  .pmenu { left: 0; right: 0; min-width: 0; max-width: none; } .mi { padding: 10px; }
   .topbar { gap: 8px; } .topbar .right { gap: 0; } .logo { display: none; } .navback span { display: none; } .navback, .navback:disabled { padding: 0 8px; }
   main { padding: calc(var(--topbar) + 8px) 12px 80px; }
   .rmap { height: 320px; }
@@ -568,7 +571,33 @@ td small { color: var(--muted); }
 /* Photos page: tools, selection, bulk review */
 .ptools { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin: -6px 0 16px; }
 .pgroups, .pview { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .pgroups { flex: 1 1 auto; min-width: 0; } .pview { margin-left: auto; }
-.pkinds { display: flex; gap: 8px; align-items: center; } .pkinds:not(:last-child) { padding-right: 8px; border-right: 1px solid var(--line); } .pkinds .chip { flex: none; }
+/* Status of the photos: tabs (one list at a time), like the settings. */
+.ptabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); flex: 1 1 auto; min-width: 0; }
+.ptabs button { flex: none; display: inline-flex; align-items: baseline; gap: 6px; border: 0; border-bottom: 2px solid transparent; background: none;
+  color: var(--ink-2); padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer; margin-bottom: -1px; }
+.ptabs button:hover { color: var(--ink); }
+.ptabs button.on { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
+.ptabs .n { font-size: 12px; color: var(--muted); font-weight: 400; } .ptabs button.on .n { color: var(--primary); }
+.ptabs button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+/* Drop-down menus of the tool bar (groups, source): the button says what is chosen. */
+.pdrop { position: relative; }
+.ptools .ddbtn { display: inline-flex; align-items: center; gap: 2px; padding-right: 8px; }
+.ddbtn .dd { width: 18px; height: 18px; fill: currentColor; }
+.pmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 260px; max-width: min(360px, calc(100vw - 32px));
+  max-height: min(70vh, 520px); overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.16); padding: 6px; }
+.pmenu[hidden] { display: none; }
+.mhint { font-size: 12px; color: var(--muted); margin: 4px 10px 6px; }
+.mi { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; cursor: pointer; font-size: 14px; color: var(--ink); }
+.mi:hover { background: var(--surface-2); }
+.mi input { margin: 0; width: 16px; height: 16px; flex: none; accent-color: var(--primary); }
+.mi .mic { width: 20px; text-align: center; flex: none; }
+.mi .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi .n { font-size: 12px; color: var(--muted); }
+.mkind { font-weight: 500; } .mkid { padding-left: 34px; }
+.mkid + .mkind { margin-top: 4px; }
+.mclear { display: block; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--primary);
+  font: inherit; font-size: 13px; padding: 10px 10px 6px; margin-top: 4px; cursor: pointer; }
 .ptools:not(:has(button, select)) { display: none; }
 .ptools .chip { padding: 4px 12px; font-size: 12px; }
 .ptools select { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink-2); }

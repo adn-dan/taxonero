@@ -45,8 +45,8 @@ def test_skipped_photo_says_why_instead_of_waiting(client, dev_app):
 
 
 def test_photos_filtered_by_what_was_detected(client):
-    """Kind chips of the Photos page: animals, plants or both (any of the chosen kinds), counted per kind, combined
-    with the groups, the lists, the counts and the bulk selection; a rejected box does not count."""
+    """Groups menu of the Photos page: animals, plants or both, and groups (class), any of the chosen ones, counted per
+    kind, in the lists, the counts and the bulk selection; a rejected box does not count."""
     c, db = client
     db.execute("UPDATE detection SET status = 'deleted'")
     ids = [r[0] for r in db.execute("SELECT asset_id FROM asset ORDER BY asset_id LIMIT 4")]
@@ -65,13 +65,17 @@ def test_photos_filtered_by_what_was_detected(client):
     assert shown("kind:animal,kind:plant") == sorted(ids)
     assert shown("kind:fungus") == [] and shown("kind:bogus") == sorted(r[0] for r in db.execute("SELECT asset_id FROM asset"))
     assert c.get("/api/photos/counts", params={"group": "kind:animal"}).json()["all"] == 2
-    # Groups: only those of the chosen kinds, then both filters together.
-    groups = {g["group"] for g in c.get("/api/photos/groups", params={"filter": "all", "group": "kind:plant"}).json()}
-    assert groups == {"Plantae"}
-    assert shown("kind:animal,Plantae") == [ids[2]]
+    # Groups with their kind, the rejected bird left out; a kind and a group add up.
+    groups = c.get("/api/photos/groups", params={"filter": "all"}).json()
+    assert sorted((g["kind"], g["group"], g["n"]) for g in groups) == [("animal", "Aves", 2), ("plant", "Plantae", 2)]
+    assert shown("Aves") == sorted(ids[:3:2])
+    assert shown("kind:animal,Plantae") == sorted(ids[:3])
     r = c.post("/api/photos/bulk", json={"filter": "pending", "every": True, "group": "kind:plant", "action": "reject"})
     assert r.status_code == 200
     assert db.execute("SELECT count(*) FROM detection WHERE status = 'pending'").fetchone()[0] == 2   # the two birds left
+    r = c.post("/api/photos/bulk", json={"filter": "pending", "every": True, "group": "Aves", "action": "reject"})
+    assert r.status_code == 200
+    assert db.execute("SELECT count(*) FROM detection WHERE status = 'pending'").fetchone()[0] == 0
 
 
 def test_delete_reframe_and_exact_undo(client):

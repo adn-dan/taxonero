@@ -316,7 +316,6 @@
  "nav.settings": "设置",
  "nav.species": "物种",
  "nav.stats": "统计",
- "photos.all_groups": "所有类群",
  "photos.empty": "此筛选条件下没有照片。",
  "photos.empty_none": "所有已分析的照片都至少有一个检测。",
  "photos.empty_pending": "没有待审核的内容 🎉",
@@ -662,8 +661,7 @@
  "kind.plant": "植物",
  "kind.fungus": "真菌",
  "kind.microbe": "微生物",
- "photos.kinds": "检测到的内容",
- "photos.kinds_hint": "可组合：照片包含任一所选类型即显示",
+ "photos.kinds_hint": "可组合：照片符合任一所选项即显示",
  "xsrc.title": "其他来源",
  "xsrc.sub": "除主来源外，再添加第二个 Immich 账户、另一个文件夹或照片应用。每个来源保留自己的照片并获得各自的结果。",
  "xsrc.none": "没有其他来源。",
@@ -684,5 +682,8 @@
  "xsrc.key": "新的 API 密钥",
  "xsrc.key_btn": "更换密钥",
  "xsrc.key_saved": "密钥已保存",
- "xsrc.key_missing": "请重新输入 API 密钥（备份不保存密钥）"
+ "xsrc.key_missing": "请重新输入 API 密钥（备份不保存密钥）",
+ "photos.groups": "类群",
+ "photos.clear": "全部清除",
+ "photos.all_sources": "所有来源"
 }

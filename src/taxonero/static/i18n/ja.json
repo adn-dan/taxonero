@@ -316,7 +316,6 @@
  "nav.settings": "設定",
  "nav.species": "種",
  "nav.stats": "統計",
- "photos.all_groups": "すべてのグループ",
  "photos.empty": "このフィルターに該当する写真はありません。",
  "photos.empty_none": "解析済みのすべての写真に検出があります。",
  "photos.empty_pending": "レビュー待ちはありません 🎉",
@@ -662,8 +661,7 @@
  "kind.plant": "植物",
  "kind.fungus": "菌類",
  "kind.microbe": "微生物",
- "photos.kinds": "検出されたもの",
- "photos.kinds_hint": "組み合わせ可能：選んだ種類のいずれかを含む写真が表示されます",
+ "photos.kinds_hint": "組み合わせ可能：いずれかに当てはまる写真を表示",
  "xsrc.title": "その他のソース",
  "xsrc.sub": "メインのソースに加えて、2つ目の Immich アカウント、別のフォルダ、または写真アプリ。各ソースは自身の写真を保持し、それぞれの結果を受け取ります。",
  "xsrc.none": "その他のソースはありません。",
@@ -684,5 +682,8 @@
  "xsrc.key": "新しい API キー",
  "xsrc.key_btn": "キーを変更",
  "xsrc.key_saved": "キーを保存しました",
- "xsrc.key_missing": "API キーを再入力してください（バックアップには保存されません）"
+ "xsrc.key_missing": "API キーを再入力してください（バックアップには保存されません）",
+ "photos.groups": "グループ",
+ "photos.clear": "すべてクリア",
+ "photos.all_sources": "すべてのソース"
 }

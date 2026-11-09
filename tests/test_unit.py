@@ -3098,3 +3098,31 @@ def test_migration_adds_a_column_named_in_an_old_comment(tmp_path):
     assert {"source", "series_id"} <= cols
     assert db.execute("SELECT source FROM asset WHERE asset_id = 'a'").fetchone()["source"] == ""
     assert {"asset_source", "asset_series"} <= {r["name"] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+
+
+def test_exiftool_processes_closed_at_exit(tmp_path):
+    """ExifTool kept open never stops by itself: a source never closed, or the desktop window closed, must not leave
+    it running after Python exits (hundreds of orphans had piled up, ~20 MB each)."""
+    import subprocess
+    import textwrap
+
+    from taxonero.sources import exiftool
+    if not exiftool.available():
+        pytest.skip("ExifTool missing")
+    pid_file = tmp_path / "pid"
+    code = textwrap.dedent(f"""
+        import gc
+        from taxonero.sources.exiftool import ExifTool
+        a, b = ExifTool(), ExifTool()
+        a.run("-ver"); b.run("-ver")
+        open({str(pid_file)!r}, "w").write(f"{{a._proc.pid}} {{b._proc.pid}}")
+        del b; gc.collect()   # object gone, process never closed
+    """)
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=60)
+    for pid in map(int, pid_file.read_text().split()):
+        try:
+            os_kill = __import__("os").kill
+            os_kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise AssertionError(f"ExifTool {pid} still running")

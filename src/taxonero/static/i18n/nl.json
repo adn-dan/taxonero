@@ -330,7 +330,6 @@
  "nav.settings": "Instellingen",
  "nav.species": "Soorten",
  "nav.stats": "Statistieken",
- "photos.all_groups": "Alle groepen",
  "photos.empty": "Geen foto's in dit filter.",
  "photos.empty_none": "Alle geanalyseerde foto's hebben minstens één detectie.",
  "photos.empty_pending": "Niets te controleren 🎉",
@@ -702,8 +701,7 @@
  "kind.plant": "Planten",
  "kind.fungus": "Schimmels",
  "kind.microbe": "Microben",
- "photos.kinds": "Wat er gedetecteerd is",
- "photos.kinds_hint": "Combineerbaar: een foto verschijnt als hij een van de gekozen soorten toont",
+ "photos.kinds_hint": "Combineerbaar: een foto verschijnt als hij een van de keuzes toont",
  "xsrc.title": "Andere bronnen",
  "xsrc.sub": "Een tweede Immich-account, een andere map of een foto-app, naast de hoofdbron. Elke bron houdt haar foto's en krijgt haar eigen resultaten.",
  "xsrc.none": "Geen andere bron.",
@@ -724,5 +722,8 @@
  "xsrc.key": "Nieuwe API-sleutel",
  "xsrc.key_btn": "Sleutel wijzigen",
  "xsrc.key_saved": "Sleutel opgeslagen",
- "xsrc.key_missing": "API-sleutel opnieuw invoeren (back-ups bewaren hem niet)"
+ "xsrc.key_missing": "API-sleutel opnieuw invoeren (back-ups bewaren hem niet)",
+ "photos.groups": "Groepen",
+ "photos.clear": "Alles wissen",
+ "photos.all_sources": "Alle bronnen"
 }

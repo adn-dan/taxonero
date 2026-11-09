@@ -214,6 +214,14 @@ class _TagWriter:
             self.thread.join(1)
 
 
+def _close_later(close) -> None:
+    """Close a replaced client in 30 s: a request of the dashboard may still be using it. Does not hold back the exit of
+    Python (the ExifTool processes are then closed by exiftool.close_all)."""
+    t = threading.Timer(30, close)
+    t.daemon = True
+    t.start()
+
+
 class Worker:
     def __init__(self, s: Settings, analyzer: Analyzer | None = None):
         self.s = s
@@ -549,7 +557,7 @@ class Worker:
             self.extra_specs = [new if x["id"] == sid else x for x in self.extra_specs]
             store.set_state(self.db, "sources", json.dumps(self.extra_specs))
         if old:
-            threading.Timer(30, old.close).start()
+            _close_later(old.close)
         log.info("API key changed for %s", self.source_label(sid))
         return {"id": sid, "label": self.source_label(sid), "writable": client.writable}
 
@@ -569,7 +577,7 @@ class Worker:
             for key in ("last_scan", "last_scan_video", "last_reconcile"):
                 store.set_state(self.db, self._key(key, sid), "")   # added again: everything listed again
         if client:
-            threading.Timer(30, client.close).start()
+            _close_later(client.close)
         log.info("photo source removed: %s", sid)
 
     def credentials(self, url: str, api_key: str) -> tuple[str, str]:
@@ -608,7 +616,7 @@ class Worker:
             client.close()
             raise
         log.info("Immich %s connection saved (%s)", client.version, state["code"])
-        threading.Timer(30, old.close).start()
+        _close_later(old.close)
         return state
 
     def set_dry_run(self, value: bool) -> None:
@@ -663,7 +671,7 @@ class Worker:
                 raise
             store.set_state(self.db, "source", json.dumps({"source": source, "photos_dir": str(self.s.photos_dir),
                                                            "catalog_path": str(self.s.catalog_path or "")}))
-            threading.Timer(30, old.close).start()
+            _close_later(old.close)
             for key in ("last_scan", "last_scan_video", "last_reconcile"):
                 store.set_state(self.db, key, "")   # new source: list everything again at the next cycle
         log.info("photo source: %s %s", source, source_path(self.s) or self.s.immich_url)

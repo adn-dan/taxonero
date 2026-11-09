@@ -330,7 +330,6 @@
  "nav.settings": "Paramètres",
  "nav.species": "Espèces",
  "nav.stats": "Statistiques",
- "photos.all_groups": "Tous les groupes",
  "photos.empty": "Aucune photo dans ce filtre.",
  "photos.empty_none": "Toutes les photos analysées ont au moins une détection.",
  "photos.empty_pending": "Rien à relire 🎉",
@@ -702,8 +701,7 @@
  "kind.plant": "Plantes",
  "kind.fungus": "Champignons",
  "kind.microbe": "Microbes",
- "photos.kinds": "Ce qui a été détecté",
- "photos.kinds_hint": "Cumulables : une photo apparaît si elle montre l'un des types choisis",
+ "photos.kinds_hint": "Cumulables : une photo apparaît si elle montre l'un des choix",
  "xsrc.title": "Autres sources",
  "xsrc.sub": "Un deuxième compte Immich, un autre dossier ou un logiciel photo, en plus de la source principale. Chaque source garde ses photos et reçoit ses propres résultats.",
  "xsrc.none": "Aucune autre source.",
@@ -724,5 +722,8 @@
  "xsrc.key": "Nouvelle clé API",
  "xsrc.key_btn": "Changer la clé",
  "xsrc.key_saved": "Clé enregistrée",
- "xsrc.key_missing": "clé API à saisir à nouveau (elle n'est pas gardée dans les sauvegardes)"
+ "xsrc.key_missing": "clé API à saisir à nouveau (elle n'est pas gardée dans les sauvegardes)",
+ "photos.groups": "Groupes",
+ "photos.clear": "Tout effacer",
+ "photos.all_sources": "Toutes les sources"
 }

@@ -44,9 +44,9 @@ plusieurs à la fois. **Tes photos ne sont jamais modifiées.**
   suit sur ses résultats ; le GPU est libéré dès que la partie IA est finie. La présence
   autour d'un point coûte une requête GBIF par zone de 1° pour toutes les espèces à la fois (gardée
   180 jours), et non une par candidat.
-- Dashboard au style d'Immich (mêmes couleurs, police, barre latérale) : page Photos avec filtres
-  (à relire, validées auto, validées par moi, rejetées, sans détection), par ce qui a été détecté
-  (animaux, plantes, champignons, cumulables) et par groupe, et visionneuse plein écran
+- Dashboard au style d'Immich (mêmes couleurs, police, barre latérale) : page Photos avec onglets d'état
+  (à relire, validées auto, validées par moi, rejetées, sans détection) et menu Groupes (animaux, plantes,
+  champignons, chacun avec ses groupes : oiseaux, mammifères…, plusieurs à la fois), et visionneuse plein écran
   pilotable au clavier, rectangles cliquables qui ouvrent l'article Wikipédia ou
   Wikispecies dans un panneau latéral, noms communs en 15 langues, boîtes dessinées à la main,
   page Espèces (vue Grille par groupe, ou vue Arbre de toutes les branches, règne > embranchement > classe > ordre > famille > espèce ; filtres par groupe et Liste rouge UICN),
@@ -305,14 +305,16 @@ l'image à chaque déploiement (`pull_policy: always`), donc la dernière versio
 Construire l'image sur le NAS à la place : copier les sources, `sudo sh deploy/truenas/build.sh
 /mnt/POOL/apps/taxonero/data`, puis dans le YAML `image: taxonero:<variante>` et `pull_policy: never`.
 
-Icône dans la liste des apps : une app personnalisée reçoit une icône générique. Comme l'indique le
-[guide Jellyfin pour TrueNAS](https://jellyfin.org/docs/general/installation/advanced/truenas) (TrueNAS 24.10 et
-plus récent), ajouter une ligne `icon` à ses métadonnées dans le shell de TrueNAS (app nommée `taxonero`), puis
-**Edit** > *Save* :
+Fiche de l'app (logo, version, liens) : TrueNAS donne à une app personnalisée une fiche générique
+(« App Version: custom », « Version: 1.0.0 »). `deploy/truenas/app-info.sh` y met le logo, le nom, les liens et la
+version lue dans l'image. Le lancer dans le shell de TrueNAS (24.10 et plus récent) après l'installation et après
+chaque mise à jour, puis **Edit** > *Save* :
 
 ```sh
-sudo sed -i -e '/^  icon:/d' -e '/^metadata:/a\  icon: https://raw.githubusercontent.com/adn-dan/taxonero/main/packaging/icons/taxonero.png' /mnt/.ix-apps/app_configs/taxonero/metadata.yaml
+curl -fsSL https://raw.githubusercontent.com/adn-dan/taxonero/main/deploy/truenas/app-info.sh | sudo sh
 ```
+
+« Version: 1.0.0 » reste : c'est la version du modèle d'app personnalisée, que TrueNAS utilise pour ses dossiers.
 
 ### Édition de bureau (Windows, macOS, Linux ; x86 et ARM)
 

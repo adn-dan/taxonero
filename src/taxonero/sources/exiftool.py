@@ -1,6 +1,10 @@
 """ExifTool (Phil Harvey, the reference for photo metadata) kept open (-stay_open): a single process
-for all reads and writes, instead of starting Perl (~0.2 s) per photo."""
+for all reads and writes, instead of starting Perl (~0.2 s) per photo.
 
+A process kept open never stops by itself, not even when the program that started it is gone (it keeps waiting
+for its next command): every one still open is closed when Python exits."""
+
+import atexit
 import json
 import os
 import shutil
@@ -48,6 +52,30 @@ def available() -> bool:
     return command() is not None
 
 
+_OPEN: set[subprocess.Popen] = set()   # processes started and not closed yet (even if their ExifTool object is gone)
+
+
+def _stop(p: subprocess.Popen) -> None:
+    """Ask the process to stop (after the command in progress, if any), kill it if it does not."""
+    _OPEN.discard(p)
+    if p.poll() is not None:
+        return
+    try:
+        p.stdin.write("-stay_open\nFalse\n")
+        p.stdin.flush()
+        p.wait(5)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        p.kill()
+        p.wait(5)
+
+
+@atexit.register
+def close_all() -> None:
+    """Exit of Python: the processes still open are closed (a source never closed, the desktop window closed)."""
+    for p in list(_OPEN):
+        _stop(p)
+
+
 class ExifTool:
     def __init__(self, cmd: list[str] | None = None):
         self.cmd = cmd or command() or ["exiftool"]
@@ -56,9 +84,11 @@ class ExifTool:
 
     def _start(self) -> subprocess.Popen:
         if self._proc is None or self._proc.poll() is not None:
+            _OPEN.discard(self._proc)   # stopped on its own (crash): started again
             self._proc = subprocess.Popen([*self.cmd, "-stay_open", "True", "-@", "-"], stdin=subprocess.PIPE,
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", bufsize=1,
                                           **NO_WINDOW)
+            _OPEN.add(self._proc)
         return self._proc
 
     def run(self, *args: str) -> tuple[str, str]:
@@ -100,14 +130,9 @@ class ExifTool:
 
     def close(self) -> None:
         with self._lock:
-            if self._proc and self._proc.poll() is None:
-                self._proc.stdin.write("-stay_open\nFalse\n")
-                self._proc.stdin.flush()
-                try:
-                    self._proc.wait(5)
-                except subprocess.TimeoutExpired:
-                    self._proc.kill()
-            self._proc = None
+            p, self._proc = self._proc, None
+            if p is not None:
+                _stop(p)
 
 
 def escape(value: str) -> str:

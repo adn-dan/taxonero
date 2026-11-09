@@ -330,7 +330,6 @@
  "nav.settings": "Einstellungen",
  "nav.species": "Arten",
  "nav.stats": "Statistiken",
- "photos.all_groups": "Alle Gruppen",
  "photos.empty": "Keine Fotos in diesem Filter.",
  "photos.empty_none": "Alle analysierten Fotos haben mindestens eine Erkennung.",
  "photos.empty_pending": "Nichts zu prüfen 🎉",
@@ -702,8 +701,7 @@
  "kind.plant": "Pflanzen",
  "kind.fungus": "Pilze",
  "kind.microbe": "Mikroben",
- "photos.kinds": "Was erkannt wurde",
- "photos.kinds_hint": "Kombinierbar: ein Foto erscheint, wenn es eine der gewählten Arten zeigt",
+ "photos.kinds_hint": "Kombinierbar: ein Foto erscheint, wenn es eine der Auswahlen zeigt",
  "xsrc.title": "Weitere Quellen",
  "xsrc.sub": "Ein zweites Immich-Konto, ein anderer Ordner oder eine Foto-App, zusätzlich zur Hauptquelle. Jede Quelle behält ihre Fotos und erhält ihre eigenen Ergebnisse.",
  "xsrc.none": "Keine weitere Quelle.",
@@ -724,5 +722,8 @@
  "xsrc.key": "Neuer API-Schlüssel",
  "xsrc.key_btn": "Schlüssel ändern",
  "xsrc.key_saved": "Schlüssel gespeichert",
- "xsrc.key_missing": "API-Schlüssel erneut eingeben (Sicherungen enthalten ihn nicht)"
+ "xsrc.key_missing": "API-Schlüssel erneut eingeben (Sicherungen enthalten ihn nicht)",
+ "photos.groups": "Gruppen",
+ "photos.clear": "Alles löschen",
+ "photos.all_sources": "Alle Quellen"
 }

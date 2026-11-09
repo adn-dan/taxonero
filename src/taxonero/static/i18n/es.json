@@ -344,7 +344,6 @@
  "nav.settings": "Ajustes",
  "nav.species": "Especies",
  "nav.stats": "Estadísticas",
- "photos.all_groups": "Todos los grupos",
  "photos.empty": "Ninguna foto en este filtro.",
  "photos.empty_none": "Todas las fotos analizadas tienen al menos una detección.",
  "photos.empty_pending": "Nada que revisar 🎉",
@@ -743,8 +742,7 @@
  "kind.plant": "Plantas",
  "kind.fungus": "Hongos",
  "kind.microbe": "Microbios",
- "photos.kinds": "Lo que se detectó",
- "photos.kinds_hint": "Combinables: una foto aparece si muestra alguno de los tipos elegidos",
+ "photos.kinds_hint": "Acumulables: una foto aparece si muestra alguna de las opciones",
  "xsrc.title": "Otras fuentes",
  "xsrc.sub": "Una segunda cuenta de Immich, otra carpeta o una aplicación de fotos, además de la fuente principal. Cada fuente conserva sus fotos y recibe sus propios resultados.",
  "xsrc.none": "Ninguna otra fuente.",
@@ -765,5 +763,8 @@
  "xsrc.key": "Nueva clave API",
  "xsrc.key_btn": "Cambiar la clave",
  "xsrc.key_saved": "Clave guardada",
- "xsrc.key_missing": "clave API que volver a introducir (las copias de seguridad no la guardan)"
+ "xsrc.key_missing": "clave API que volver a introducir (las copias de seguridad no la guardan)",
+ "photos.groups": "Grupos",
+ "photos.clear": "Borrar todo",
+ "photos.all_sources": "Todas las fuentes"
 }
