@@ -191,7 +191,7 @@ class Taxonomy:
                 continue
             return body
         if r.is_success:
-            raise httpx.HTTPError(f"Wikidata : {error}")
+            raise httpx.HTTPError(f"Wikidata: {error}")
         return r.raise_for_status().json()
 
     def fetch_bytes(self, url: str, params: list | dict | None = None, retries: int = 6) -> bytes:

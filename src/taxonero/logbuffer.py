@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .config import Settings
 
-CAPACITY = 2000    # lignes d'information
+CAPACITY = 2000    # information lines
 KEEP = 2000        # warnings and errors
 MAX_CHARS = 8000   # one line, error trace included
 MASK = "***"

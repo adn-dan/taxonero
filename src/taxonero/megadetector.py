@@ -55,7 +55,7 @@ def weights(models_dir: Path, user_agent: str = "taxonero") -> Path:
     torch.save(state, tmp)
     tmp.replace(compact)
     full.unlink(missing_ok=True)
-    log.info("MegaDetector : poids extraits (%s)", compact.name)
+    log.info("MegaDetector: weights extracted (%s)", compact.name)
     return compact
 
 

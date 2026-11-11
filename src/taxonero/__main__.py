@@ -76,7 +76,7 @@ def main() -> None:
         from .sync import Syncer
         if not w.check():
             raise SystemExit("server not validated: uninstall refused")
-        syncer = Syncer(w.db, w.client, s.tag_root, s.names_lang)
+        syncer = Syncer(w.db, w.client, s.tag_root, s.names_lang, scientific=s.scientific_names)
         if not syncer.same_server():
             raise SystemExit("none of the written tags exists on this server (another Immich or another account?): uninstall refused")
         print(syncer.uninstall(), f"remaining photos: {syncer.remaining}", "(dry-run)" if s.dry_run else "")

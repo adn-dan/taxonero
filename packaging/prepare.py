@@ -43,7 +43,7 @@ def fetch_uv() -> None:
     url = f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-{target}.{ext}"
     data = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "taxonero"}), timeout=120).read()
     if hashlib.sha256(data).hexdigest() != UV_SHA256[target]:
-        raise SystemExit(f"uv {UV_VERSION} ({target}) : empreinte SHA-256 inattendue")
+        raise SystemExit(f"uv {UV_VERSION} ({target}): unexpected SHA-256 checksum")
     out = BUILD / "uv"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)

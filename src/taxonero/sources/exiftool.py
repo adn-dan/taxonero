@@ -7,6 +7,7 @@ for its next command): every one still open is closed when Python exits."""
 import atexit
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,7 @@ class ExifTool:
     def __init__(self, cmd: list[str] | None = None):
         self.cmd = cmd or command() or ["exiftool"]
         self._proc: subprocess.Popen | None = None
+        self._errors: queue.Queue = queue.Queue()   # error lines of the process (None: its error output is closed)
         self._lock = threading.Lock()
 
     def _start(self) -> subprocess.Popen:
@@ -89,7 +91,21 @@ class ExifTool:
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", bufsize=1,
                                           **NO_WINDOW)
             _OPEN.add(self._proc)
+            # Error output read as it comes, in its own thread: read only after the standard output, a batch with many
+            # errors (unreadable files) filled its pipe (a few KB) and ExifTool waited there for ever, as did the scan.
+            self._errors = queue.Queue()
+            threading.Thread(target=self._drain, args=(self._proc, self._errors), daemon=True, name="exiftool-errors").start()
         return self._proc
+
+    @staticmethod
+    def _drain(p: subprocess.Popen, errors: queue.Queue) -> None:
+        try:
+            for line in p.stderr:
+                errors.put(line)
+        except (OSError, ValueError):   # process stopped, pipe closed
+            pass
+        finally:
+            errors.put(None)
 
     def run(self, *args: str) -> tuple[str, str]:
         """One command (one argument per item, as on the command line); return (output, errors). Values
@@ -108,11 +124,11 @@ class ExifTool:
                     break
                 if line.rstrip("\n") != "{ready}":
                     out.append(line)
-            err = []
-            for line in p.stderr:
-                if line.rstrip("\n") == "{done}":
-                    break
+            err, errors = [], self._errors
+            while (line := errors.get()) is not None and line.rstrip("\n") != "{done}":
                 err.append(line)
+            if line is None:   # process gone: the next command starts another one, with its own queue
+                errors.put(None)
         return "".join(out), "".join(err)
 
     def read(self, paths: list[str], tags: list[str]) -> list[dict]:

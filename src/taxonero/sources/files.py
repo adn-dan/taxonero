@@ -38,7 +38,7 @@ READ_TAGS = ["DateTimeOriginal", "CreateDate", "GPSLatitude", "GPSLongitude", "M
 SIZES = {"thumbnail": 250, "preview": 1440}   # short side, like Immich thumbnails and previews
 NAMESPACE = uuid.UUID("6f1c2b8e-6a7d-4a43-9d8e-4f3e5c2a1b90")
 
-try:   # HEIC (iPhone) : greffon facultatif
+try:   # HEIC (iPhone): optional plugin
     from pillow_heif import register_heif_opener
     register_heif_opener()
 except ImportError:

@@ -78,7 +78,7 @@ def build(archive: Path, out: Path, version: str = "") -> Path:
                 db.executemany("INSERT INTO taxon VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
                 batch.clear()
         db.executemany("INSERT INTO taxon VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
-        log.info("taxonomie GBIF : %d taxons (%.0f s)", db.execute("SELECT count(*) FROM taxon").fetchone()[0], time.monotonic() - t0)
+        log.info("GBIF taxonomy: %d taxa (%.0f s)", db.execute("SELECT count(*) FROM taxon").fetchone()[0], time.monotonic() - t0)
         db.executemany("INSERT INTO vernacular VALUES (?,?,?,?)",
                        ((int(r[0]), r[1].strip(), r[2], r[7]) for r in _rows(z, "VernacularName.tsv") if r[1].strip()))
     db.executescript(INDEXES)

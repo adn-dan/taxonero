@@ -27,7 +27,7 @@ CONTRACT: tuple[Endpoint, ...] = (
     Endpoint("get", "/server/version", None),
     # Permissions of the key itself (no permission required): say which one is missing, or which one is extra.
     Endpoint("get", "/api-keys/me", None, optional=True),
-    Endpoint("post", "/search/metadata", "asset.read", body_fields=("page", "size", "type", "updatedAfter", "withExif", "tagIds")),
+    Endpoint("post", "/search/metadata", "asset.read", body_fields=("page", "size", "type", "updatedAfter", "withExif", "withPeople", "tagIds")),
     Endpoint("get", "/assets/{id}", "asset.read"),
     Endpoint("get", "/assets/{id}/thumbnail", "asset.view"),
     # Original, to identify small subjects in full resolution (otherwise: ~1440 px preview).

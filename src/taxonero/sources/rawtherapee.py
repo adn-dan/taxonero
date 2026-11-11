@@ -49,8 +49,8 @@ class RawTherapee(LocalFolder):
     name = "rawtherapee"
     label = "RawTherapee"
 
-    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True, options: Path | None = None):
-        super().__init__(root, data_dir, dry_run)
+    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True, options: Path | None = None, sid: str = ""):
+        super().__init__(root, data_dir, dry_run, sid)
         self.options = options or options_file()
 
     def _sidecars(self, p: Path) -> list[Path]:

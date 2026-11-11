@@ -26,7 +26,7 @@ class _Sanitizer(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
         self.skipping = False        # in an ignored section (references, external links...)
-        self.heading: str | None = None   # balise de titre en cours (h2/h3/h4), texte mis en tampon
+        self.heading: str | None = None   # heading tag in progress (h2/h3/h4), its text buffered
         self.heading_text: list[str] = []
         self.drop = 0                # in <script>/<style>: content ignored
 

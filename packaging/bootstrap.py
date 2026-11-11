@@ -33,8 +33,8 @@ PYTORCH = "https://download.pytorch.org/whl/"
 AMD_WIN = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2/"
 # Variant -> (package index, PyTorch packages). Same versions as the Docker image.
 TORCH = {
-    "cu130": (PYTORCH + "cu130", ["torch==2.14.1", "torchvision==0.29.1"]),     # NVIDIA, pilote >= 580
-    "cu128": (PYTORCH + "cu128", ["torch==2.11.0", "torchvision==0.26.0"]),     # NVIDIA, pilote >= 525
+    "cu130": (PYTORCH + "cu130", ["torch==2.14.1", "torchvision==0.29.1"]),     # NVIDIA, driver >= 580
+    "cu128": (PYTORCH + "cu128", ["torch==2.11.0", "torchvision==0.26.0"]),     # NVIDIA, driver >= 525
     "rocm": (PYTORCH + "rocm7.2", ["torch==2.14.1", "torchvision==0.29.1"]),    # AMD, Linux
     "xpu": (PYTORCH + "xpu", ["torch==2.14.1", "torchvision==0.29.1"]),         # Intel Arc, Core Ultra
     "cpu": (PYTORCH + "cpu", ["torch==2.14.1", "torchvision==0.29.1"]),
@@ -119,7 +119,7 @@ def detect() -> tuple[str, str]:
             return "amd-win", _why("AMD Radeon (version d'aperçu d'AMD)", "AMD Radeon (AMD preview build)")
         if Path("/dev/kfd").exists():   # amdgpu driver with compute (ROCm)
             return "rocm", "AMD Radeon (ROCm)"
-    if not arm and ("Arc" in names or "(xe)" in names):   # Intel Arc, Core Ultra (pilote xe sous Linux)
+    if not arm and ("Arc" in names or "(xe)" in names):   # Intel Arc, Core Ultra (xe driver on Linux)
         return "xpu", "Intel Arc"
     return "cpu", _why("aucun GPU pris en charge détecté", "no supported GPU found")
 

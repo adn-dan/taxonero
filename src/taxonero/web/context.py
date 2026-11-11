@@ -123,6 +123,10 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
                 t = store.load_taxon(db, key)
         return t
 
+    def public_on() -> bool:
+        """Public identification page open: the setting, and never on the desktop (local window, session token)."""
+        return bool(s.public_identify) and not desktop
+
     blocked_cache = {"at": 0.0, "groups": set()}
 
     def blocked_now() -> set[str]:
@@ -210,7 +214,7 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
         db.commit()
         return det_json(db.execute("SELECT * FROM detection WHERE id = ?", (det_id,)).fetchone())
 
-    return SimpleNamespace(s=s, w=w, db=db, tx=tx, drop=drop, lock=lock, range_lock=range_lock, auth=auth,
+    return SimpleNamespace(s=s, w=w, db=db, tx=tx, drop=drop, lock=lock, range_lock=range_lock, auth=auth, security=security, public_on=public_on,
                            public_immich=public_immich, source_link=source_link, taxon=taxon, blocked_now=blocked_now,
                            det_json=det_json, ensure_taxon=ensure_taxon, asset_json=asset_json, set_status=set_status,
                            analyzer=analyzer, original=original)

@@ -757,3 +757,13 @@ main:has(#v-photos.on #ptimeline:not([hidden])) { padding-right: 60px; }
 }
 #viewer:focus { outline: none; }
 .loaderr .btn { margin-top: 12px; }
+/* Public identification page (public.html): the Identify page alone, without the top bar or the sidebar. */
+.public main { margin: 0; padding: 0; min-height: 0; }
+.pubpage { max-width: 1200px; margin: 0 auto; padding: 16px 16px 32px; }
+.pubhead { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 18px; }
+.pubhead img { border-radius: 7px; } .pubhead h1 { font-size: 18px; font-weight: 400; margin: 0; color: var(--muted); }
+.pubhead h1::before { content: "· "; }
+.public .cand { cursor: default; } .public .cand:hover { background: none; }
+.publinks { margin-top: 6px; font-size: 13px; display: flex; gap: 14px; }
+.pubfoot { margin-top: 24px; text-align: center; font-size: 12px; }
+.publink { margin-top: 6px; } .publink code { user-select: all; }

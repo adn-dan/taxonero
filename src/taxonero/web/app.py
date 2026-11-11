@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.security import HTTPBasicCredentials
 from pydantic import BaseModel
 
 from .. import __version__, logbuffer, store
@@ -26,6 +27,10 @@ from .context import fail, make_context
 STATIC = Path(__file__).parent.parent / "static"
 SESSION_COOKIE = "taxonero_session"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# Files of the public identification page (Settings > General), served without a password while it is on: its script,
+# the style sheet, the texts, the fonts and the icons. Nothing of the dashboard itself.
+PUBLIC_STATIC = ("js/public.js", "app.css", "favicon.svg", "logo.svg", "apple-touch-icon.png", "vendor/fonts.css")
+PUBLIC_STATIC_DIRS = ("i18n/", "vendor/fonts/")
 # img-src https: Wikipedia images and map background. style-src 'unsafe-inline': style attributes of the interface.
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -110,11 +115,28 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
         # Always revalidate: otherwise the browser may keep an old version of the interface.
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @app.get("/static/{path:path}", dependencies=[Depends(auth)])
+    def static_auth(path: str, request: Request, creds: HTTPBasicCredentials | None = Depends(c.security)) -> None:
+        """Password, except for the few files of the public identification page while it is on."""
+        try:   # the file actually asked for ("i18n/../js/core.js" is not one of the public ones)
+            rel = (STATIC / path).resolve().relative_to(STATIC.resolve()).as_posix()
+        except ValueError:
+            rel = ""
+        if not (c.public_on() and (rel in PUBLIC_STATIC or rel.startswith(PUBLIC_STATIC_DIRS))):
+            auth(request, creds)
+
+    @app.get("/identify")
+    def public_page():
+        """Public identification page (no password), only while the setting is on: one image in, what is recognised
+        out. Its requests: /api/public/* (web/identify.py)."""
+        if not c.public_on():
+            raise HTTPException(404)
+        return FileResponse(STATIC / "public.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/static/{path:path}", dependencies=[Depends(static_auth)])
     def static(path: str):
         """Fonts and Leaflet served locally: the dashboard depends neither on Google Fonts nor on a CDN."""
         f = (STATIC / path).resolve()
-        if not f.is_relative_to(STATIC.resolve()) or not f.is_file() or f.name == "index.html":
+        if not f.is_relative_to(STATIC.resolve()) or not f.is_file() or f.name in ("index.html", "public.html"):
             raise HTTPException(404)
         # Interface code and texts (js/, app.css, i18n/): revalidated at every load, like index.html,
         # otherwise an update mixes old and new versions. Fonts and Leaflet (vendor/): one week.
@@ -174,8 +196,13 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
             "manual": s.detection == "manual",   # manual detection: nothing is "queued"
             "can_pick": picker is not None,      # desktop: "Browse…" button
             "version": __version__,              # of Taxonero, shown next to the source
+            "edition": s.edition,                # server or desktop (some settings exist in one only)
             "models_on_disk": models_on_disk(s),  # otherwise ~5 GB to download at first use, announced
             "langs": list(s.langs),
+            # Names written to the photos (Settings > General); tagged: photos whose tags or description a change rewrites.
+            "names": {"lang": s.names_lang, "follow": s.names_follow_ui, "scientific": s.scientific_names,
+                      "tagged": db.execute("SELECT count(DISTINCT asset_id) FROM written WHERE kind LIKE 'tag_asset%' "
+                                           "OR kind LIKE 'description%'").fetchone()[0]},
             # Languages whose interface is translated (static/i18n catalogues); the others: species names only.
             "ui_langs": sorted(f.stem for f in (STATIC / "i18n").glob("*.json")),
         }

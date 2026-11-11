@@ -25,12 +25,21 @@ const SET_ROWS = [   // labels: set.<key>, set.<key>.sub, set.<key>.<option>, se
   { k: 'write_description', type: 'bool' },
   { k: 'analysis_window', type: 'window' },
   { k: 'interval_minutes', type: 'int', min: 1, max: 1440, unit: 'min' },
+  // Server edition only (the desktop window is local): a page open to anyone, to identify one image.
+  { group: 'public', edition: 'server' },
+  { k: 'public_identify', type: 'bool', edition: 'server', extra: () => publicNote() },
 ];
+/* Address of the public identification page, to share, once it is on. */
+function publicNote() {
+  if (!SETS?.values?.public_identify) return '';
+  const url = `${location.origin}/identify`;
+  return `<div class="publink">${t('set.public_identify.link', { url: `<a href="/identify" target="_blank" rel="noopener"><code>${esc(url)}</code></a>` })}</div>`;
+}
 let SETS = null, MODELS = null, IMM = null, SRC = null;
 /* Tabs of the page: SET_ROWS group -> tab; the open tab is remembered by the browser. */
 const TABS = ['source', 'analysis', 'validation', 'models', 'general', 'logs'];
 const TAB_LABEL = { source: 'src.title', analysis: 'set.tab.analysis', validation: 'set.group.auto', models: 'models.title', general: 'set.tab.general', logs: 'logs.title' };
-const SET_TAB = { detection: 'analysis', compute: 'analysis', identification: 'analysis', auto: 'validation', immich: 'source' };
+const SET_TAB = { detection: 'analysis', compute: 'analysis', identification: 'analysis', auto: 'validation', immich: 'source', public: 'general' };
 let setTab = (() => { try { return localStorage.getItem('settings-tab'); } catch { return null; } })();
 function showSetTab(k, focus) {
   setTab = k;
@@ -437,10 +446,12 @@ function renderSettings() {
   // Tabs: each group of settings goes in the SET_TAB tab (Analysis by default).
   const tabs = { source: sourceCard(SRC) + immichCard(IMM) + extraCard(SRC) + undoCard(), analysis: '', validation: '', models: modelsCard(MODELS), logs: logsCard(),
     general: `<section class="card"><h2>${t('set.group.display')}</h2><div class="setrow"><div class="lbl"><b>${t('set.lang')}</b>
-    <div class="sub">${t('set.lang.sub', { tags: esc(langName(e.names_lang).toLocaleLowerCase(LANG)), env: '<code>NAMES_LANG</code>' })}</div></div>
-    <div class="ctl"><select id="set-lang" class="pill" aria-label="${esc(t('set.lang'))}">${langs.map(l => `<option value="${esc(l)}"${l === LANG ? ' selected' : ''}>${esc(opt(l))}</option>`).join('')}</select></div></div></section>` };
+    <div class="sub">${t('set.lang.sub')}</div></div>
+    <div class="ctl"><select id="set-lang" class="pill" aria-label="${esc(t('set.lang'))}">${langs.map(l => `<option value="${esc(l)}"${l === LANG ? ' selected' : ''}>${esc(opt(l))}</option>`).join('')}</select></div></div>
+    ${namesRows(v, opt)}</section>` };
   let tab = null;
   for (const r of SET_ROWS) {
+    if (r.edition && r.edition !== (STATE.status?.edition || 'server')) continue;
     if (r.group) { if (tab) tabs[tab] += '</section>'; tab = SET_TAB[r.group] || 'analysis'; tabs[tab] += `<section class="card"><h2>${t(`set.group.${r.group}`)}</h2>`; continue; }
     if (r.when && !r.when(v)) continue;
     const changed = r.norm ? r.norm(v[r.k]) !== r.norm(d[r.k]) : JSON.stringify(v[r.k]) !== JSON.stringify(d[r.k]);
@@ -451,7 +462,6 @@ function renderSettings() {
   tabs.general += `<section class="card"><h2>${t('env.title')}</h2><div class="sub" style="font-size:13px">${t('env.sub', { file: '<code>.env</code>' })}</div>
     <dl class="envlist">
       <dt>${t('env.writing')}</dt><dd>${e.dry_run ? `${t('env.writing_off')} (<code>DRY_RUN=true</code>)` : t('env.writing_on')}</dd>
-      <dt>${t('env.tags_lang')}</dt><dd>${esc(langName(e.names_lang))} <span class="sub">(<code>NAMES_LANG</code> : ${t('env.tags_lang_hint')})</span></dd>
       <dt>${t('env.tag_root')}</dt><dd>${esc(e.tag_root)}</dd>
       <dt>${t('env.open_detector')}</dt><dd>${e.open_detector ? t('env.open_detector_on') : t('env.open_detector_off')}</dd>
     </dl></section>`;
@@ -466,6 +476,23 @@ function renderSettings() {
   bindLogs();
   bindUndo();
   showSetAnchor();
+}
+/* Names written to the photos: scientific names only, or common names in the interface language or a fixed one. */
+function namesRows(v, opt) {
+  const sw = (id, on, label) => `<label class="switch"><input type="checkbox" id="${id}" aria-label="${esc(label)}"${on ? ' checked' : ''}><span></span></label>`;
+  const langs = STATE.status?.langs || [v.names_lang];
+  let h = `<div class="setrow"><div class="lbl"><b>${t('set.scientific_names')}</b><div class="sub">${t('set.scientific_names.sub')}</div></div>
+    <div class="ctl">${sw('set-scientific_names', v.scientific_names, t('set.scientific_names'))}</div></div>`;
+  if (v.scientific_names) return h;
+  h += `<div class="setrow"><div class="lbl"><b>${t('set.names_follow_ui')}</b><div class="sub">${t('set.names_follow_ui.sub')}</div></div>
+    <div class="ctl">${sw('set-names_follow_ui', v.names_follow_ui, t('set.names_follow_ui'))}</div></div>`;
+  if (!v.names_follow_ui) h += `<div class="setrow"><div class="lbl"><b>${t('set.names_lang')}</b><div class="sub">${t('set.names_lang.sub')}</div></div>
+    <div class="ctl"><select id="set-names_lang" class="pill" aria-label="${esc(t('set.names_lang'))}">${langs.map(l => `<option value="${esc(l)}"${l === v.names_lang ? ' selected' : ''}>${esc(opt(l))}</option>`).join('')}</select></div></div>`;
+  return h;
+}
+async function changeNames(values) {
+  if (await saveNames(values)) { SETS = await api('/api/settings'); toast(t('set.saved')); drawBack(); }
+  renderSettings();
 }
 function fmtSet(r, x) {
   if (r.type === 'bool') return x ? t('common.yes') : t('common.no');
@@ -494,6 +521,10 @@ function bindSettings() {
       if (d != null) { ev.preventDefault(); showSetTab(TABS[(i + d + TABS.length) % TABS.length], true); }
     };
   });
+  $('#set-scientific_names').onchange = e => changeNames({ scientific_names: e.target.checked });
+  $('#set-names_follow_ui') && ($('#set-names_follow_ui').onchange = e => changeNames(e.target.checked && STATE.status?.langs?.includes(LANG)
+    ? { names_follow_ui: true, names_lang: LANG } : { names_follow_ui: e.target.checked }));
+  $('#set-names_lang') && ($('#set-names_lang').onchange = e => changeNames({ names_lang: e.target.value }));
   $('#set-lang').onchange = async e => { await setLang(e.target.value); renderSettings(); toast(t('set.lang.changed', { lang: esc(langName(LANG)) })); };
   for (const r of SET_ROWS) {
     if (!r.k) continue;

@@ -77,6 +77,11 @@ class Settings(BaseSettings):
 
     tag_root: str = "Nature"
     names_lang: str = "fr"  # main language of the names (tags, description); not LANG: system variable
+    # Names written follow the language chosen in the dashboard menu (names_lang changed with it). On for a new
+    # install without NAMES_LANG, off otherwise (worker: no tag renamed by an update).
+    names_follow_ui: bool = False
+    # Scientific names only: shown in the dashboard and written in the tags and descriptions, no common name.
+    scientific_names: bool = False
     # Languages of the common names shown in the dashboard (Wikipedia codes).
     names_langs: str = "fr,en,de,es,it,nl,pt,ca,br,eu,oc,pl,sv,ja,zh"
 
@@ -119,6 +124,10 @@ class Settings(BaseSettings):
     dashboard_port: int = 8765
     dashboard_password: str = Field(default="", description="HTTP Basic password (user 'nature').")
     dashboard_no_auth: bool = False
+    # Public identification page (/identify), without login or password: anyone who has the address can send one image
+    # and see what is recognised in it. Nothing else is open (photos, species, settings), the image is not kept, and
+    # requests are limited per address. Off by default; server edition only. Also set in Settings > General.
+    public_identify: bool = False
     # Public Immich URL for the "open in Immich" links (immich_url by default).
     immich_public_url: str = ""
 
@@ -128,7 +137,7 @@ class Settings(BaseSettings):
         from .hardware import DEVICES
         v = v.strip().lower()
         if v not in DEVICES:
-            raise ValueError(f"DEVICE : {' | '.join(DEVICES)}")
+            raise ValueError(f"DEVICE: {' | '.join(DEVICES)}")
         return v
 
     @field_validator("source")
@@ -137,7 +146,7 @@ class Settings(BaseSettings):
         from .sources import SOURCES
         v = v.strip().lower()
         if v not in SOURCES:
-            raise ValueError(f"SOURCE : {' | '.join(SOURCES)}")
+            raise ValueError(f"SOURCE: {' | '.join(SOURCES)}")
         return v
 
     @field_validator("analysis_window")
@@ -190,7 +199,7 @@ def user_data_dir(app: str = "taxonero") -> Path:
 
 # Settings that can be changed from the dashboard (Settings page). They are saved in the database and
 # take precedence over the environment. Security settings (DRY_RUN, API key, password) stay
-# in the environment only, like NAMES_LANG (changing it renames all the tags in Immich).
+# in the environment only. NAMES_LANG is only the starting value of names_lang.
 # device: from the dashboard, GPU (auto: GPU if there is one, otherwise CPU) or CPU. The finer
 # values (cuda, xpu, mps) are still possible in the environment.
 CHOICES = {"detection": ("auto", "manual"), "domestic_animals": ("skip", "keep"), "auto_confirm": ("rule", "calibrated", "fixed", "off"),
@@ -200,7 +209,8 @@ BOUNDS = {"auto_confirm_threshold": (0.5, 0.99), "auto_confirm_max_runner_up": (
           "auto_confirm_audit": (0.0, 0.5), "gpu_batch": (0, 64), "models_idle_minutes": (0, 1440)}
 GROUPS = ("animal", "plant", "fungus", "microbe")
 EDITABLE = ("detection", "detect_groups", "device", "open_detector_mode", "gpu_batch", "models_idle_minutes", "exclude_extinct", "hide_absent", "analyze_videos", "skip_people", "skip_raw_twins", "full_image_fallback", "domestic_animals", "auto_confirm", "auto_confirm_threshold",
-            "auto_confirm_max_runner_up", "auto_confirm_audit", "write_description", "analysis_window", "interval_minutes")
+            "auto_confirm_max_runner_up", "auto_confirm_audit", "write_description", "analysis_window", "interval_minutes",
+            "names_lang", "names_follow_ui", "scientific_names", "public_identify")
 WINDOW = re.compile(r"^$|^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -222,21 +232,25 @@ def validate_overrides(s: Settings, values: dict) -> dict:
                 raise ValueError(f"{k}: yes or no expected")
         elif kind in (int, float):
             try:
+                if isinstance(v, bool):   # int(True) is 1: a yes/no is not a number
+                    raise TypeError
                 v = kind(v)
             except (TypeError, ValueError):
-                raise ValueError(f"{k} : nombre attendu") from None
+                raise ValueError(f"{k}: number expected") from None
             lo, hi = BOUNDS[k]
             if not lo <= v <= hi:
                 raise ValueError(f"{k}: between {lo} and {hi}")
         else:
             v = str(v).strip()
         if k in CHOICES and v not in CHOICES[k]:
-            raise ValueError(f"{k} : {' | '.join(CHOICES[k])}")
+            raise ValueError(f"{k}: {' | '.join(CHOICES[k])}")
         if k == "detect_groups":
             chosen = {g.strip() for g in v.split(",") if g.strip()}
             if not chosen or chosen - set(GROUPS):
                 raise ValueError(f"detect_groups: at least one of {', '.join(GROUPS)}")
             v = ",".join(g for g in GROUPS if g in chosen)
+        if k == "names_lang" and v not in s.langs:   # those whose common names are fetched (NAMES_LANGS)
+            raise ValueError(f"names_lang: one of {', '.join(s.langs)}")
         if k == "analysis_window" and not window_ok(v):
             raise ValueError("analysis_window: empty or HH:MM-HH:MM, different start and end")
         out[k] = v

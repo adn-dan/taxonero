@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Taxonero</title>
+<!-- Public identification page (Settings > General): one image in, what is recognised out. No password, and no
+     access to anything else of the dashboard: it only calls /api/public/* (web/identify.py). -->
+<link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+<link rel="apple-touch-icon" href="static/apple-touch-icon.png">
+<link rel="stylesheet" href="static/vendor/fonts.css">
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body class="public">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4,4H7L9,2H15L17,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M12,7A5,5 0 0,0 7,12A5,5 0 0,0 12,17A5,5 0 0,0 17,12A5,5 0 0,0 12,7M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9Z"/></symbol>
+</svg>
+<div class="pubpage">
+  <header class="pubhead"><img src="static/logo.svg" alt="" width="36" height="36"><b>Taxonero</b><h1 id="pubtitle"></h1></header>
+  <main id="identify"></main>
+  <footer class="pubfoot sub"><a href="https://github.com/adn-dan/taxonero" target="_blank" rel="noopener">Taxonero</a></footer>
+</div>
+<script src="static/js/public.js"></script>
+</body>
+</html>

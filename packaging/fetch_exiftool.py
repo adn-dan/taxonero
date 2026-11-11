@@ -42,10 +42,10 @@ def fetch(name: str) -> bytes:
             with urllib.request.urlopen(urllib.request.Request(m.format(f=name), headers={"User-Agent": "taxonero"}), timeout=120) as r:
                 data = r.read()
             if hashlib.sha256(data).hexdigest() != want:
-                raise ValueError("empreinte SHA-256 inattendue")
+                raise ValueError("unexpected SHA-256 checksum")
             return data
         except Exception as e:
-            print(f"{m.format(f=name)} : {e}")
+            print(f"{m.format(f=name)}: {e}")
     raise SystemExit(f"ExifTool {VERSION} not found")
 
 
@@ -66,7 +66,7 @@ def main() -> None:
         shutil.copy(src / "exiftool", OUT / "exiftool")
         shutil.copytree(src / "lib", OUT / "lib")
         shutil.rmtree(OUT.parent / "exiftool-src")
-    print(f"ExifTool {VERSION} : {OUT}")
+    print(f"ExifTool {VERSION}: {OUT}")
 
 
 if __name__ == "__main__":

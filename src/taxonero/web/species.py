@@ -113,7 +113,7 @@ def register(app, c) -> None:
                 seen.add(r["key"])
                 out.append({"gbif_key": r["key"], "name": r.get("canonicalName"), "rank": r.get("rank", "").lower(), "common": ""})
         order = {"species": 0, "genus": 1, "family": 2, "subspecies": 3}
-        out.sort(key=lambda r: order.get(r["rank"], 4))  # tri stable : garde l'ordre de pertinence GBIF
+        out.sort(key=lambda r: order.get(r["rank"], 4))  # stable sort: keeps the GBIF relevance order
         return out[:12]
 
     # -- species, tree, map, stats ----------------------------------------

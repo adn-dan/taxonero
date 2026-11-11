@@ -65,7 +65,7 @@ def register(app, c) -> None:
         image.save(buf, "JPEG", quality=90)
         return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
-    # -- relecture -----------------------------------------------------------
+    # -- review --------------------------------------------------------------
 
     HIGHER_RANKS = ("kingdom", "phylum", "class", "order", "family", "genus")
 

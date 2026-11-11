@@ -34,8 +34,8 @@ class RapidRaw(LocalFolder):
     name = "rapidraw"
     label = "RapidRAW"
 
-    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True, settings: Path | None = None):
-        super().__init__(root, data_dir, dry_run)
+    def __init__(self, root: Path, data_dir: Path, dry_run: bool = True, settings: Path | None = None, sid: str = ""):
+        super().__init__(root, data_dir, dry_run, sid)
         self.settings = settings or settings_file()
 
     def _sidecars(self, p: Path) -> list[Path]:

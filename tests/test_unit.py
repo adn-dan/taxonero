@@ -32,6 +32,38 @@ def test_tag_value_species_and_genus():
     assert tag_value(genus, "Nature") == "Nature/Aves/Passeriformes/Paridae/Parus (genus)"
 
 
+def test_scientific_names_only_in_tags_and_description():
+    from taxonero.sync import description_block
+    assert tag_value(PARUS, "Nature", None) == "Nature/Aves/Passeriformes/Paridae/Parus/Parus major"
+    assert tag_value(PARUS, "Nature", "en") == "Nature/Aves/Passeriformes/Paridae/Parus/Parus major"   # no English name
+    taxon = {**PARUS, "wikipedia": {"fr": "https://fr.wikipedia.org/wiki/M"}}
+    block = description_block([taxon], "fr", scientific=True)
+    assert "Parus major · https://fr.wikipedia.org/wiki/M" in block and "Mésange" not in block
+    assert "Mésange charbonnière (Parus major)" in description_block([taxon], "fr")
+
+
+def test_names_follow_the_interface_only_on_a_new_install(tmp_path, monkeypatch):
+    """Following the interface language could rename tags already written: only a new install without NAMES_LANG
+    gets it, and the choice made at the first start stays."""
+    from taxonero import store
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    kw = {"immich_url": "http://x", "immich_api_key": "k"}
+    assert Worker(Settings(data_dir=tmp_path / "new", **kw)).s.names_follow_ui is True
+    assert Worker(Settings(data_dir=tmp_path / "env", names_lang="en", **kw)).s.names_follow_ui is False
+    old = tmp_path / "old"
+    old.mkdir()
+    db = store.connect(old / "taxonero.sqlite")
+    db.execute("INSERT INTO written (kind, immich_id, asset_id, value, written_at) VALUES ('tag_asset', 't', 'a', 'x', 0)")
+    db.commit()
+    db.close()
+    assert Worker(Settings(data_dir=old, **kw)).s.names_follow_ui is False
+    new = Worker(Settings(data_dir=tmp_path / "new", **kw))
+    new.db.execute("INSERT INTO written (kind, immich_id, asset_id, value, written_at) VALUES ('tag_asset', 't', 'a', 'x', 0)")
+    new.db.commit()
+    assert Worker(Settings(data_dir=tmp_path / "new", **kw)).s.names_follow_ui is True   # chosen once
+
+
 def _c(name, score, plaus="green", genus=None, key=None):
     g = genus or name.split()[0]
     return Candidate(name=name, score=score, lineage={"genus": g, "family": "F", "kingdom": "Animalia"},
@@ -1610,6 +1642,156 @@ def test_settings_unchanged_when_source_unreachable(tmp_path, monkeypatch):
     assert s.dry_run is True and client.dry_run is True
 
 
+def test_desktop_write_switch_stays_after_use(tmp_path):
+    """Desktop: the "write the results" switch stays in Settings once used, and after a restart. Assigning dry_run
+    made it look set by the environment, and the switch was gone for good."""
+    from fastapi.testclient import TestClient
+    from taxonero.config import Settings
+    from taxonero.web import create_app
+    from taxonero.worker import Worker
+    s, w = _local_worker(tmp_path, edition="desktop")
+
+    def web(s, w):
+        c = TestClient(create_app(s, w, token="tok"), base_url="http://127.0.0.1")
+        c.cookies.set("taxonero_session", "tok")
+        return c
+    c = web(s, w)
+    assert c.get("/api/sources").json()["dry_run_editable"]
+    r = c.put("/api/source", json={"dry_run": False}).json()
+    assert r["dry_run"] is False and r["dry_run_editable"]
+    # Restart: the choice is read back from the database, and can still be changed.
+    s2 = Settings(data_dir=tmp_path, gbif_local=False, source="local", photos_dir=s.photos_dir, edition="desktop")
+    w2 = Worker(s2)
+    w2.check()
+    r = web(s2, w2).get("/api/sources").json()
+    assert r["dry_run"] is False and r["dry_run_editable"]
+    # DRY_RUN given in the environment: locked, and refused if asked anyway.
+    s3 = Settings(data_dir=tmp_path, gbif_local=False, source="local", photos_dir=s.photos_dir, edition="desktop", dry_run=True)
+    w3 = Worker(s3)
+    w3.check()
+    c3 = web(s3, w3)
+    assert not c3.get("/api/sources").json()["dry_run_editable"]
+    assert c3.put("/api/source", json={"dry_run": False}).status_code == 422 and s3.dry_run is True
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_main_source_down_does_not_stop_the_added_ones(tmp_path):
+    """Several sources: the main Immich not answering is reported, and the cycle goes on with the added sources (their
+    photos listed and analysed, those of the main one waiting). Alone, it still fails the cycle."""
+    import httpx
+    from PIL import Image
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    Image.new("RGB", (64, 48), (40, 120, 80)).save(photos / "a.jpg")
+
+    class NoAnalyzer:
+        def analyze(self, *a, **k):
+            return []
+    s = Settings(data_dir=tmp_path / "data", gbif_local=False, immich_url="http://127.0.0.1:9", immich_api_key="k" * 20)
+    w = Worker(s, analyzer=NoAnalyzer())
+    w.db.execute("INSERT INTO asset (asset_id, file_name, kind, taken_at, people) VALUES ('main-1', 'm.jpg', 'IMAGE', '2030-01-01T00:00:00', 0)")
+    w.db.commit()
+    w.add_source({"type": "local", "path": str(photos)})
+    report = w.run_once(manual=True)
+    assert report["writable"] is False and report["scanned"] == 1 and report["analyzed"] == 1 and not report.get("paused")
+    assert any(k.startswith("scan ") for k in report["errors"]) and w.client.writable is False and w.client.errors
+    done = {r["file_name"]: r["analyzed_at"] is not None for r in w.db.execute("SELECT file_name, analyzed_at FROM asset")}
+    assert done == {"m.jpg": False, "a.jpg": True}
+    w.remove_source(next(iter(w.extras)))
+    with pytest.raises(httpx.ConnectError):
+        w.run_once(manual=True)
+
+
+def test_public_identify_page_opens_only_itself(tmp_path, monkeypatch):
+    """Public identification page (Settings > General): off by default; on, anyone can send one image and read what is
+    recognised, and nothing else opens without the password. Bounded: image size, images per address."""
+    import io
+    from fastapi.testclient import TestClient
+    from PIL import Image
+    from taxonero.config import Settings
+    from taxonero.web import create_app, identify
+    from taxonero.worker import Worker
+    photos = tmp_path / "ph"
+    photos.mkdir()
+
+    class OneFox:
+        def analyze(self, data, lat=None, lon=None, **k):
+            from taxonero.pipeline import Analysis, Box, Candidate, Decision
+            c = Candidate("Vulpes vulpes", 0.9, {"kingdom": "Animalia", "family": "Canidae"}, None, "Vulpes vulpes", posterior=0.9, prior=0.9)
+            return [Analysis(Box(0.1, 0.1, 0.5, 0.5, 0.9, "animal"), Decision(None, "Vulpes vulpes", "species", 0.9, 0.8, "unknown", [c]))]
+    s = Settings(data_dir=tmp_path, gbif_local=False, source="local", photos_dir=photos, device="cpu", dashboard_password="secret-word")
+    w = Worker(s, analyzer=OneFox())
+    web = TestClient(create_app(s, w), raise_server_exceptions=False)
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), (40, 120, 80)).save(buf, "PNG")
+    image, login = buf.getvalue(), ("nature", "secret-word")
+    send = lambda data=image: web.post("/api/public/identify", content=data)
+
+    # Off (default): the page and its requests do not exist, and nothing is served without the password.
+    assert web.get("/identify").status_code == 404 and web.get("/api/public/info").status_code == 404
+    assert send().status_code == 404 and web.get("/static/app.css").status_code == 401
+
+    assert web.put("/api/settings", json={"public_identify": True}).status_code == 401   # only from the dashboard
+    assert web.put("/api/settings", json={"public_identify": True}, auth=login).json()["values"]["public_identify"] is True
+    assert web.get("/identify").status_code == 200 and "public.js" in web.get("/identify").text
+    for path in ("js/public.js", "app.css", "i18n/fr.json", "vendor/fonts.css", "favicon.svg"):
+        assert web.get(f"/static/{path}").status_code == 200, path
+    info = web.get("/api/public/info").json()
+    assert info["max_mb"] == identify.PUBLIC_MAX_BYTES // 2 ** 20 and info["models_loaded"] is True
+    r = send()
+    assert r.status_code == 200 and set(r.json()) == {"lat", "lon", "detections"}   # nothing about the collection
+    det = r.json()["detections"][0]
+    assert det["candidates"][0]["name"] == "Vulpes vulpes" and det["candidates"][0]["vernacular"] == {}
+    assert send(b"not an image").status_code == 400 and send(b"").status_code == 400
+
+    # Everything else still asks for the password: the dashboard, its scripts, the photos, the settings.
+    for path in ("/", "/static/js/core.js", "/static/index.html", "/static/i18n/%2e%2e/js/core.js", "/api/photos", "/api/status",
+                 "/api/settings", "/api/species", "/api/logs", "/api/export.csv", "/api/thumb/x", "/api/sync/status"):
+        assert web.get(path).status_code in (401, 404), path
+        assert web.get(path).status_code == 401 or path == "/static/index.html", path
+    assert web.post("/api/identify", content=image).status_code == 401
+    assert web.post("/api/sync").status_code == 401 and web.put("/api/settings", json={"public_identify": False}).status_code == 401
+
+    # Bounds: size of the image, then images per address over the window.
+    monkeypatch.setattr(identify, "PUBLIC_MAX_BYTES", 100)
+    r = send()
+    assert r.status_code == 413 and r.json()["detail"]["code"] == "image_too_big"
+    monkeypatch.setattr(identify, "PUBLIC_MAX_BYTES", 25 * 2 ** 20)
+    monkeypatch.setattr(identify, "PUBLIC_PER_ADDRESS", 5)   # four sent above, refused ones included
+    assert send().status_code == 200
+    r = send()
+    assert r.status_code == 429 and r.json()["detail"]["code"] == "too_many_requests" and int(r.headers["retry-after"]) > 0
+
+    # Off again: closed at once. Desktop edition: never open (local window), whatever the setting.
+    web.put("/api/settings", json={"public_identify": False}, auth=login)
+    assert web.get("/identify").status_code == 404 and send().status_code == 404 and web.get("/static/app.css").status_code == 401
+    s.public_identify, s.edition = True, "desktop"
+    desk = TestClient(create_app(s, w, token="tok"), base_url="http://127.0.0.1")
+    assert desk.get("/identify").status_code == 401   # no session token: refused before anything
+    desk.cookies.set("taxonero_session", "tok")
+    assert desk.get("/identify").status_code == 404 and desk.post("/api/public/identify", content=image).status_code == 404
+
+
+def test_added_source_of_every_folder_kind(tmp_path):
+    """Every folder source can be added next to the main one (RawTherapee and RapidRAW did not take the source id)."""
+    from taxonero.config import Settings
+    from taxonero.sources import SOURCES, extra_id, make_extra
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    s = Settings(data_dir=tmp_path, edition="desktop")
+    for kind, spec in SOURCES.items():
+        if spec["kind"] != "folder":
+            continue
+        extra = {"type": kind, "path": str(photos), "label": ""}
+        extra["id"] = extra_id(extra)
+        client, other = make_extra(extra, s), make_extra({**extra, "id": "other"}, s)
+        assert client.sid == extra["id"] and client.asset_id("a.jpg") != other.asset_id("a.jpg")
+        client.close()
+        other.close()
+
+
 def test_thumbnail_concurrent_requests(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     s, w = _local_worker(tmp_path)
@@ -2669,6 +2851,33 @@ def test_window_icon_is_an_ico_on_windows():
         assert path.is_file() and Image.open(path).format == fmt
     with Image.open(window_icon("win32")) as ico:
         assert {(16, 16), (32, 32), (256, 256)} <= set(ico.info["sizes"])
+
+
+@pytest.mark.skipif(not __import__("shutil").which("exiftool"), reason="ExifTool absent")
+def test_exiftool_many_errors_do_not_block(tmp_path):
+    """A batch with many errors (unreadable or vanished files): ExifTool's error output was read only after its
+    standard output, its pipe filled up and both sides waited for ever (the scan of the folder never ended)."""
+    import threading
+    from taxonero.sources.exiftool import ExifTool
+    et, out = ExifTool(), {}
+    missing = [str(tmp_path / f"{'x' * 200}-{i:03d}.jpg") for i in range(400)]   # ~130 KB of error lines
+
+    def read():
+        out["first"] = et.run("-j", "-n", "-q", "-q", "-ec", "-DateTimeOriginal", *missing)
+        et.write(str(tmp_path / "b.xmp"), ["-XMP-dc:Description=after"])
+        out["after"] = et.read([str(tmp_path / "b.xmp")], ["XMP-dc:Description"])
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    worker.join(60)
+    try:
+        assert not worker.is_alive(), "ExifTool blocked"
+        assert out["first"][1].count("File not found") == 400
+        assert out["after"][0]["Description"] == "after"   # the next commands are not mixed up with these errors
+    finally:
+        if worker.is_alive():
+            et._proc.kill()
+        else:
+            et.close()
 
 
 def test_exiftool_found_in_the_installer_copy_without_the_launcher(tmp_path, monkeypatch):

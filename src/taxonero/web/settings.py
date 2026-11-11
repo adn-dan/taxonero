@@ -111,7 +111,7 @@ def register(app, c) -> None:
         for o in options:
             o["path"] = str(suggested(o) or "")
         return {"current": s.source, "locked": w.env_source, "edition": s.edition, "dry_run": s.dry_run,
-                "dry_run_editable": s.edition == "desktop" and "dry_run" not in s.model_fields_set, "options": options,
+                "dry_run_editable": s.edition == "desktop" and not w.env_dry_run, "options": options,
                 "extra": w.sources_status(db)}
 
     class ExtraIn(BaseModel):

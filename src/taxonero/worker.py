@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -62,6 +62,9 @@ UNKNOWN_BOX_MIN_SCORE = {"md": 0.7, "owl": 0.5}
 MAX_FAILURES = 3
 # Full check of the Immich state (missing photos, tags removed by hand): once a day.
 DAILY = 86400
+# The marker of a scan is set this long before its start: a photo changed in the source while it was being listed, or
+# a clock a little ahead of the source's, would otherwise be missed for good (listing a photo again changes nothing).
+SCAN_OVERLAP = 120
 # Setting changed during a cycle: time given to the cycle to reach a stopping point (one photo, one
 # network request) before giving up (Busy).
 STOP_WAIT = 60
@@ -226,7 +229,15 @@ class Worker:
     def __init__(self, s: Settings, analyzer: Analyzer | None = None):
         self.s = s
         self.db = store.connect(s.db_path)
-        self.undo: dict = {"state": "idle"}   # retrait d'Immich (start_uninstall)
+        self.undo: dict = {"state": "idle"}   # removal from Immich (start_uninstall)
+        # Names written following the interface language: chosen once, at the first start of this version. Only a
+        # new install without NAMES_LANG follows it; elsewhere, tags already written must not be renamed.
+        if store.get_state(self.db, "names_follow_ui") is None:
+            fresh = "names_lang" not in s.model_fields_set and not self.db.execute("SELECT 1 FROM written LIMIT 1").fetchone()
+            store.set_state(self.db, "names_follow_ui", "1" if fresh else "0")
+            self.db.commit()
+        if "names_follow_ui" not in s.model_fields_set:
+            s.names_follow_ui = store.get_state(self.db, "names_follow_ui") == "1"
         # Environment values (or defaults), then settings made from the dashboard on top.
         self.env_defaults = {k: getattr(s, k) for k in EDITABLE}
         apply_overrides(s, store.get_state(self.db, "settings"))
@@ -235,8 +246,10 @@ class Worker:
         saved = json.loads(store.get_state(self.db, "immich") or "{}")
         s.immich_url = s.immich_url or saved.get("url", "")
         s.immich_api_key = s.immich_api_key or saved.get("key", "")
-        # Desktop: result writing set in the dashboard (DRY_RUN from the environment otherwise).
-        if s.edition == "desktop" and "dry_run" not in s.model_fields_set and store.get_state(self.db, "dry_run"):
+        # Desktop: result writing set in the dashboard (DRY_RUN from the environment otherwise). Noted once, here:
+        # assigning a setting adds it to model_fields_set, which would then read as "set by the environment".
+        self.env_dry_run = "dry_run" in s.model_fields_set
+        if s.edition == "desktop" and not self.env_dry_run and store.get_state(self.db, "dry_run"):
             s.dry_run = store.get_state(self.db, "dry_run") == "1"
         # Photo source: environment first (locked), otherwise the one chosen in the dashboard.
         self.env_source = bool({"source", "photos_dir", "catalog_path"} & s.model_fields_set)
@@ -385,7 +398,7 @@ class Worker:
                 old, self._analyzer = self._device, None
                 hardware.release(old)
             if self._analyzer is None:
-                log.info("calcul : %s (%s), OWLv2 %s", hardware.WHY[why], device, ov_mode)
+                log.info("compute: %s (%s), OWLv2 %s", hardware.WHY[why], device, ov_mode)
                 hardware.full_precision()
                 self._device = device
                 det = None
@@ -621,8 +634,8 @@ class Worker:
 
     def set_dry_run(self, value: bool) -> None:
         """Desktop edition: result writing enabled from the dashboard (no environment to set)."""
-        if self.s.edition != "desktop":
-            raise ValueError("DRY_RUN is set in the environment (server edition)")
+        if self.s.edition != "desktop" or self.env_dry_run:
+            raise ValueError("DRY_RUN is set in the environment")
         with self._idle():
             before = self.s.dry_run
             for _, c in [("", self.client), *self.extras.items()]:
@@ -722,6 +735,19 @@ class Worker:
         store.set_state(self.db, "immich_version", self.client.version or "")
         store.set_state(self.db, "writable", "1" if ok else "0")
         return ok
+
+    def _check_for_cycle(self) -> bool:
+        """check() at the start of a cycle. The main source not answering stops the cycle only when it is the only
+        one: with added sources, it is reported and set read-only, its photos wait, and the others go on (as in scan)."""
+        try:
+            return self.check()
+        except Exception as e:
+            if not self.extras:
+                raise
+            self.client.errors, self.client.writable = [f"{type(e).__name__}: {e}"], False
+            store.set_state(self.db, "writable", "0")
+            log.error("source %s: %s", self.source_label(""), self.client.errors[0])
+            return False
 
     def mark_missing(self, asset_id: str, db: sqlite3.Connection | None = None) -> None:
         db = db or self.db
@@ -850,7 +876,7 @@ class Worker:
             for kind in self.kinds():
                 key = self._key("last_scan" if kind == "IMAGE" else "last_scan_video", sid)
                 since = store.get_state(self.db, key)
-                started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                started = (datetime.now(timezone.utc) - timedelta(seconds=SCAN_OVERLAP)).isoformat().replace("+00:00", "Z")
                 for a in client.iter_assets(updated_after=since or None, kind=kind, with_people=True):
                     # Stopping point; marker not advanced: the next scan picks these photos up again.
                     self._checkpoint() if walked else self._tick()
@@ -1046,11 +1072,15 @@ class Worker:
             "speed_geo": median(sorted(self._speed_geo)),   # geographic check, second phase
         }
 
-    def queue_sql(self) -> tuple[str, tuple]:
+    def queue_sql(self, reachable: bool = True) -> tuple[str, tuple]:
         """Photos to analyse (SQL condition on asset, parameters): not missing, not given up, not skipped
-        (videos if disabled, RAW paired with a JPG, photos with people if SKIP_PEOPLE)."""
-        return ("analyzed_at IS NULL AND missing_at IS NULL AND fail_count < ? AND " + SKIPPED_NOT,
-                (MAX_FAILURES, *self.s.skip_args))
+        (videos if disabled, RAW paired with a JPG, photos with people if SKIP_PEOPLE). reachable: nor those of a source
+        that did not answer at this cycle's scan (several sources): their previews cannot be fetched, and the outage
+        would stop the analysis of the photos of the other sources."""
+        down = list(self.scan_errors) if reachable else []
+        skip = f" AND asset.source NOT IN ({', '.join('?' * len(down))})" if down else ""
+        return ("analyzed_at IS NULL AND missing_at IS NULL AND fail_count < ? AND " + SKIPPED_NOT + skip,
+                (MAX_FAILURES, *self.s.skip_args, *down))
 
     def pending_analysis(self) -> int:
         if self.s.detection == "manual":   # boxes drawn by hand only: no automatic analysis
@@ -1199,7 +1229,7 @@ class Worker:
         """Second phase of the analysis: geographic check (GBIF), decision and saving of the photos whose AI result
         is stored, without the models (the GPU is free). A photo whose check fails is counted as failed (given up
         after MAX_FAILURES); a GBIF outage (Unavailable) stops the phase, the results wait for the next cycle."""
-        where, args = self.queue_sql()
+        where, args = self.queue_sql(reachable=False)   # the check needs no image: a source that is down keeps its results
         # AI results of photos that left the queue (deleted, skipped, given up): no longer needed.
         self.db.execute(f"DELETE FROM inferred WHERE asset_id NOT IN (SELECT asset_id FROM asset WHERE {where})", args)
         self.db.commit()
@@ -1426,6 +1456,7 @@ class Worker:
     def syncer(self, sid: str, client, db=None, **kw) -> Syncer:
         """Writer of the results to one source (its photos and its records only)."""
         return Syncer(db or self.db, client, self.s.tag_root, self.s.names_lang, self.s.write_description,
+                      scientific=self.s.scientific_names,
                       write_gap=getattr(client, "write_gap", WRITE_GAP), source=sid, **kw)
 
     def sync(self):
@@ -1533,7 +1564,7 @@ class Worker:
         report: dict = {"at": time.time(), "manual": manual, "dry_run": self.s.dry_run}
         try:
             self._step("check")
-            report["writable"] = self.check()
+            report["writable"] = self._check_for_cycle()
             self._step("scan")
             report["scanned"] = self.scan()
             for sid, e in self.scan_errors.items():   # a source that did not answer: the others went on
@@ -1754,10 +1785,10 @@ class Worker:
             return False
         def run():
             try:
-                log.info("synchronisation manuelle : %s", self.run_once(manual=True))
+                log.info("manual synchronisation: %s", self.run_once(manual=True))
             except Exception:
                 log.exception("manual synchronisation failed")
-        threading.Thread(target=run, daemon=True, name="sync-manuelle").start()
+        threading.Thread(target=run, daemon=True, name="manual-sync").start()
         return True
 
     def install_backbone(self) -> None:

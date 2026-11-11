@@ -388,6 +388,19 @@ def test_models_idle_minutes_is_editable(client):
     assert client.put("/api/settings", json={"models_idle_minutes": 2000}).status_code != 200
 
 
+def test_names_written_are_editable(client):
+    c, db = client
+    names = c.get("/api/status").json()["names"]
+    assert names["tagged"] == db.execute("SELECT count(DISTINCT asset_id) FROM written WHERE kind LIKE 'tag_asset%' "
+                                         "OR kind LIKE 'description%'").fetchone()[0]
+    r = c.put("/api/settings", json={"names_lang": "en", "names_follow_ui": False, "scientific_names": True})
+    assert r.status_code == 200, r.text
+    assert {k: v for k, v in c.get("/api/status").json()["names"].items() if k != "tagged"} == \
+        {"lang": "en", "follow": False, "scientific": True}
+    assert c.put("/api/settings", json={"names_lang": "xx"}).status_code == 422   # no common names fetched in it
+    assert c.put("/api/settings", json={"names_lang": None}).json()["values"]["names_lang"] == "fr"
+
+
 def test_photo_scope_filters_every_listing(client):
     c, db = client
     key = db.execute("SELECT taxon_key FROM detection WHERE status = 'confirmed' AND taxon_key IS NOT NULL LIMIT 1").fetchone()[0]

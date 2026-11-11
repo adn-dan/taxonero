@@ -60,7 +60,7 @@ def check_path(source: str, path: Path) -> str | None:
     """Reason why this path does not suit the source, or None."""
     spec = SOURCES[source]
     if not path.is_absolute():
-        return f"chemin complet attendu : {path}"
+        return f"full path expected: {path}"
     if spec["kind"] == "folder" and not path.is_dir():
         return f"folder not found: {path}"
     if spec["kind"] == "catalog" and not ((path.is_dir() if spec.get("bundle") else path.is_file())

@@ -74,13 +74,15 @@ const langName = (l, inLang = LANG) => {   // name of a language, in the interfa
 };
 const hasUI = l => l === 'fr' || (STATE.status?.ui_langs || []).includes(l);
 
-const common = t => t?.vernacular?.[LANG] || t?.vernacular?.en || t?.vernacular?.fr || '';
+// Settings > General > scientific names only: no common name anywhere (nor in the tags written).
+const sciOnly = () => !!STATE.status?.names?.scientific;
+const common = t => sciOnly() ? '' : t?.vernacular?.[LANG] || t?.vernacular?.en || t?.vernacular?.fr || '';
 const taxName = t => !t ? '?' : (common(t) ? `${esc(common(t))} <i>${esc(t.scientific_name)}</i>` : `<i>${esc(t.scientific_name)}</i>`);
 /* English names of orders and families often in "Title Case" (Hawks, Eagles, Kites, And Allies): set back to
    sentence case. Only in English (German capitalises nouns) and if all the words have a capital. */
 const tidyCase = s => !s || LANG !== 'en' || !/^(\p{Lu}[^\s]*[\s,-]+)+\p{Lu}\S*$/u.test(s) ? s
   : s[0] + s.slice(1).toLocaleLowerCase('en');
-const higherCommon = name => tidyCase(SP.higher?.[name]?.vernacular?.[LANG] || '');
+const higherCommon = name => sciOnly() ? '' : tidyCase(SP.higher?.[name]?.vernacular?.[LANG] || '');
 /* Name of a higher rank, as for species: common name as the main one, scientific name as the secondary one
    (alone if there is no common name). */
 const higherNames = name => { const com = higherCommon(name);
@@ -90,6 +92,7 @@ const shortName = tx => tx ? (common(tx) || tx.scientific_name) : t('det.unknown
 const hasWiki = t => t?.wikipedia && Object.keys(t.wikipedia).length;
 /* Names in the other languages: folded (one clickable line), unfolded when needed. */
 function otherNames(tx) {
+  if (sciOnly()) return '';
   const items = Object.entries(tx?.vernacular || {}).filter(([l]) => l !== LANG).map(([l, n]) => `<code title="${esc(langName(l))}">${esc(l)}</code><b>${esc(n)}</b>`);
   return items.length ? `<details class="names"><summary>${t('names.other', { n: items.length })}</summary>${items.join(' · ')}</details>` : '';
 }
@@ -99,6 +102,10 @@ const STATE = { view: 'photos', status: null };
 const srcTitle = id => id === 'local' ? t('local.title') : tOr(`src.${id}`, id);   // name of the photo source
 async function loadStatus() {
   const s = STATE.status = await api('/api/status');
+  // New install following the interface: nothing written yet, so the names written take its language without asking.
+  if (s.names?.follow && !s.names.tagged && s.names.lang !== LANG && s.langs?.includes(LANG)) {
+    await api('/api/settings', { method: 'PUT', body: JSON.stringify({ names_lang: LANG }) }).then(() => { s.names.lang = LANG; }, () => {});
+  }
   const pending = (await api('/api/photos/counts')).pending || 0;   // photos to review (like the filter)
   $('#nb-pending').hidden = !pending; $('#nb-pending').textContent = pending;
   if (!s.immich_configured) {
@@ -121,9 +128,23 @@ async function loadStatus() {
 async function setLang(l) {
   try { localStorage.setItem('names-lang', l); } catch (err) {}
   await loadLang(l);
+  const n = STATE.status?.names;   // names written following the interface: they change with it (asked if already written)
+  // Rewrite refused: the names stop following, so that the setting shown says what is written.
+  if (n?.follow && n.lang !== l && STATE.status.langs?.includes(l) && !await saveNames({ names_lang: l })) await saveNames({ names_follow_ui: false });
   W.lang = LANG; SPP.wlang = LANG; IDP.wlang = LANG;
   drawBack(); loadStatus(); pollSync(false);
   if (V.open) drawViewer();
+}
+/* Names written to the photos (tags, descriptions): saved after a confirmation when photos already have some,
+   since all of them get rewritten at the next synchronisation. False: refused or cancelled. */
+async function saveNames(values) {
+  const cur = STATE.status?.names || {}, n = cur.tagged || 0;
+  const rewrites = ('names_lang' in values && values.names_lang !== cur.lang) || ('scientific_names' in values && values.scientific_names !== cur.scientific);
+  if (n && rewrites && !confirm(t('names.rewrite_ask', { n }))) return false;
+  try { await api('/api/settings', { method: 'PUT', body: JSON.stringify(values) }); }
+  catch (e) { toast(t('set.refused', { msg: esc(e.message) })); return false; }
+  await loadStatus();
+  return true;
 }
 /* Synchronisation: new photos from Immich, analysis, tags, local copies of records, range maps and articles.
    Runs on the server; the sidebar shows the progress. */

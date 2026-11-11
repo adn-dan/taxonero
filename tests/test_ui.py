@@ -151,6 +151,39 @@ def test_settings_immich_connection(page):
     _no_overflow(page)
 
 
+def test_names_written_to_the_photos(page):
+    """Settings > General: scientific names only (the app shows no common name), language of the names written."""
+    base = page.url.split("#")[0]
+    page.on("dialog", lambda d: d.accept())                      # "tags of N photos rewritten": yes
+    page.goto(base + "#species")
+    page.wait_for_selector(".sptile")
+    assert "Renard roux" in page.locator("#species").inner_text()
+    page.goto(base + "#settings")
+    page.click("#settab-general")
+    if page.is_checked("#set-names_follow_ui"):
+        page.click("label.switch:has(#set-names_follow_ui)")
+    page.wait_for_selector("#set-names_lang")                    # fixed language: its list
+    page.select_option("#set-names_lang", "en")
+    page.wait_for_function("STATE.status.names.lang === 'en' && !STATE.status.names.follow")
+    page.click("label.switch:has(#set-names_follow_ui)")         # back to the interface: French
+    page.wait_for_function("STATE.status.names.lang === 'fr' && STATE.status.names.follow")
+    page.wait_for_selector("#set-names_lang", state="detached")   # the page redrawn after the save
+    page.select_option("#set-lang", "en")                        # interface in English: the names written follow
+    page.wait_for_function("STATE.status.names.lang === 'en'")
+    page.select_option("#set-lang", "fr")
+    page.wait_for_function("STATE.status.names.lang === 'fr' && LANG === 'fr'")
+    page.click("label.switch:has(#set-scientific_names)")
+    page.wait_for_function("STATE.status.names.scientific")
+    page.wait_for_selector("#set-names_follow_ui", state="detached")   # no common name written: no language either
+    page.evaluate("$('#species').innerHTML = ''")                # the tiles of the first visit are still in the page
+    page.goto(base + "#species")
+    page.wait_for_selector(".sptile")
+    text = page.locator("#species").inner_text()
+    assert "Vulpes vulpes" in text and "Renard roux" not in text
+    assert not page.errors, page.errors
+    _no_overflow(page)
+
+
 def test_settings_tabs(page):
     page.goto(page.url.split("#")[0] + "#settings")
     page.wait_for_selector("#settab-source[aria-selected=true]")

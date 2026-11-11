@@ -42,14 +42,15 @@ class SyncStats:
     failed: int = 0   # photos whose write was refused (retried at the next cycle)
 
 
-def display_name(taxon: dict, lang: str = "fr") -> str:
+def display_name(taxon: dict, lang: str | None = "fr") -> str:
+    """Common name (scientific name), or the scientific name alone: no common name in lang, or lang None."""
     sci = taxon["scientific_name"]
-    common = taxon.get("vernacular", {}).get(lang)
+    common = taxon.get("vernacular", {}).get(lang) if lang else None
     suffix = "" if taxon["rank"] == "species" else f" ({taxon['rank']})"
     return f"{common} ({sci}){suffix}" if common else f"{sci}{suffix}"
 
 
-def tag_value(taxon: dict, root: str, lang: str = "fr") -> str:
+def tag_value(taxon: dict, root: str, lang: str | None = "fr") -> str:
     """E.g. Nature/Aves/Passeriformes/Paridae/Great tit (Parus major)."""
     lineage = taxon.get("lineage", {})
     parts = [root]
@@ -63,12 +64,12 @@ def tag_value(taxon: dict, root: str, lang: str = "fr") -> str:
     return "/".join(parts)
 
 
-def description_block(taxa: list[dict], lang: str = "fr") -> str:
+def description_block(taxa: list[dict], lang: str = "fr", scientific: bool = False) -> str:
     lines = []
     for t in taxa:
         icon = next((i for k, i in GROUP_ICONS.items() if k in t.get("lineage", {}).values()), "•")
         url = t.get("wikipedia", {}).get(lang) or next(iter(t.get("wikipedia", {}).values()), "")
-        lines.append(f"{icon} {display_name(t, lang)}" + (f" · {url}" if url else ""))
+        lines.append(f"{icon} {display_name(t, None if scientific else lang)}" + (f" · {url}" if url else ""))
     return f"{BLOCK_START}\n" + "\n".join(lines) + f"\n{BLOCK_END}"
 
 
@@ -109,7 +110,7 @@ def _epoch(iso: str | None) -> float:
 class Syncer:
     def __init__(self, db: sqlite3.Connection, client: ImmichClient, tag_root: str = "Nature", lang: str = "fr",
                  write_description: bool = True, write_gap: float = WRITE_GAP, settle_seconds: float = SETTLE_SECONDS,
-                 verify_rounds: int = 2, checkpoint=None, progress=None, source: str = ""):
+                 verify_rounds: int = 2, checkpoint=None, progress=None, source: str = "", scientific: bool = False):
         self.db, self.client = db, client
         # Source written to ('' the main one): this Syncer only handles its photos and its records. Those of an added
         # source have their own kinds ("tag@<id>"…): tag ids are those of each Immich account, a file source names its
@@ -123,6 +124,9 @@ class Syncer:
         # then its description: three units).
         self.progress = progress or (lambda done, total, phases: None)
         self.tag_root, self.lang, self.write_description = tag_root, lang, write_description
+        # Scientific names only: no common name in the tags and descriptions (Wikipedia links still in lang).
+        self.scientific = scientific
+        self.tag_lang = None if scientific else lang
         self.write_gap, self.settle_seconds, self.verify_rounds = write_gap, settle_seconds, verify_rounds
         self._tag_ids: dict[str, str] | None = None
         self._last_write: dict[str, float] = {}
@@ -195,15 +199,15 @@ class Syncer:
 
     def _wanted(self, taxa: list[dict]) -> str:
         """Fingerprint of what the tool wants to see in Immich for a photo (tags + description block)."""
-        tags = sorted(tag_value(t, self.tag_root, self.lang) for t in taxa)
-        block = description_block(taxa, self.lang) if taxa and self.write_description else None
+        tags = sorted(tag_value(t, self.tag_root, self.tag_lang) for t in taxa)
+        block = description_block(taxa, self.lang, self.scientific) if taxa and self.write_description else None
         return json.dumps([tags, block, self.write_description], ensure_ascii=False)
 
     def _plan(self, asset: dict) -> tuple[list[str], dict[str, str], list[dict]]:
         """(tag values to add, {value: id} to remove, wanted taxa), from the actual state."""
         aid = asset["id"]
         taxa = desired_taxa(self.db, aid)
-        want = {tag_value(t, self.tag_root, self.lang) for t in taxa}
+        want = {tag_value(t, self.tag_root, self.tag_lang) for t in taxa}
         actual = {t["value"]: t["id"] for t in asset.get("tags", [])}
         ours = {r["value"]: r["immich_id"] for r in self.db.execute(
             "SELECT immich_id, value FROM written WHERE kind = ? AND asset_id = ?", (self.k["tag_asset"], aid))}
@@ -216,7 +220,7 @@ class Syncer:
     def _apply_tags(self, asset: dict, stats: SyncStats) -> list[dict]:
         aid = asset["id"]
         add, remove, taxa = self._plan(asset)
-        want = {tag_value(t, self.tag_root, self.lang) for t in taxa}
+        want = {tag_value(t, self.tag_root, self.tag_lang) for t in taxa}
         # Mark as ours the wanted tags already present (set during a previous run).
         if not self.client.dry_run:
             for v, tid in ((t["value"], t["id"]) for t in asset.get("tags", [])):
@@ -241,7 +245,7 @@ class Syncer:
     def _apply_description(self, asset: dict, taxa: list[dict], stats: SyncStats) -> None:
         aid = asset["id"]
         current = (asset.get("exifInfo") or {}).get("description") or ""
-        new = merge_description(current, description_block(taxa, self.lang) if taxa else None)
+        new = merge_description(current, description_block(taxa, self.lang, self.scientific) if taxa else None)
         if new.strip() != current.strip():
             self._write(aid, self.client.set_description, aid, new)
             if not self.client.dry_run:

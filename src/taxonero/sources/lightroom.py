@@ -75,7 +75,7 @@ class Lightroom(FileSource):
             self.warnings.append(str(e))
             return True
         except sqlite3.Error as e:
-            self.errors.append(f"catalogue Lightroom illisible ({self.root.name}) : {e}")
+            self.errors.append(f"Lightroom catalog unreadable ({self.root.name}): {e}")
             return False
         inside = sum(1 for n in names if is_image(n) and n.rpartition(".")[2].lower() not in SIDECAR_EXT)
         if inside:

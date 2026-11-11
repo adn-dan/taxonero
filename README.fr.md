@@ -76,6 +76,14 @@ plusieurs à la fois. **Tes photos ne sont jamais modifiées.**
   dans la région. Au clavier : `1`-`5` candidat, `←` `→` photo de référence, `⏎` choisir l'espèce.
 - Page **Identifier** : une image déposée (ou collée) est identifiée sans être gardée, avec sa carte de
   répartition et l'article Wikipédia.
+- **Page publique d'identification** (facultative, désactivée par défaut : Paramètres > Général, ou
+  `PUBLIC_IDENTIFY=true` ; édition serveur) : l'adresse `/identify` s'ouvre sans identifiant ni mot de passe, pour
+  toute personne à qui tu la donnes. Une image envoyée, ce que l'IA y reconnaît en retour (noms, candidats, liens
+  vers Wikipédia et GBIF). Rien d'autre n'est ouvert : ni tes photos, ni tes espèces, ni les réglages, ni le reste du
+  tableau de bord, et l'image n'est pas gardée. Bornée contre les abus : 25 Mo par image, 20 images par adresse
+  toutes les 10 minutes, 3 demandes à la fois. Chaque image fait travailler les modèles d'IA (GPU ou processeur) de
+  ton serveur : partage l'adresse en conséquence. Derrière un proxy, règle `FORWARDED_ALLOW_IPS` pour que la limite
+  compte chaque visiteur et non le proxy.
 - Relecture rapide : passage automatique à la photo suivante, sélection de plusieurs photos
   (coche sur la photo, appui long au doigt, Ctrl/Maj + clic, glisser à la souris, un mois entier, toutes celles du
   filtre, ou l'inverse de la sélection), partout où il y a des photos, y compris les fiches d'une espèce ou d'un rang,
@@ -88,7 +96,8 @@ plusieurs à la fois. **Tes photos ne sont jamais modifiées.**
 - Interface en 12 langues (français, anglais, allemand, espagnol, italien, néerlandais, portugais, catalan,
   polonais, suédois, japonais, chinois), choisie dans **Paramètres > Général** : la même langue sert pour
   les noms communs des espèces et les articles Wikipédia. Le breton, le basque et l'occitan sont proposés
-  pour les noms d'espèces, avec l'interface en français. Les tags écrits dans Immich suivent `NAMES_LANG`.
+  pour les noms d'espèces, avec l'interface en français. Les tags et descriptions écrits dans les photos suivent
+  la langue de l'interface ou une langue fixe, ou ne contiennent que les noms scientifiques (**Paramètres > Général**).
 - Dans la fiche de relecture, une mini-carte montre l'aire du candidat et le lieu de la photo ;
   survoler un autre candidat affiche son aire, pour juger tout de suite de sa plausibilité.
 - Écriture dans Immich de **tags hiérarchiques** (`Nature/Aves/Passeriformes/Paridae/Parus/Mésange charbonnière (Parus major)`)
@@ -443,8 +452,8 @@ Dans Docker, un dossier ajouté doit être monté dans le conteneur, comme `PHOT
 Toutes les options sont commentées dans [`.env.example`](.env.example). Une partie se règle aussi
 depuis la page **Paramètres** du dashboard (filtres de candidats, animaux domestiques,
 auto-validation, description, plage horaire, fréquence) : ces réglages sont enregistrés dans la
-base et priment sur l'environnement. Les réglages sensibles (`DRY_RUN`, clé API, mot de passe,
-`NAMES_LANG`) restent dans l'environnement. Les principales :
+base et priment sur l'environnement. Les réglages sensibles (`DRY_RUN`, clé API, mot de passe) restent dans
+l'environnement. Les principales :
 
 - `EXCLUDE_EXTINCT` (défaut `true`) : écarte les espèces disparues que BioCLIP propose parfois,
   surtout sur les photos sans GPS (chevaux et chiens fossiles). Critère : plus de 5 fossiles par
@@ -495,7 +504,8 @@ base et priment sur l'environnement. Les réglages sensibles (`DRY_RUN`, clé AP
   espèces), les fossiles (une liste mondiale des espèces à fossiles, une fois par an), les noms communs et
   l'UICN (une fois par taxon), les cartes. L'état s'affiche dans **Paramètres > Modèles d'IA**. Si l'API passe
   à une nouvelle version de la taxonomie, la copie est refaite au démarrage suivant.
-- `NAMES_LANG` (tags, description) et `NAMES_LANGS` (noms affichés dans le dashboard).
+- `NAMES_LANG` : langue de départ des tags et descriptions, changée ensuite dans **Paramètres > Général**
+  (absente sur une nouvelle installation : la langue de l'interface). `NAMES_LANGS` : langues des noms communs récupérés.
 
 ## Ligne de commande
 

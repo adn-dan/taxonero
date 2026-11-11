@@ -200,7 +200,7 @@ function drawInfo() {
 /* Common names of the candidates (local cache; the server fetches the missing ones in the background). */
 const NAMES = new Map();
 function candName(c) {
-  const t = NAMES.get(c.gbif_key), com = t && (t.vernacular?.[LANG] || t.vernacular?.en || t.vernacular?.fr);
+  const t = NAMES.get(c.gbif_key), com = t && common(t);
   return com ? `<b class="cname">${esc(com)}</b> <i>${esc(c.name)}</i>` : `<i>${esc(c.name)}</i>`;
 }
 async function loadCandNames(d, tries = 0) {

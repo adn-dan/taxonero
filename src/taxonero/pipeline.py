@@ -639,7 +639,7 @@ def load_original(original: "Callable[[], bytes | None]", preview: Image.Image) 
         data = original()
         full = open_image(data, MAX_SIDE) if data else None
     except Exception as e:
-        log.debug("original indisponible : %s", e)
+        log.debug("original unavailable: %s", e)
         return None
     if full is None or full.width <= preview.width or not same_frame(full, preview):
         return None
