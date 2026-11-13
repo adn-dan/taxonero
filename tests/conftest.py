@@ -37,8 +37,16 @@ def dev_app(tmp_path, monkeypatch):
     # Simulated GBIF observation service: its state must not decide the test results. GBIF_LIVE=1: the real one.
     if not os.environ.get("GBIF_LIVE"):
         real = Taxonomy._fetch
-        monkeypatch.setattr(Taxonomy, "_fetch", lambda self, url, retries=6: {"count": 500, "results": [], "endOfRecords": True}
-                            if "/occurrence/" in url else real(self, url, retries))
+
+        def fetch(self, url, retries=6):
+            if "/occurrence/" in url or "/distributions" in url:
+                return {"count": 500, "results": [], "endOfRecords": True}
+            if "/geocode/reverse" in url:   # facts of a taxon (facts.py): country of the photo
+                return [{"type": "GADM0", "title": "France", "isoCountryCode2Digit": "FR", "distance": 0.0}]
+            if "action=wbgetentities" in url and "props=claims" in url:   # facts: figures and recording
+                return {"entities": {}}
+            return real(self, url, retries)
+        monkeypatch.setattr(Taxonomy, "_fetch", fetch)
     # Light copy (without the network cache or the range maps): /tmp is often in RAM.
     src, dst = sqlite3.connect(DB), sqlite3.connect(tmp_path / "taxonero.sqlite")
     src.backup(dst)

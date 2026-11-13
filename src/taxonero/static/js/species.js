@@ -65,22 +65,72 @@ function groupLegend(groups) {
   return colored.map(g => `<span><i class="sw" style="background:${g.c}"></i>${esc(g.name)}</span>`).join('')
     + (neutral.length ? `<span><i class="sw" style="background:var(--g-other)"></i>${neutral.map(g => esc(g.name)).join(' · ')}</span>` : '');
 }
-/* Group chips: the groups created on the fly (rarely seen classes, with a Latin name), if there are several,
-   under a single "Others" chip that unfolds them. Unfolded right away if one of them is the active filter. */
-const GX = { open: false };
-function groupChips(groups, active, chip, count) {
-  const known = groups.filter(g => !g.dynamic), dyn = groups.filter(g => g.dynamic);
-  if (dyn.length < 2) return groups.map(chip).join('');
-  const open = GX.open || dyn.some(g => g.id === active);
-  return known.map(chip).join('') + `<button class="chip" data-gmore aria-expanded="${open}">🔹 ${t('group.other')}<span class="n">${dyn.reduce((a, g) => a + count(g), 0)}</span></button>`
-    + `<span class="gxchips${open ? ' on' : ''}">${dyn.map(chip).join('')}</span>`;
+/* Kind of a taxon (animal, plant, fungus, microbe): same rule as the server (curation.DETECTION_GROUP). */
+function kindOf(tx) {
+  const L = tx?.lineage || {}, k = L.kingdom;
+  if (['Bacteria', 'Archaea', 'Viruses'].includes(k) || (k === 'Chromista' && L.phylum !== 'Ochrophyta') || (k === 'Protozoa' && L.phylum !== 'Mycetozoa')) return 'microbe';
+  return !k || k === 'Animalia' || k === 'Metazoa' ? 'animal' : k === 'Fungi' ? 'fungus' : 'plant';
 }
-document.addEventListener('click', e => {
-  const b = e.target.closest?.('[data-gmore]'); if (!b) return;
-  GX.open = b.getAttribute('aria-expanded') !== 'true';
-  b.setAttribute('aria-expanded', GX.open);
-  b.nextElementSibling.classList.toggle('on', GX.open);
-});
+/* Groups menu of the Species and Statistics pages: the same as on the Photos page (kinds, each with its groups,
+   several at once, a chosen kind standing for all its groups), over a list of taxa instead of photos.
+   st: { kinds: 'animal,plant', group: 'aves,insecta', gmenu: open or not }. */
+const gmList = v => v ? String(v).split(',').filter(Boolean) : [];
+const taxonChosen = (st, tx) => { const ks = gmList(st.kinds), gs = gmList(st.group);
+  return (!ks.length && !gs.length) || ks.includes(kindOf(tx)) || gs.includes(groupOf(tx).id); };
+// Kinds present, each with its groups, most taxa first. counted: the taxa that count in the figures (other filters).
+function taxaTree(taxa, counted = taxa) {
+  const by = new Map(), add = (tx, n) => { const k = kindOf(tx), g = groupOf(tx); if (!by.has(k)) by.set(k, new Map());
+    const m = by.get(k); m.set(g.id, { g, n: (m.get(g.id)?.n || 0) + n }); };
+  taxa.forEach(tx => add(tx, 0)); counted.forEach(tx => add(tx, 1));
+  return KINDS.filter(k => by.has(k.id)).map(k => { const kids = [...by.get(k.id).values()].sort((a, b) => b.n - a.n);
+    return { ...k, n: kids.reduce((a, x) => a + x.n, 0), kids }; });
+}
+function taxaMenuHTML(st, tree) {
+  const ks = gmList(st.kinds), gs = gmList(st.group);
+  if (!tree.length || (tree.length === 1 && tree[0].kids.length < 2 && !ks.length && !gs.length)) return '';
+  const names = [...tree.filter(k => ks.includes(k.id)).map(k => t(`kind.${k.id}`)),
+    ...tree.flatMap(k => ks.includes(k.id) ? [] : k.kids).filter(x => gs.includes(x.g.id)).map(x => x.g.name)];
+  const label = !names.length ? t('photos.groups') : names.length > 2 ? `${esc(names[0])}, ${esc(names[1])} +${names.length - 2}` : esc(names.join(', '));
+  const item = (attrs, on, mixed, icon, name, n, cls = '') => `<label class="mi${cls}"><input type="checkbox" ${attrs}${on ? ' checked' : ''}${mixed ? ' data-mixed' : ''}>
+    <span class="mic">${icon}</span><span class="mname">${esc(name)}</span><span class="n">${fmtN(n)}</span></label>`;
+  const body = tree.map(k => {
+    const kids = k.kids.length > 1 || k.kids.some(x => gs.includes(x.g.id)) ? k.kids : [];
+    const on = ks.includes(k.id), mixed = !on && kids.some(x => gs.includes(x.g.id));
+    return item(`data-kind="${k.id}"`, on, mixed, k.icon, t(`kind.${k.id}`), k.n, ' mkind')
+      + kids.map(x => item(`data-g="${esc(x.g.id)}" data-k="${k.id}"`, on || gs.includes(x.g.id), false, x.g.icon, x.g.name, x.n, ' mkid')).join('');
+  }).join('');
+  return `<div class="pdrop gdrop"><button class="chip ddbtn${names.length ? ' on' : ''}" data-gmenu aria-haspopup="true" aria-expanded="${!!st.gmenu}">${label}<svg class="ic dd" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></button>
+    <div class="pmenu"${st.gmenu ? '' : ' hidden'}>${body}${names.length ? `<button class="mclear" data-clear>${t('photos.clear')}</button>` : ''}</div></div>`;
+}
+let GM_OPEN = null;   // { st, root } of the open menu, to close it on a click elsewhere or Escape
+function closeTaxaMenu() {
+  if (!GM_OPEN) return;
+  const { st, root } = GM_OPEN; GM_OPEN = null; st.gmenu = false;
+  const m = root.querySelector('.gdrop .pmenu'), b = root.querySelector('[data-gmenu]');
+  if (m) m.hidden = true; b?.setAttribute('aria-expanded', 'false');
+  return b;
+}
+document.addEventListener('click', e => { if (GM_OPEN && !e.target.closest?.('.gdrop')) closeTaxaMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && GM_OPEN) { closeTaxaMenu()?.focus(); e.stopPropagation(); } }, true);
+/* changed(): the choice was changed (st.kinds, st.group updated): redraw; the menu stays open while choosing. */
+function bindTaxaMenu(root, st, tree, changed) {
+  const btn = root.querySelector('[data-gmenu]'); if (!btn) return;
+  if (st.gmenu) GM_OPEN = { st, root };
+  btn.onclick = () => { const open = !st.gmenu; closeTaxaMenu();
+    if (open) { st.gmenu = true; GM_OPEN = { st, root }; btn.setAttribute('aria-expanded', 'true'); root.querySelector('.gdrop .pmenu').hidden = false; } };
+  const set = (kinds, groups) => { st.kinds = KINDS.map(k => k.id).filter(k => kinds.includes(k)).join(','); st.group = [...new Set(groups)].join(','); changed(); };
+  const kidsOf = id => (tree.find(k => k.id === id)?.kids || []).map(x => x.g.id);
+  root.querySelectorAll('.gdrop input[data-mixed]').forEach(x => { x.indeterminate = true; });
+  root.querySelectorAll('.gdrop input[data-kind]').forEach(x => x.onchange = () => { const id = x.dataset.kind, ks = gmList(st.kinds), kids = kidsOf(id);
+    set(ks.includes(id) ? ks.filter(k => k !== id) : [...ks, id], gmList(st.group).filter(g => !kids.includes(g))); });   // half chosen: the whole kind
+  root.querySelectorAll('.gdrop input[data-g]').forEach(x => x.onchange = () => { const id = x.dataset.g, kindId = x.dataset.k, kids = kidsOf(kindId);
+    let ks = gmList(st.kinds), gs = gmList(st.group);
+    if (ks.includes(kindId)) { ks = ks.filter(k => k !== kindId); gs = [...gs, ...kids.filter(g => g !== id)]; }   // all but this one
+    else gs = gs.includes(id) ? gs.filter(g => g !== id) : [...gs, id];
+    if (kids.length > 1 && kids.every(g => gs.includes(g))) { ks = [...ks, kindId]; gs = gs.filter(g => !kids.includes(g)); }   // all of them: the kind
+    set(ks, gs); });
+  const clear = root.querySelector('.gdrop [data-clear]'); if (clear) clear.onclick = () => set([], []);
+}
 const THREATENED = ['VULNERABLE', 'ENDANGERED', 'CRITICALLY_ENDANGERED'];
 const IUCN_CATS = ['CRITICALLY_ENDANGERED', 'ENDANGERED', 'VULNERABLE', 'NEAR_THREATENED', 'LEAST_CONCERN', 'DATA_DEFICIENT', 'NOT_EVALUATED'];
 const IUCN_COLOR = { CRITICALLY_ENDANGERED: '#c0392b', ENDANGERED: '#e67e22', VULNERABLE: '#d4ac0d', NEAR_THREATENED: '#7f8c8d',
@@ -90,24 +140,21 @@ const IUCN_FILTERS = [{ id: 'threatened', test: c => THREATENED.includes(c) },
   ...IUCN_CATS.map(k => ({ id: k, test: c => (c || 'NOT_EVALUATED') === k, color: IUCN_COLOR[k] }))];
 const iucnFilterName = id => id === 'threatened' ? t('iucn.threatened') : iucnName(id);
 const iucnOK = (s, f) => !f || IUCN_FILTERS.find(x => x.id === f).test(s.taxon?.iucn);
-const groupOK = (s, g) => !g || groupOf(s.taxon)?.id === g;
-/* Row of group + Red List chips. `st` holds { group, iucn }; `all` is used for the counts. */
+/* Groups menu + row of Red List chips. `st` holds { kinds, group, iucn }; `all` is used for the counts. */
+const filterTree = (st, all) => taxaTree(all.map(s => s.taxon), all.filter(s => iucnOK(s, st.iucn)).map(s => s.taxon));
 function filterRows(st, all, prefix) {
-  const gCount = g => all.filter(s => groupOf(s.taxon) === g && iucnOK(s, st.iucn)).length;
-  const iCount = f => all.filter(s => f.test(s.taxon?.iucn) && groupOK(s, st.group)).length;
-  groupsFor(all.map(s => s.taxon));
-  return `<div class="frow"><span class="lab">${t('species.group')}</span><button class="chip${st.group ? '' : ' on'}" data-${prefix}g="">${t('species.all')}</button>${groupChips(GROUPS
-      .filter(g => all.some(s => groupOf(s.taxon) === g)), st.group, g => { const n = gCount(g);
-        return `<button class="chip${st.group === g.id ? ' on' : ''}" data-${prefix}g="${g.id}" ${n ? '' : 'disabled'}><i class="sw" style="background:${g.c}"></i>${g.icon} ${esc(g.name)}<span class="n">${n}</span></button>`; }, gCount)}</div>
+  const iCount = f => all.filter(s => f.test(s.taxon?.iucn) && taxonChosen(st, s.taxon)).length;
+  const menu = taxaMenuHTML(st, filterTree(st, all));
+  return `${menu ? `<div class="frow gtools"><span class="lab">${t('species.group')}</span>${menu}</div>` : ''}
     <div class="frow"><span class="lab">${t('iucn.red_list')}</span><button class="chip${st.iucn ? '' : ' on'}" data-${prefix}i="">${t('species.all_f')}</button>${IUCN_FILTERS
       .filter(f => all.some(s => f.test(s.taxon?.iucn))).map(f => { const n = iCount(f);
         return `<button class="chip${st.iucn === f.id ? ' on' : ''}" data-${prefix}i="${f.id}" ${n ? '' : 'disabled'}>${f.color ? `<span class="iucn-dot" style="background:${f.color}"></span>` : '⚠️'}${iucnFilterName(f.id)}<span class="n">${n}</span></button>`; }).join('')}</div>`;
 }
-function bindFilterRows(root, st, prefix, redraw) {
-  root.querySelectorAll(`[data-${prefix}g]`).forEach(b => b.onclick = () => { st.group = b.dataset[`${prefix}g`] || null; redraw(); });
+function bindFilterRows(root, st, all, prefix, redraw) {
+  bindTaxaMenu(root, st, filterTree(st, all), redraw);
   root.querySelectorAll(`[data-${prefix}i]`).forEach(b => b.onclick = () => { st.iucn = b.dataset[`${prefix}i`] || null; redraw(); });
 }
-const SP = { all: [], group: null, iucn: null, q: '', sort: 'photos', higher: {}, month: null, country: null, camera: null, year: null, mode: 'grid' };
+const SP = { all: [], kinds: '', group: '', gmenu: false, iucn: null, q: '', sort: 'photos', higher: {}, month: null, country: null, camera: null, year: null, mode: 'grid' };
 try { SP.mode = localStorage.getItem('species-mode') === 'tree' ? 'tree' : 'grid'; } catch (e) {}
 const monthName = m => new Date(Date.UTC(2001, m - 1, 1)).toLocaleDateString(LANG, { month: 'long', timeZone: 'UTC' });
 
@@ -119,7 +166,7 @@ async function loadSpecies() {
   renderSpecies();
 }
 function matches(s) {
-  if (!groupOK(s, SP.group) || !iucnOK(s, SP.iucn)) return false;
+  if (!taxonChosen(SP, s.taxon) || !iucnOK(s, SP.iucn)) return false;
   if (SP.month && !(s.months || []).includes(SP.month)) return false;
   if (SP.country && !(s.countries || []).includes(SP.country)) return false;
   if (SP.camera != null && !(s.cameras || []).includes(SP.camera)) return false;
@@ -141,6 +188,7 @@ function renderSpecies() {
   // With a context filter, s.n would also count the photos outside the filter: the right number is on the Photos page.
   ctx.set('filter', 'identified');
   if (SP.group) ctx.set('group', SP.group);
+  if (SP.kinds) ctx.set('kinds', SP.kinds);
   const photoCount = hasCtx ? `<a href="#photos?${ctx}">${t('photos.see')}</a>` : t('count.photos', { n: photos });
   // Summary + a single set of filters (group, Red List).
   let h = `<div class="filters"><span class="count">${t('count.species', { n: shown.length })} · ${photoCount}</span>
@@ -157,7 +205,7 @@ function renderSpecies() {
   root.innerHTML = h;
   $('#spsort').value = SP.sort;
   $('#spsort').onchange = e => { SP.sort = e.target.value; renderSpecies(); };
-  bindFilterRows(root, SP, 's', () => { setQuery({ group: SP.group, iucn: SP.iucn }); renderSpecies(); });
+  bindFilterRows(root, SP, SP.all, 's', () => { setQuery({ kinds: SP.kinds || null, group: SP.group || null, iucn: SP.iucn }); renderSpecies(); });
   root.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { SP.mode = b.dataset.mode;
     try { localStorage.setItem('species-mode', SP.mode); } catch (err) {} renderSpecies(); });
   root.querySelector('[data-treeinfo]')?.addEventListener('click', e => {

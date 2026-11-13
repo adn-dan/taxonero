@@ -20,10 +20,10 @@ from urllib.parse import urlsplit
 import httpx
 from PIL import Image
 
-from . import backbone, hardware, ranges, series, store, wiki
+from . import backbone, facts, hardware, ranges, series, store, traits, wiki
 from .config import EDITABLE, Settings, apply_overrides
 from .immich.client import is_missing, is_transient, probe
-from .pipeline import _contained, _iou, Analysis, Analyzer, Box, Classifier, Detector, image_quality, open_image, OpenVocabDetector
+from .pipeline import _contained, _iou, Analysis, Analyzer, Box, Classifier, crop, Detector, image_quality, open_image, OpenVocabDetector
 from .sources import SOURCES, available, check_path, extra_id, make_extra, make_source, source_path
 from .sync import WRITE_GAP, Syncer, SyncStats
 from .taxonomy import HIGHER, NAMES_VERSION, TAXON_VERSION, Taxonomy, tidy_names, to_json
@@ -65,6 +65,12 @@ DAILY = 86400
 # The marker of a scan is set this long before its start: a photo changed in the source while it was being listed, or
 # a clock a little ahead of the source's, would otherwise be missed for good (listing a photo again changes nothing).
 SCAN_OVERLAP = 120
+# Facts of the taxa (facts.py) fetched ahead at each cycle, at most: each one is up to four GBIF or Wikidata requests.
+FACTS_PER_CYCLE = 150
+# Sex of the animals (traits.py), per cycle: species whose model is learnt (about sixty photos downloaded from
+# iNaturalist each), and confirmed detections looked at (one preview read back and one BioCLIP pass each).
+TRAIT_MODELS_PER_CYCLE = 10
+TRAIT_PER_CYCLE = 300
 # Setting changed during a cycle: time given to the cycle to reach a stopping point (one photo, one
 # network request) before giving up (Busy).
 STOP_WAIT = 60
@@ -1520,7 +1526,10 @@ class Worker:
             "SELECT DISTINCT d.asset_id FROM detection d JOIN asset a ON a.asset_id = d.asset_id "
             "LEFT JOIN image_quality q ON q.asset_id = d.asset_id "
             "WHERE d.status = 'confirmed' AND q.asset_id IS NULL AND a.missing_at IS NULL LIMIT ?", (limit,))]
-        self._step("prefetch", len(todo) + len(no_quality))
+        # Facts of the confirmed taxa at the places of their photos (season, presence, status, figures, recording): the
+        # species pages and the viewer then show them at once. A bounded number per cycle (GBIF requests).
+        no_facts = [x for x in facts.targets(self.db) if not facts.fetched(self.tx, *x)][:FACTS_PER_CYCLE]
+        self._step("prefetch", len(todo) + len(no_quality) + len(no_facts))
         for key, name in todo:
             self._tick()
             try:
@@ -1549,7 +1558,74 @@ class Worker:
                 self.ensure_quality(aid)
             except Exception:
                 log.debug("quality unavailable for %s", aid, exc_info=True)
-        return len(todo)
+        got = missed = 0
+        for key, lat, lon in no_facts:
+            if missed >= 3:   # GBIF or Wikidata down: the rest waits for the next cycle instead of failing one by one
+                break
+            self._tick()
+            try:
+                ok = facts.prefetch(self.tx, key, store.load_taxon(self.db, key), lat, lon)
+                got, missed = got + ok, 0 if ok else missed + 1
+            except Exception:   # each part already tolerates its own failures: something else, the rest waits
+                self.db.rollback()
+                log.warning("facts not fetched for %s", key, exc_info=True)
+                break
+        return len(todo) + got
+
+    def tell_trait(self, trait: str) -> dict | None:
+        """Sex or life stage of the confirmed animals (settings sex_detection, stage_detection): learn the model of
+        the species that have none yet, then look at the detections of the species in which the trait shows. A
+        bounded amount per cycle; the models are loaded only when there is something to do."""
+        learn = traits.to_learn(self.db, trait, TRAIT_MODELS_PER_CYCLE)
+        if not learn and not traits.to_tell(self.db, trait, 1):
+            return None
+        embed = getattr(getattr(self.analyzer, "classifier", None), "embed", None)
+        if embed is None:   # analyser without BioCLIP (provided from outside)
+            return None
+        out = {"learnt": 0, "usable": 0, "told": 0}
+        self._step(f"{trait}_learn", len(learn))
+        for key in learn:
+            self._tick()
+            t = store.load_taxon(self.db, key) or {}
+            try:
+                got = traits.learn(self.tx, key, [t.get("scientific_name")], trait, embed, self._checkpoint)
+            except httpx.HTTPError as e:   # iNaturalist down or busy: the rest waits for the next cycle
+                self.db.rollback()
+                log.warning("%s model of %s not learnt, resumed at the next cycle: %s", trait, t.get("scientific_name") or key, str(e) or type(e).__name__)
+                break
+            out["learnt"] += 1
+            out["usable"] += (got["accuracy"] or 0) >= traits.MIN_ACCURACY
+            log.info("%s model of %s: %d photos (%s), accuracy %s", trait, t.get("scientific_name") or key, got["n"],
+                     ", ".join(got["labels"]) or "none", "none" if got["accuracy"] is None else f"{got['accuracy']:.0%}")
+        todo = traits.to_tell(self.db, trait, TRAIT_PER_CYCLE)
+        self._step(trait, len(todo))
+        models: dict = {}
+        for i in range(0, len(todo), 16):
+            rows, crops = [], []
+            for r in todo[i:i + 16]:
+                self._tick()
+                try:
+                    image = open_image(self.client_for(r["asset_id"]).thumbnail(r["asset_id"], self.s.thumbnail_size))
+                except Exception as e:   # photo gone, source down: looked at again at a later cycle
+                    log.debug("%s of detection %s: photo unavailable: %s", trait, r["id"], e)
+                    continue
+                whole = r["box_label"] == "image" or r["x"] is None
+                crops.append(image if whole else crop(image, Box(r["x"], r["y"], r["w"], r["h"], 1.0, "animal")))
+                rows.append(r)
+            if not rows:
+                continue
+            for r, e in zip(rows, embed(crops)):
+                if r["taxon_key"] not in models:
+                    models[r["taxon_key"]] = traits.model(self.db, r["taxon_key"], trait)
+                lean, margin = traits.guess(*models[r["taxon_key"]], e)
+                value = lean if margin >= traits.MIN_MARGIN else ""   # the leaning is kept all the same, shown as such
+                # Not what the user set meanwhile (dashboard), nor a detection reviewed again since the list was read.
+                self.db.execute(f"UPDATE detection SET {trait} = ?, {trait}_auto = ?, {trait}_score = ?, {trait}_by = 'auto', {trait}_key = ? "
+                                f"WHERE id = ? AND taxon_key = ? AND coalesce({trait}_by, '') != 'user'",
+                                (value, lean, margin, r["taxon_key"], r["id"], r["taxon_key"]))
+                out["told"] += 1
+            self.db.commit()
+        return out
 
     def run_once(self, manual: bool = False) -> dict:
         """A full cycle. Manual ("Sync" button): also analyses outside the time window.
@@ -1606,6 +1682,9 @@ class Worker:
             self._step("sync")
             self._soft(report, "sync", lambda: asdict(stats) if (stats := self.sync()) else None)
             self._soft(report, "prefetched", self.prefetch)
+            for trait in traits.TRAITS:
+                if getattr(self.s, f"{trait}_detection") and allowed():
+                    self._soft(report, trait, lambda trait=trait: self.tell_trait(trait))
             try:
                 self.backup()
             except Exception:   # disk full, permissions: reported, without blocking the cycle

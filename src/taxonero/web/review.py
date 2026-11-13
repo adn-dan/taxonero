@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .. import series, store
+from .. import series, store, traits
 from ..autoconfirm import auto_threshold
 from ..curation import DETECTION_GROUP, EXCLUDED, cand_json, relocate
 from ..immich.client import is_missing
@@ -269,6 +269,26 @@ def register(app, c) -> None:
         db.commit()
         return det_json(db.execute("SELECT * FROM detection WHERE id = ?", (det_id,)).fetchone())
 
+    class TraitIn(BaseModel):
+        value: str | None = None   # one of the values of the trait | '' cannot tell | None: back to what the model says
+
+    @app.post("/api/detections/{det_id}/trait/{trait}", dependencies=[Depends(auth)])
+    def set_trait(det_id: int, trait: str, body: TraitIn):
+        """Sex or life stage of the individual set by hand (kept whatever the model says), or handed back to the model."""
+        if trait not in traits.TRAITS:
+            raise HTTPException(404)
+        if body.value not in (None, "", *traits.LABELS[trait]):
+            fail(400, "bad_value", f"{trait}: {', '.join(traits.LABELS[trait])} or empty")
+        if not db.execute("SELECT 1 FROM detection WHERE id = ?", (det_id,)).fetchone():
+            raise HTTPException(404)
+        if body.value is None:   # what the model said comes back at once (nothing, if it never looked at it)
+            db.execute(f"UPDATE detection SET {trait} = CASE WHEN {trait}_score >= ? THEN {trait}_auto WHEN {trait}_auto IS NOT NULL THEN '' END, "
+                       f"{trait}_by = CASE WHEN {trait}_auto IS NULL THEN NULL ELSE 'auto' END WHERE id = ?", (traits.MIN_MARGIN, det_id))
+        else:
+            db.execute(f"UPDATE detection SET {trait} = ?, {trait}_by = 'user' WHERE id = ?", (body.value, det_id))
+        db.commit()
+        return det_json(db.execute("SELECT * FROM detection WHERE id = ?", (det_id,)).fetchone())
+
     @app.post("/api/detections/{det_id}/reject", dependencies=[Depends(auth)])
     def reject(det_id: int):
         return set_status(det_id, "rejected")
@@ -341,9 +361,12 @@ def register(app, c) -> None:
             raise HTTPException(404)
         box, d, cj, out = identify(row["asset_id"], b)
         keep = row["status"] == "confirmed" and row["confirmed_by"] == "user"
-        # frame_support cleared: the new box is identified on the crop alone.
+        # frame_support cleared: the new box is identified on the crop alone. Sex and stage told by the models on the
+        # old frame are forgotten (told again at the next cycle); what was set by hand stays.
+        forget = "".join(f", {t} = CASE WHEN {t}_by = 'user' THEN {t} END, {t}_by = CASE WHEN {t}_by = 'user' THEN 'user' END, "
+                         f"{t}_auto = NULL, {t}_score = NULL, {t}_key = NULL" for t in traits.TRAITS)
         db.execute("UPDATE detection SET x = ?, y = ?, w = ?, h = ?, candidates = ?, candidates_out = ?, margin = ?, plausibility = ?, "
-                   "frame_support = NULL, smoothed = NULL, presmooth = NULL"
+                   "frame_support = NULL, smoothed = NULL, presmooth = NULL" + forget
                    + ("" if keep else ", taxon_key = ?, taxon_rank = ?, score = ?, status = 'pending', confirmed_by = NULL")
                    + " WHERE id = ?",
                    (box.x, box.y, box.w, box.h, cj, out, d.margin, d.plausibility)

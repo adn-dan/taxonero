@@ -36,6 +36,7 @@ function closeViewer(silent) {
   // Boxes removed before hiding the image: Annotorious would recompute them at size 0 (NaN, Infinity).
   anno.clearAnnotations();
   V.open = false; $('#viewer').classList.remove('on'); document.body.style.overflow = '';
+  stopFactAudio(true);
   $('#vdone').hidden = true;
   V.opener?.focus?.({ preventScroll: true });
   resetZoom();
@@ -114,6 +115,32 @@ function seriesLine(d) {
   if (d.model_taxon) return `<div class="locline">🎞 ${tr('series.smoothed', { n: d.series_n, model: esc(shortName(d.model_taxon)) })}</div>`;
   return `<div class="locline">🎞 ${tr('series.support', { n: d.series_n })}</div>`;
 }
+/* Sex and life stage of a confirmed animal: proposed by the model of its species where they show (traits.py), or set
+   here by hand. A click on the value already set by hand takes it away (back to what the model says).
+   What the model says stays shown with how sure it is: under a value set by hand, and when it is too unsure to propose.
+   Stages offered: those that make sense for the group, plus the one already set. */
+const SEX_SIGN = { male: '♂', female: '♀' };
+function traitValues(d, trait) {
+  if (trait === 'sex') return ['female', 'male'];
+  const l = d.taxon?.lineage || {};
+  const all = l.phylum !== 'Chordata' ? ['adult', 'juvenile', 'larva', 'nymph'] : l.class === 'Amphibia' ? ['adult', 'juvenile', 'larva'] : ['adult', 'juvenile'];
+  return d.stage && !all.includes(d.stage) ? [...all, d.stage] : all;
+}
+function traitLine(d, trait) {
+  if (d.status !== 'confirmed' || d.taxon?.lineage?.kingdom !== 'Animalia') return '';
+  const auto = !!d[trait] && d[`${trait}_by`] !== 'user', conf = d[`${trait}_confidence`], said = d[`${trait}_auto`];
+  const pct = conf != null ? ` · ${fmtPct(Math.min(conf, 0.99))}` : '';
+  return `<div class="sexline"><span>${t(`${trait}.title`)}</span><span class="seg">${traitValues(d, trait).map(v =>
+    `<button data-trait="${trait}" data-value="${v}" class="${d[trait] === v ? 'on' : ''}" aria-pressed="${d[trait] === v}">${SEX_SIGN[v] ? `${SEX_SIGN[v]} ` : ''}${t(`${trait}.${v}`)}</button>`).join('')}</span>
+    ${auto ? `<span class="sub" title="${esc(t('sex.auto_hint'))}">${t('sex.auto')}${pct}</span>`
+      : said ? `<span class="sub said" title="${esc(t('sex.auto_hint'))}">${tr(d[trait] ? 'sex.auto_said' : 'sex.auto_unsure', { value: `${SEX_SIGN[said] ? `${SEX_SIGN[said]} ` : ''}${t(`${trait}.${said}`)}` })}${pct}</span>` : ''}</div>`;
+}
+async function setTrait(d, trait, v) {
+  const value = d[trait] === v && d[`${trait}_by`] === 'user' ? null : v;
+  try { await api(`/api/detections/${d.id}/trait/${trait}`, { method: 'POST', body: JSON.stringify({ value }) }); }
+  catch (e) { fail(e); return; }
+  await refreshAsset();
+}
 function statusBadge(d) {
   if (d.status === 'pending' && d.audit) return `<span class="badge2 pending" title="${esc(t('det.audit_hint'))}">${t('det.audit')}</span>`;
   if (d.status === 'confirmed') return `<span class="badge2 ok">${ic('check')} ${t(d.confirmed_by === 'auto' ? 'det.confirmed_auto' : 'det.confirmed_user')}</span>`;
@@ -154,10 +181,12 @@ function drawInfo() {
     ${otherNames(t)}
     <div class="badges">${statusBadge(d)}${t?.iucn && THREATENED.concat('NEAR_THREATENED').includes(t.iucn)
       ? `<a class="badge2" href="#species?iucn=${t.iucn}"><span class="iucn-dot" style="background:${IUCN_COLOR[t.iucn]}"></span>${tr('iucn.short', { cat: esc(iucnName(t.iucn)) })}</a>` : ''}</div>
+    ${traitLine(d, 'sex')}${traitLine(d, 'stage')}
     ${metaLine(a)}
     ${seriesLine(d)}
     ${locLine(a)}
     ${t ? `<div class="links"><button class="btn" id="l-sp">${ic('paw')} ${tr('det.species_page')}</button>${hasWiki(t) ? `<button class="btn" id="l-wp">${ic('book')} ${tr('wiki.wikipedia')}</button>` : ''}</div>` : ''}
+    ${t && d.taxon_key ? '<div class="facts" id="vi-facts"></div>' : ''}
   </section>`;
   // Actions according to the state: never two buttons for the same thing. Delete and Analyse again: top bar.
   const acts = { pending: ['ok', 'no'], confirmed: ['no', 'reset'], rejected: ['ok', 'reset'] }[d.status] || ['ok', 'no'];
@@ -187,10 +216,14 @@ function drawInfo() {
     el.onmouseleave = () => setMiniRange(shownKey());
   });
   drawMini(shownKey(), a);
+  // Season and presence around the photo (without a place: around your photos of this taxon), month of the photo marked.
+  showFacts($('#vi-facts'), d.taxon_key, a.lat != null && a.lon != null ? { lat: a.lat, lon: a.lon } : null,
+    { photo: true, month: a.taken_at && +a.taken_at.slice(5, 7) >= 1 ? +a.taken_at.slice(5, 7) - 1 : undefined });
   loadCandNames(d);
   if (d.status === 'confirmed' && d.taxon_key) loadSeries(d);
   $('#l-sp') && ($('#l-sp').onclick = () => { location.hash = `species/${d.taxon_key}`; });   // route() closes the viewer
   $('#l-wp') && ($('#l-wp').onclick = () => openWiki(d.taxon_key, 'wikipedia'));
+  $$('#vinfo [data-trait]').forEach(b => { b.onclick = () => setTrait(d, b.dataset.trait, b.dataset.value); });
   $('#b-ok') && ($('#b-ok').onclick = () => act('confirm'));
   $('#b-no') && ($('#b-no').onclick = () => act('reject'));
   $('#b-reset') && ($('#b-reset').onclick = () => act('reset'));

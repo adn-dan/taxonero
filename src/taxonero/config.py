@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     # and see what is recognised in it. Nothing else is open (photos, species, settings), the image is not kept, and
     # requests are limited per address. Off by default; server edition only. Also set in Settings > General.
     public_identify: bool = False
+    # Sex of the animals (traits.py): for each species with confirmed photos, a small model is learnt from a few dozen
+    # photos annotated male or female on iNaturalist (downloaded once, not kept), and proposes the sex in the viewer
+    # where the difference shows. Off by default: it downloads from iNaturalist. Also set in Settings > Analysis.
+    sex_detection: bool = False
+    # Life stage of the animals, the same way: adult, juvenile, larva or nymph, for the species in which it shows
+    # (caterpillars, ladybird larvae, young gulls…). Off by default. Also set in Settings > Analysis.
+    stage_detection: bool = False
     # Public Immich URL for the "open in Immich" links (immich_url by default).
     immich_public_url: str = ""
 
@@ -210,7 +217,7 @@ BOUNDS = {"auto_confirm_threshold": (0.5, 0.99), "auto_confirm_max_runner_up": (
 GROUPS = ("animal", "plant", "fungus", "microbe")
 EDITABLE = ("detection", "detect_groups", "device", "open_detector_mode", "gpu_batch", "models_idle_minutes", "exclude_extinct", "hide_absent", "analyze_videos", "skip_people", "skip_raw_twins", "full_image_fallback", "domestic_animals", "auto_confirm", "auto_confirm_threshold",
             "auto_confirm_max_runner_up", "auto_confirm_audit", "write_description", "analysis_window", "interval_minutes",
-            "names_lang", "names_follow_ui", "scientific_names", "public_identify")
+            "names_lang", "names_follow_ui", "scientific_names", "public_identify", "sex_detection", "stage_detection")
 WINDOW = re.compile(r"^$|^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$")
 
 

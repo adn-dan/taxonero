@@ -57,12 +57,14 @@ function drawBoxes() {
   if (d) anno.setSelected(String(d.id)); else anno.cancelSelected();
   drawLabels();
 }
+// On the label of a confirmed animal: its sex and life stage when known (viewer.js, traitLine).
+const traitTag = d => d.status !== 'confirmed' ? '' : `${SEX_SIGN[d.sex] ? ` ${SEX_SIGN[d.sex]}` : ''}${d.stage ? ` · ${esc(t(`stage.${d.stage}`))}` : ''}`;
 function drawLabels() {
   const a = cur(); if (!a) return;
   $('#labels').innerHTML = a.detections.map((d, k) => {
     const inside = d.w * d.h > 0.98 || d.y < 0.07;
     const pos = inside ? `left:${d.x * 100}%;top:${d.y * 100}%` : `left:${d.x * 100}%;bottom:${(1 - d.y) * 100}%`;
-    return `<span class="vlbl ${d.status}${k === V.sel ? ' sel' : ''}${inside ? ' in' : ''}" style="${pos}">${subjectIcon(d)} ${esc(shortName(d.taxon))}${d.status === 'confirmed' ? ' ✓' : ''}</span>`;
+    return `<span class="vlbl ${d.status}${k === V.sel ? ' sel' : ''}${inside ? ' in' : ''}" style="${pos}">${subjectIcon(d)} ${esc(shortName(d.taxon))}${traitTag(d)}${d.status === 'confirmed' ? ' ✓' : ''}</span>`;
   }).join('');
 }
 // After layout: Annotorious reads the image size again at the next frame (otherwise a NaN scale for a moment).

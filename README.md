@@ -75,6 +75,25 @@ never modified.**
   the region. Keyboard: `1`-`5` candidate, `←` `→` reference photo, `⏎` choose the species.
 - **Identify** page: drop (or paste) an image to have it identified without storing it, with its range
   map and Wikipedia article.
+- **Sex of the animals** (option, off by default: Settings > Analysis): male or female suggested in the viewer for the
+  species in which the difference shows (mallard, blackbird, stag beetle…), and nothing for those whose sexes look
+  alike. For each confirmed animal species, about sixty photos annotated on iNaturalist are downloaded once to learn
+  a small model of that species (the photos are not kept), whose accuracy on photos left aside decides whether it is
+  used (90 % at least; 94 to 99 % measured on ten species with a visible difference, `dev/benchmark_traits.py`). You
+  can always set or correct the sex by hand; it stays in Taxonero (not written to the tags).
+- **Life stage of the animals** (separate option, off by default too): adult, juvenile, larva or nymph suggested the
+  same way, with a model per species learnt from photos annotated on iNaturalist. It works where the stages look
+  different (caterpillars, ladybird larvae, bug nymphs, tadpoles, young gulls or robins: 94 to 100 % measured) and
+  proposes nothing elsewhere (fawns, young boars: about 70 %, not used).
+- **At a glance**, on each species page and in the viewer: the season of the species in the region (GBIF
+  observations per month, about 500 km around the photo, its month highlighted), how often it is seen nearby and in
+  the region, whether it is native, introduced or invasive in the country of the photo (lists per country published on
+  GBIF; shown only when they speak of the whole country and agree), a few figures when Wikidata has them (weight,
+  length, wingspan, lifespan, gestation, clutch: mostly birds and mammals), a recording (Wikimedia Commons) and, for
+  birds, the link to xeno-canto. Fetched ahead by the synchronisation for the confirmed species (a bounded number per cycle), otherwise the first time
+  a species is opened, then kept locally. On a species page, the months of your own photos are coloured in the season,
+  and when you photographed it in several countries, a menu switches the season, presence and status from one region to
+  the other.
 - **Public identification page** (optional, off by default: Settings > General, or `PUBLIC_IDENTIFY=true`; server
   edition): the address `/identify` opens without login or password, for anyone you give it to. One image in, what
   the AI recognises out (names, candidates, links to Wikipedia and GBIF). Nothing else is open: not your photos, your
@@ -133,7 +152,10 @@ The tool is a separate service that talks to Immich through its public API only.
 | Identification | [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) (ViT-L/14, TreeOfLife-200M, ~950,000 taxa) | MIT |
 | Taxonomy, names, IUCN, occurrences | [GBIF](https://www.gbif.org/developer/summary) | CC0 / CC-BY data |
 | Multilingual names, Wikipedia and Wikispecies links | Wikidata (property P846, GBIF identifier) | CC0 |
+| At a glance: season, local presence, status in the country | GBIF (occurrences per month, species distributions such as GRIIS, reverse geocoding) | CC0 / CC-BY data |
+| At a glance: figures and recording | Wikidata (quantities), Wikimedia Commons (audio file, played from there; author and licence on its page) | CC0; per file for audio |
 | Range maps | [GBIF maps API](https://techdocs.gbif.org/en/openapi/v2/maps): vector tiles read once on a fixed hexagonal grid (~25 km in Europe for a species or genus, ~50 km for higher ranks), snapped to GBIF's exact grid so the cells line up; when zooming in, the tile of the displayed zoom is fetched on the fly (cells stay ~11 px on screen, cached 30 days, local grid as fallback); field observations only, on a near-white base map | CC0 / CC-BY |
+| Sex and life stage of the animals (options) | [iNaturalist API](https://api.inaturalist.org/v1/docs/): research grade observations annotated with the sex or the life stage, read once per species to learn a model, not kept or shown | CC0 / CC BY / CC BY-NC photos only |
 | Reference photos (comparison) | [iNaturalist API](https://api.inaturalist.org/v1/docs/): photos featured on the taxon page, Creative Commons licences only | CC0 / CC BY / CC BY-NC… (per photo) |
 | Side panel articles | Wikipedia / Wikispecies API (TextExtracts), cleaned text (tag allow-list) | CC BY-SA |
 

@@ -76,6 +76,26 @@ plusieurs à la fois. **Tes photos ne sont jamais modifiées.**
   dans la région. Au clavier : `1`-`5` candidat, `←` `→` photo de référence, `⏎` choisir l'espèce.
 - Page **Identifier** : une image déposée (ou collée) est identifiée sans être gardée, avec sa carte de
   répartition et l'article Wikipédia.
+- **Sexe des animaux** (option, désactivée par défaut : Réglages > Analyse) : mâle ou femelle proposé dans la
+  visionneuse pour les espèces où la différence se voit (canard colvert, merle, lucane…), et rien pour celles dont les
+  sexes se ressemblent. Pour chaque espèce animale validée, une soixantaine de photos annotées sur iNaturalist sont
+  téléchargées une fois pour apprendre un petit modèle propre à l'espèce (les photos ne sont pas gardées), dont la
+  justesse sur des photos mises de côté décide s'il est utilisé (90 % au moins ; 94 à 99 % mesurés sur dix espèces à
+  différence visible, `dev/benchmark_traits.py`). Tu peux toujours indiquer ou corriger le sexe à la main ; il reste
+  dans Taxonero (pas écrit dans les tags).
+- **Stade de vie des animaux** (option séparée, désactivée par défaut elle aussi) : adulte, juvénile, larve ou nymphe
+  proposé de la même façon, avec un modèle par espèce appris sur des photos annotées sur iNaturalist. Ça marche là où
+  les stades ne se ressemblent pas (chenilles, larves de coccinelles, nymphes de punaises, têtards, jeunes goélands ou
+  rougegorges : 94 à 100 % mesurés) et rien n'est proposé ailleurs (faons, marcassins : environ 70 %, non utilisé).
+- **En bref**, sur chaque page d'espèce et dans la visionneuse : la saison de l'espèce dans la région (observations
+  GBIF par mois, environ 500 km autour de la photo, son mois mis en avant), sa fréquence à proximité et dans la région,
+  son statut dans le pays de la photo (indigène, introduite ou envahissante, d'après les listes par pays publiées sur
+  GBIF ; affiché seulement quand elles parlent du pays entier et concordent), quelques chiffres quand Wikidata les a
+  (poids, longueur, envergure, longévité, gestation, ponte : surtout oiseaux et mammifères), un enregistrement
+  (Wikimedia Commons) et, pour les oiseaux, le lien vers xeno-canto. Récupéré d'avance par la synchronisation pour les espèces validées (un nombre limité par cycle), sinon à la
+  première ouverture d'une espèce, puis gardé localement. Sur la page d'une espèce, les mois de tes propres photos
+  sont colorés dans la saison, et si tu l'as photographiée dans plusieurs pays, un menu fait passer la saison, la présence et le statut d'une
+  région à l'autre.
 - **Page publique d'identification** (facultative, désactivée par défaut : Paramètres > Général, ou
   `PUBLIC_IDENTIFY=true` ; édition serveur) : l'adresse `/identify` s'ouvre sans identifiant ni mot de passe, pour
   toute personne à qui tu la donnes. Une image envoyée, ce que l'IA y reconnaît en retour (noms, candidats, liens
@@ -133,7 +153,10 @@ L'outil est un service séparé qui ne parle à Immich que par son API publique.
 | Identification | [BioCLIP 2](https://huggingface.co/imageomics/bioclip-2) (ViT-L/14, TreeOfLife-200M, ~950 000 taxons) | MIT |
 | Taxonomie, noms, UICN, occurrences | [GBIF](https://www.gbif.org/developer/summary) | données CC0 / CC-BY |
 | Noms multilingues, liens Wikipédia et Wikispecies | Wikidata (propriété P846, identifiant GBIF) | CC0 |
+| En bref : saison, présence locale, statut dans le pays | GBIF (observations par mois, distributions des espèces comme GRIIS, géocodage inverse) | Données CC0 / CC-BY |
+| En bref : chiffres et enregistrement | Wikidata (grandeurs), Wikimedia Commons (fichier audio, lu depuis ce site ; auteur et licence sur sa page) | CC0 ; selon le fichier pour le son |
 | Aires de répartition | [API cartes GBIF](https://techdocs.gbif.org/en/openapi/v2/maps) : tuiles vectorielles lues une fois sur une grille hexagonale fixe (~25 km en Europe pour une espèce ou un genre, ~50 km pour les rangs supérieurs), recalée sur la grille exacte de GBIF pour que les cases s'emboîtent ; en zoomant, la tuile du zoom affiché est demandée à la volée (cases de ~11 px à l'écran, gardées 30 jours, grille locale en repli) ; observations de terrain seulement, sur un fond de carte presque blanc | CC0 / CC-BY |
+| Sexe et stade de vie des animaux (options) | [API iNaturalist](https://api.inaturalist.org/v1/docs/) : observations de qualité recherche annotées avec le sexe ou le stade de vie, lues une fois par espèce pour apprendre un modèle, ni gardées ni affichées | Photos CC0 / CC BY / CC BY-NC seulement |
 | Photos de référence (comparaison) | [API iNaturalist](https://api.inaturalist.org/v1/docs/) : photos mises en avant sur la fiche du taxon, licences Creative Commons seulement | CC0 / CC BY / CC BY-NC… (selon la photo) |
 | Articles du panneau latéral | API Wikipédia / Wikispecies (TextExtracts), texte nettoyé (liste blanche de balises) | CC BY-SA |
 

@@ -526,7 +526,7 @@ td small { color: var(--muted); }
   /* Filters on a single scrolling line: the photos stay visible without scrolling down. */
   #pfilters { flex-basis: 100%; max-width: 100%; }
   /* Menus across the whole tool bar, whatever button opened them; bigger rows for a finger. */
-  .ptools { position: relative; } .pdrop { position: static; }
+  .ptools, .gtools { position: relative; } .pdrop { position: static; }
   .pmenu { left: 0; right: 0; min-width: 0; max-width: none; } .mi { padding: 10px; }
   .topbar { gap: 8px; } .topbar .right { gap: 0; } .logo { display: none; } .navback span { display: none; } .navback, .navback:disabled { padding: 0 8px; }
   main { padding: calc(var(--topbar) + 8px) 12px 80px; }
@@ -581,7 +581,8 @@ td small { color: var(--muted); }
 .ptabs button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 /* Drop-down menus of the tool bar (groups, source): the button says what is chosen. */
 .pdrop { position: relative; }
-.ptools .ddbtn { display: inline-flex; align-items: center; gap: 2px; padding-right: 8px; }
+.ptools .ddbtn, .gtools .ddbtn { display: inline-flex; align-items: center; gap: 2px; padding-right: 8px; }
+.statsf { margin: -6px 0 14px; }
 .ddbtn .dd { width: 18px; height: 18px; fill: currentColor; }
 .pmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 260px; max-width: min(360px, calc(100vw - 32px));
   max-height: min(70vh, 520px); overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -646,6 +647,8 @@ a.gchip { text-decoration: none; } a.gchip:hover { background: var(--surface-3);
 #lpmap { height: min(460px, 60vh); }
 .lpbtns { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; align-items: center; } .lpbtns .grow { flex: 1; }
 .locline { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+.sexline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--ink-2); margin-top: 10px; }
+.sexline .sub { font-size: 12px; }
 .linkbtn { font: inherit; color: var(--primary); background: none; border: 0; padding: 0 0 0 4px; cursor: pointer; text-decoration: underline; }
 .srcpath { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .srcpath input { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: min(360px, 100%); flex: 1; }
@@ -767,3 +770,26 @@ main:has(#v-photos.on #ptimeline:not([hidden])) { padding-right: 60px; }
 .publinks { margin-top: 6px; font-size: 13px; display: flex; gap: 14px; }
 .pubfoot { margin-top: 24px; text-align: center; font-size: 12px; }
 .publink { margin-top: 6px; } .publink code { user-select: all; }
+/* Facts about a taxon (facts.js): season, local presence, status in the country, figures, recording. */
+.facts:empty { display: none; } .facts { margin-top: 16px; font-size: 13px; }
+.facts .sectit { margin-bottom: 8px; }
+.fpart + .fpart { margin-top: 10px; } .fpart > :first-child { margin-top: 0; }
+/* Species page: a card of its own under the article and the map, the parts side by side. */
+.spfacts { padding: 16px 24px; margin: 12px 0 4px; }
+.spfacts .fparts { display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: flex-start; }
+.spfacts .fpart { margin-top: 0; min-width: 0; } .spfacts .fseason { width: 360px; max-width: 100%; }
+.spfacts .faudio { width: 320px; max-width: 100%; }
+.fmonths { display: flex; align-items: flex-end; gap: 3px; height: 64px; max-width: 360px; }
+.fm { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; min-width: 0; }
+.fm i { display: block; width: 100%; background: var(--surface-3); border-radius: 3px 3px 0 0; }
+.fm span { font-size: 10px; color: var(--muted); line-height: 1; }
+.fm.cur i { background: var(--primary); } .fm.cur span { color: var(--primary); font-weight: 600; }
+.fseason .sub { font-size: 11px; margin-top: 4px; }
+.fline { margin-top: 8px; } .fline .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.fstatus.introduced { color: var(--warn); } .fstatus.invasive { color: var(--bad); } .fstatus.native { color: var(--ok); }
+.ftraits { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 10px 0 0; }
+.ftraits div { min-width: 0; } .ftraits dt { font-size: 11px; color: var(--muted); } .ftraits dd { margin: 0; font-weight: 500; }
+.faudio { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; align-items: flex-start; }
+.faudio audio { width: 100%; max-width: 360px; height: 36px; } .faudio a { font-size: 12px; }
+.fnote { font-size: 12px; margin-top: 8px; }
+.fregions { flex: none; margin: -2px 0 14px; }

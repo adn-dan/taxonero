@@ -16,6 +16,8 @@ const SET_ROWS = [   // labels: set.<key>, set.<key>.sub, set.<key>.<option>, se
   { k: 'skip_raw_twins', type: 'bool' },
   { k: 'full_image_fallback', type: 'bool' },
   { k: 'domestic_animals', type: 'seg', opts: ['skip', 'keep'] },
+  { k: 'sex_detection', type: 'bool' },
+  { k: 'stage_detection', type: 'bool' },
   { group: 'auto' },
   { k: 'auto_confirm', type: 'seg', opts: ['rule', 'calibrated', 'fixed', 'off'], extra: () => groupsNote() },
   { k: 'auto_confirm_threshold', type: 'range', min: .5, max: .99, step: .01, when: v => v.auto_confirm === 'rule' || v.auto_confirm === 'fixed' },

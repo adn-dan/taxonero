@@ -32,9 +32,11 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 PUBLIC_STATIC = ("js/public.js", "app.css", "favicon.svg", "logo.svg", "apple-touch-icon.png", "vendor/fonts.css")
 PUBLIC_STATIC_DIRS = ("i18n/", "vendor/fonts/")
 # img-src https: Wikipedia images and map background. style-src 'unsafe-inline': style attributes of the interface.
+# media-src: recordings of a species, played from Wikimedia Commons (facts.py).
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                               "img-src 'self' data: blob: https:; object-src 'none'; base-uri 'none'; "
+                               "img-src 'self' data: blob: https:; media-src https://upload.wikimedia.org; "
+                               "object-src 'none'; base-uri 'none'; "
                                "form-action 'self'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",

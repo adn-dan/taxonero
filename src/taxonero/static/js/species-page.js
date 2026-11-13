@@ -51,6 +51,7 @@ async function loadSpeciesPage(key, scope = {}) {
       </div>
     </section>
     ${midHTML(P_.id, tr('sp.map_hint'))}
+    <section class="card facts spfacts"></section>
     <h2 class="sph">${tr('nav.photos')}</h2>
     <div class="spphotos"></div>`;
   P_.cover = r.cover;
@@ -60,6 +61,8 @@ async function loadSpeciesPage(key, scope = {}) {
   drawRangeMap(P_, r.assets);
   loadPanelWiki(P_);
   showCover(P_, root);
+  // Around where most of its photos were taken; the months of your photos of that region coloured in the season.
+  if (r.taxon) showFacts(root.querySelector('.spfacts'), key, null, { assets: r.assets });
   await embedGrid(root.querySelector('.spphotos'), { taxon: key, ...scope }, assetId => setCover(key, assetId));
   starTiles();
 }

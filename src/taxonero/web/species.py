@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from .. import ranges, refphotos, store, wiki
+from .. import facts, ranges, refphotos, store, wiki
 from ..autoconfirm import auto_threshold
 from ..taxonomy import ISO3, to_json
 from .context import fail
@@ -60,6 +60,27 @@ def register(app, c) -> None:
         # Language actually served (fallback if the article does not exist in the requested language): the menu shows it.
         a["lang"] = next((k for k, v in t.get("wikipedia", {}).items() if v == url), None)
         return a
+
+    @app.get("/api/facts/{key}", dependencies=[Depends(auth)])
+    def taxon_facts(key: int, lat: float | None = None, lon: float | None = None):
+        """Facts about a taxon (facts.py): season and presence around a place, status in its country, figures and
+        recording. The place: that of the photo (lat, lon). Without it (species page): the region with most of your
+        confirmed photos of this taxon, and the list of all its regions (one per country), which the page then asks
+        for one by one with lat and lon; no located photo: only what does not depend on a place."""
+        t = taxon(key)
+        if not t:
+            raise HTTPException(404)
+        source, found = "photo", None
+        if lat is None or lon is None:
+            source, found = "photos", facts.regions(tx, db, key)
+            lat, lon = (found[0]["lat"], found[0]["lon"]) if found else (None, None)
+        elif not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            fail(400, "bad_location", "latitude or longitude out of range")
+        out = facts.facts(tx, key, t, lat, lon)
+        out["place"] = {"lat": lat, "lon": lon, "source": source} if lat is not None else None
+        if found is not None:
+            out["regions"] = found
+        return out
 
     @app.get("/api/refphotos/{key}", dependencies=[Depends(auth)])
     def ref_photos(key: int, name: str = ""):

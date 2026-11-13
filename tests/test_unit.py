@@ -1774,6 +1774,173 @@ def test_public_identify_page_opens_only_itself(tmp_path, monkeypatch):
     assert desk.get("/identify").status_code == 404 and desk.post("/api/public/identify", content=image).status_code == 404
 
 
+def test_taxon_facts(tmp_path, monkeypatch):
+    """Facts about a taxon (facts.py): season and presence around the photo, status in its country, figures and
+    recording from Wikidata. Services simulated; a part whose service fails is left out, the others stay."""
+    import httpx
+    from taxonero import facts, store
+    from taxonero.taxonomy import Taxonomy
+    db = store.connect(tmp_path / "t.sqlite")
+    tx = Taxonomy(db, fail_fast=True)
+    quantity = lambda amount, unit, rank="normal", role=None: {"rank": rank, "mainsnak": {"datavalue": {"type": "quantity", "value": {
+        "amount": amount, "unit": unit if unit == "1" else f"http://www.wikidata.org/entity/{unit}"}}},
+        **({"qualifiers": {"P3831": [{"datavalue": {"type": "wikibase-entityid", "value": {"id": role}}}]}} if role else {})}
+    claims = {"P2067": [quantity("+1.68", "Q41803"), quantity("+18.5", "Q41803")],          # egg, then adult: the largest
+              "P2050": [quantity("+0.23", "Q11573")], "P2048": [quantity("+3", "Q11573"), quantity("+9", "Q11573", "deprecated")],
+              "P4214": [quantity("+15", "Q577")], "P7725": [quantity("+7.7", "1")],
+              "P2043": [quantity("+4", "Q99999")],                                               # unknown unit: left out
+              "P51": [{"rank": "normal", "mainsnak": {"datavalue": {"type": "string", "value": "Parus major.ogg"}}}]}
+    calls, down = [], set()
+
+    def fetch(self, url, retries=6):
+        calls.append(url)
+        if any(x in url for x in down):
+            raise httpx.ConnectError("down")
+        if "/occurrence/" in url and "facet=month" in url:
+            return {"count": 30, "facets": [{"field": "MONTH", "counts": [{"name": "5", "count": 20}, {"name": "12", "count": 10}]}]}
+        if "/occurrence/" in url:   # presence: ±1° then ±5° squares
+            return {"count": 4 if "43.00%2C45.00" in url else 50}
+        if "/geocode/reverse" in url:
+            return [{"type": "GADM1", "title": "Occitanie", "isoCountryCode2Digit": "FR", "distance": 0.0},
+                    {"type": "GADM0", "title": "France", "isoCountryCode2Digit": "FR", "distance": 0.0}]
+        if "/distributions" in url:
+            return {"results": {
+                1: [{"country": "FR", "establishmentMeans": "INTRODUCED", "status": "PRESENT"}],            # whole country
+                2: [{"country": "FR", "locality": "Îles Kerguelen", "establishmentMeans": "INTRODUCED"},     # a part only
+                    {"country": "FR", "locality": "France", "establishmentMeans": "NATIVE"}],
+                3: [{"country": "FR", "establishmentMeans": "NATIVE"}, {"country": "FR", "establishmentMeans": "INTRODUCED"}],  # disagree
+                4: [{"country": "FR", "establishmentMeans": "INVASIVE", "locationId": "ISO_3166-2:FR", "locality": "x"},
+                    {"country": "FR", "establishmentMeans": "INTRODUCED"}, {"country": "GB", "establishmentMeans": "INTRODUCED", "status": "ABSENT"}],
+            }[int(url.split("/species/")[1].split("/")[0])]}
+        if "props=claims" in url:
+            return {"entities": {"Q25485": {"claims": claims}}}
+        raise AssertionError(url)
+    monkeypatch.setattr(Taxonomy, "_fetch", fetch)
+    monkeypatch.setattr(Taxonomy, "_area_count", lambda self, *a, **k: None)   # per-taxon searches only
+    bird = {"scientific_name": "Parus major", "rank": "species", "wikidata": "Q25485", "lineage": {"class": "Aves"}}
+
+    f = facts.facts(tx, 1, bird, 44.2, 3.25)
+    assert f["months"] == [0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10] and (f["near"], f["region"], f["presence"]) == (4, 50, "green")
+    assert f["country"] == "FR" and f["status"] == "introduced"
+    assert f["traits"] == [{"id": "mass", "value": 18.5, "unit": "gram"}, {"id": "height", "value": 3.0, "unit": "meter"},
+                           {"id": "wingspan", "value": 23.0, "unit": "centimeter"}, {"id": "max_lifespan", "value": 15.0, "unit": "year"},
+                           {"id": "litter", "value": 7.7, "unit": None}]
+    assert f["audio"]["src"] == "https://upload.wikimedia.org/wikipedia/commons/d/df/Parus_major.ogg"
+    assert f["audio"]["mp3"].endswith("/transcoded/d/df/Parus_major.ogg/Parus_major.ogg.mp3")
+    assert f["xeno_canto"] == "https://xeno-canto.org/species/Parus-major"
+    # Kept locally in a compact form: asked once.
+    n = len(calls)
+    assert facts.facts(tx, 1, bird, 44.2, 3.25) == f and len(calls) == n
+    # Status: a record about a part of the country says nothing of the country; sources that disagree neither.
+    assert facts.facts(tx, 2, bird, 44.2, 3.25)["status"] == "native"
+    assert facts.facts(tx, 3, bird, 44.2, 3.25)["status"] is None
+    assert facts.facts(tx, 4, bird, 44.2, 3.25)["status"] == "invasive"
+    assert facts.statuses(tx, 4).get("GB") is None                      # "absent" is not a presence
+    # Without a place: only what does not depend on one. A genus: no status, no xeno-canto page.
+    nowhere = facts.facts(tx, 1, bird)
+    assert nowhere["months"] is None and nowhere["country"] is None and nowhere["traits"] and nowhere["audio"]
+    genus = facts.facts(tx, 1, {"scientific_name": "Parus", "rank": "genus", "lineage": {"class": "Aves"}}, 44.2, 3.25)
+    assert genus["status"] is None and genus["xeno_canto"] is None and genus["traits"] == [] and genus["months"]
+    # A mass given at birth only (the robin on Wikidata: 2.4 g) is not the mass of the animal; the adult's is kept.
+    mass = lambda *c: [x for x in facts.parse_claims({"P2067": list(c)})["traits"] if x["id"] == "mass"]
+    assert mass(quantity("+2.4", "Q41803", role="Q4128476")) == []
+    assert mass(quantity("+36.5", "Q41803", role="Q4128476"), quantity("+715", "Q41803", role="Q78101716"),
+                quantity("+835", "Q41803", role="Q78101716")) == [{"id": "mass", "value": 835.0, "unit": "gram"}]
+    # Square of a search: cut at the poles, in two halves across the antimeridian (GBIF refuses anything beyond).
+    assert tx.square(44.0, 3.0, 1.0) == {"decimalLatitude": "43.00,45.00", "decimalLongitude": "2.00,4.00"}
+    assert tx.square(-18.0, 178.0, 5.0) == {"decimalLatitude": "-23.00,-13.00", "decimalLongitude": ["173.00,180.00", "-180.00,-177.00"]}
+    assert tx.square(-44.0, -177.0, 5.0)["decimalLongitude"] == ["178.00,180.00", "-180.00,-172.00"]
+    assert tx.square(87.0, 20.0, 5.0)["decimalLatitude"] == "82.00,90.00" and tx.square(-88.0, 0.0, 5.0)["decimalLatitude"] == "-90.00,-83.00"
+    # A service down: its part is left out, the others stay, and nothing wrong is kept in the cache.
+    down.update({"/geocode/reverse", "props=claims"})
+    f = facts.facts(tx, 9, {**bird, "wikidata": "Q1"}, 10.0, 10.0)
+    assert f["months"] and f["country"] is None and f["status"] is None and f["traits"] == [] and f["audio"] is None
+    down.clear()
+    assert facts.facts(tx, 9, {**bird, "wikidata": "Q25485"}, 10.0, 10.0)["country"] == "FR"
+    # Fetched ahead by the cycle (Worker.prefetch): each confirmed taxon at the places of its photos (one per 0.1° square)
+    # and at the place of its species page; noted as done only when every part was obtained.
+    for i, (key, lat, lon) in enumerate([(1, 44.2, 3.25), (1, 44.24, 3.21), (1, 10.0, 10.0), (1, None, None), (5, None, None)]):
+        db.execute("INSERT INTO asset (asset_id, lat, lon) VALUES (?, ?, ?)", (f"a{i}", lat, lon))
+        db.execute("INSERT INTO detection (asset_id, source, status, taxon_key, created_at) VALUES (?, 'auto', 'confirmed', ?, 0)", (f"a{i}", key))
+    db.execute("INSERT INTO detection (asset_id, source, status, taxon_key, created_at) VALUES ('a0', 'auto', 'pending', 8, 0)")
+    db.commit()
+    # Species page: one region per country of the photos (the simulated geocoder only knows France), on its 1° cell with
+    # most photos; a place whose country is unknown (geocoder down) is a region of its own.
+    assert facts.regions(tx, db, 1) == [{"country": "FR", "lat": 44.0, "lon": 3.0, "n": 3}] and facts.regions(tx, db, 5) == []
+    db.execute("DELETE FROM http_cache WHERE url LIKE 'facts:place:%'")
+    down.add("/geocode/reverse")
+    assert facts.regions(tx, db, 1) == [{"country": None, "lat": 44.0, "lon": 3.0, "n": 2}, {"country": None, "lat": 10.0, "lon": 10.0, "n": 1}]
+    down.clear()
+    todo = facts.targets(db)
+    assert sorted((k, la is None) for k, la, lo in todo) == [(1, False), (1, False), (1, False), (5, True)]
+    assert not any(facts.fetched(tx, *x) for x in todo)
+    down.add("/geocode/reverse")
+    here = next(x for x in todo if x[0] == 1 and x[1] == 10.0)
+    db.execute("DELETE FROM http_cache WHERE url LIKE 'facts:place:%'")
+    assert facts.prefetch(tx, here[0], bird, here[1], here[2]) is False and not facts.fetched(tx, *here)
+    down.clear()
+    assert all(facts.prefetch(tx, k, bird, la, lo) for k, la, lo in todo) and all(facts.fetched(tx, *x) for x in todo)
+    n = len(calls)
+    assert facts.facts(tx, 1, bird, 44.21, 3.24)["months"] and len(calls) == n   # another photo of the same square: nothing asked
+
+
+def test_cycle_fetches_the_facts_ahead(tmp_path, monkeypatch):
+    """The local data step of a cycle also fetches the facts of the confirmed taxa, a bounded number per cycle, and
+    stops asking when the services do not answer."""
+    import json
+    from taxonero import facts, store, worker as worker_mod
+    s, w = _local_worker(tmp_path)
+    for k in (1, 2, 3):
+        store.save_taxon(w.db, k, json.dumps({"scientific_name": f"Taxon {k}", "rank": "species", "v": 99}))
+        w.db.execute("INSERT INTO asset (asset_id, lat, lon) VALUES (?, 44.2, 3.2)", (f"a{k}",))
+        w.db.execute("INSERT INTO detection (asset_id, source, status, taxon_key, created_at) VALUES (?, 'auto', 'confirmed', ?, 0)", (f"a{k}", k))
+        w.db.execute("INSERT INTO image_quality VALUES (?, 0.5)", (f"a{k}",))
+        w.db.execute("INSERT INTO taxon_range VALUES (?, ?, ?)", (k, json.dumps({"v": 4}), 9e12)) if k else None
+    w.db.commit()
+    asked, answer = [], [True]
+    monkeypatch.setattr(facts, "facts", lambda tx, key, taxon, lat=None, lon=None, failed=None:
+                        (asked.append((key, taxon["scientific_name"], lat)), failed.append("x") if not answer[0] else None, {})[-1])
+    monkeypatch.setattr(worker_mod, "FACTS_PER_CYCLE", 4)
+    assert len(facts.targets(w.db)) == 6                    # three taxa, each at its photo and at its species page
+    assert w.prefetch() == 4 and len(asked) == 4            # bounded per cycle
+    assert w.prefetch() == 2 and len(asked) == 6 and w.prefetch() == 0 and len(asked) == 6   # the rest, then nothing more
+    w.db.execute("DELETE FROM http_cache WHERE url LIKE 'facts:done:%'")
+    w.db.commit()
+    answer[0] = False
+    assert w.prefetch() == 0 and len(asked) == 9            # services down: three tries, the rest waits
+
+
+def test_taxon_facts_route(tmp_path, monkeypatch):
+    """/api/facts: around the photo when a place is given, otherwise where most of the confirmed photos of the taxon
+    were taken; behind the password like the rest."""
+    import json
+    from taxonero import facts, store
+    s, w = _local_worker(tmp_path)
+    web = _web(s, w)
+    seen = []
+    monkeypatch.setattr(facts, "facts", lambda tx, key, taxon, lat=None, lon=None: seen.append((key, taxon["scientific_name"], lat, lon)) or {"months": None})
+    monkeypatch.setattr(facts, "country", lambda tx, lat, lon: {"code": "FR" if lat > 20 else "TD", "name": ""})
+    assert web.get("/api/facts/7").status_code == 404   # unknown taxon
+    store.save_taxon(w.db, 7, json.dumps({"scientific_name": "Parus major", "rank": "species", "v": 99}))
+    for i, (lat, lon) in enumerate([(44.2, 3.3), (44.4, 2.9), (10.0, 10.0), (None, None)]):
+        w.db.execute("INSERT INTO asset (asset_id, lat, lon) VALUES (?, ?, ?)", (f"a{i}", lat, lon))
+        w.db.execute("INSERT INTO detection (asset_id, source, status, taxon_key, created_at) VALUES (?, 'auto', 'confirmed', 7, 0)", (f"a{i}",))
+    w.db.commit()
+    at_photo = web.get("/api/facts/7?lat=48.5&lon=2.25").json()
+    assert at_photo["place"] == {"lat": 48.5, "lon": 2.25, "source": "photo"} and "regions" not in at_photo
+    page = web.get("/api/facts/7").json()
+    assert page["place"] == {"lat": 44.0, "lon": 3.0, "source": "photos"}   # the region with most photos (two out of three)
+    assert page["regions"] == [{"country": "FR", "lat": 44.0, "lon": 3.0, "n": 2}, {"country": "TD", "lat": 10.0, "lon": 10.0, "n": 1}]
+    assert seen == [(7, "Parus major", 48.5, 2.25), (7, "Parus major", 44.0, 3.0)]
+    assert web.get("/api/facts/7?lat=95&lon=2").status_code == 400
+    w.db.execute("UPDATE asset SET lat = NULL, lon = NULL")
+    w.db.commit()
+    nowhere = web.get("/api/facts/7").json()
+    assert nowhere["place"] is None and nowhere["regions"] == [] and seen[-1] == (7, "Parus major", None, None)
+    s.dashboard_no_auth, s.dashboard_password = False, "secret-word"
+    assert web.get("/api/facts/7").status_code == 401
+
+
 def test_added_source_of_every_folder_kind(tmp_path):
     """Every folder source can be added next to the main one (RawTherapee and RapidRAW did not take the source id)."""
     from taxonero.config import Settings
@@ -3335,3 +3502,180 @@ def test_exiftool_processes_closed_at_exit(tmp_path):
         except ProcessLookupError:
             continue
         raise AssertionError(f"ExifTool {pid} still running")
+
+
+def test_sex_model_tells_a_visible_difference_only():
+    """Per-species model (traits.py): two groups of embeddings that differ are told apart, on photos left out of the
+    learning; groups that do not differ give an accuracy near chance, and such a model is never used."""
+    import sqlite3
+    import numpy as np
+    from taxonero import traits
+    rng = np.random.default_rng(1)
+    y = np.array([0] * 30 + [1] * 30)
+    noise = rng.normal(size=(60, 32))
+    apart = noise + np.where(y[:, None] == 1, 1.0, -1.0) * np.r_[3.0, np.zeros(31)]
+    assert traits.accuracy(apart, y) >= 0.95 and traits.accuracy(noise, y) < 0.75
+    m = traits.fit(apart, y)
+    assert m.dtype == np.float32 and len(m) == 33
+    sexes = traits.LABELS["sex"]
+    assert traits.tell(m, sexes, apart[0])[0] == "female" and traits.tell(m, sexes, apart[-1])[0] == "male"
+    assert traits.tell(m, sexes, np.r_[0.0, np.ones(31)])[0] == ""          # on the limit: no answer
+    # Three values (life stages): one row each, the same way.
+    y3 = np.repeat([0, 1, 2], 20)
+    three = noise + 6.0 * np.eye(32)[y3]
+    m3 = traits.fit(three, y3, 3)
+    assert m3.shape == (3, 33) and traits.accuracy(three, y3, 3) >= 0.95 and traits.accuracy(noise, y3, 3) < 0.6
+    assert [traits.tell(m3, ("adult", "juvenile", "larva"), three[i])[0] for i in (0, 20, 40)] == ["adult", "juvenile", "larva"]
+    assert 0.95 < traits.confidence(traits.MIN_MARGIN) < traits.confidence(1.0) < 1
+    db = sqlite3.connect(":memory:")
+    traits.ensure_schema(db)
+    db.execute("INSERT INTO trait_model VALUES (1, 'sex', 60, 0.97, ?, 0, NULL), (2, 'sex', 60, 0.6, ?, 0, NULL), (3, 'sex', 4, NULL, NULL, 0, NULL), "
+               "(1, 'stage', 60, 0.95, ?, 0, '[\"adult\", \"juvenile\", \"larva\"]')", (m.tobytes(), m.tobytes(), m3.tobytes()))
+    model = lambda key, trait="sex": traits.model(db, key, trait)
+    assert model(1)[1] == sexes and model(2) is None and model(3) is None and model(4) is None
+    assert model(1, "stage")[0].shape == (3, 33) and model(1, "stage")[1] == ("adult", "juvenile", "larva") and model(2, "stage") is None
+    # Table of an earlier version, without the labels: the column is added.
+    old = sqlite3.connect(":memory:")
+    old.execute("CREATE TABLE trait_model (taxon_key INTEGER NOT NULL, trait TEXT NOT NULL, n INTEGER NOT NULL, accuracy REAL, model BLOB, "
+                "fetched REAL NOT NULL, PRIMARY KEY (taxon_key, trait))")
+    old.execute("INSERT INTO trait_model VALUES (1, 'sex', 60, 0.97, ?, 0)", (m.tobytes(),))
+    traits.ensure_schema(old)
+    assert traits.model(old, 1, "sex")[1] == sexes
+
+
+def test_cycle_learns_and_tells_the_sex(tmp_path, monkeypatch):
+    """Setting sex_detection: the cycle learns the model of each confirmed animal species from annotated iNaturalist
+    photos (asked once), then tells the sex of its confirmed detections on the frame of the animal; a species whose
+    sexes look alike gets nothing; what the user sets by hand is kept, and can be handed back to the model."""
+    import io
+    import json
+    import numpy as np
+    from PIL import Image
+    from taxonero import refphotos, store, traits
+    from taxonero.taxonomy import Taxonomy
+    s, w = _local_worker(tmp_path, sex_detection=True)
+    colours = {"male": (200, 40, 40), "female": (40, 40, 200), "unclear": (120, 40, 120), "alike": (40, 200, 40)}
+    for name, c in colours.items():
+        Image.new("RGB", (64, 48), c).save(s.photos_dir / f"{name}.jpg")
+    w.scan()
+    ids = {r["file_name"].split(".")[0]: r["asset_id"] for r in w.db.execute("SELECT asset_id, file_name FROM asset")}
+    # Taxon 1: sexes of different colours; taxon 2: alike; taxon 3: a plant, never asked.
+    for k, kingdom in ((1, "Animalia"), (2, "Animalia"), (3, "Plantae")):
+        store.save_taxon(w.db, k, json.dumps({"scientific_name": f"Taxon {k}", "rank": "species", "v": 99, "lineage": {"kingdom": kingdom}}))
+    det = {}
+    for name, key, label in (("male", 1, "animal"), ("female", 1, "animal"), ("unclear", 1, "animal"), ("alike", 2, "animal"), ("p0", 3, "plant")):
+        det[name] = w.db.execute("INSERT INTO detection (asset_id, x, y, w, h, box_label, source, status, taxon_key, taxon_rank, created_at) "
+                                 "VALUES (?, 0.1, 0.1, 0.8, 0.8, ?, 'auto', 'confirmed', ?, 'species', 0)", (ids[name], label, key)).lastrowid
+    w.db.commit()
+    rng = np.random.default_rng(0)
+
+    def jpeg(c):
+        out = io.BytesIO()
+        Image.new("RGB", (32, 32), tuple(int(v) for v in np.clip(np.array(c) + rng.normal(0, 12, 3), 0, 255))).save(out, "JPEG")
+        return out.getvalue()
+    asked = []
+    monkeypatch.setattr(refphotos, "inat_taxon", lambda tx, names, synonyms=None: {"id": int(names[0].split()[-1])})
+
+    def fetch(self, url, retries=6):
+        taxon, value = int(url.split("taxon_id=")[1].split("&")[0]), int(url.split("term_value_id=")[1].split("&")[0])
+        asked.append(taxon)
+        return {"results": [{"photos": [{"url": f"https://x/{taxon}/{value}/{i}/square.jpg"}]} for i in range(40)]}
+    monkeypatch.setattr(Taxonomy, "_fetch", fetch)
+    monkeypatch.setattr(Taxonomy, "fetch_bytes", lambda self, url, params=None, retries=6:
+                        jpeg(colours["alike"] if "/2/" in url else colours["male" if "/11/" in url else "female"]))
+
+    class Colours:   # embedding: the mean colour of the image
+        def embed(self, images):
+            return np.stack([np.asarray(im.convert("RGB"), dtype=float).reshape(-1, 3).mean(0) / 255 + 0.01 for im in images])
+
+        def classify(self, images):   # frame moved by hand: no candidate, the confirmed species stays
+            return [[] for _ in images]
+    w._analyzer.classifier = Colours()
+    assert w.tell_trait("sex") == {"learnt": 2, "usable": 1, "told": 3} and sorted(set(asked)) == [1, 2]
+    rows = {r["taxon_key"]: r for r in w.db.execute("SELECT * FROM trait_model")}
+    assert rows[1]["n"] == 2 * traits.PER_VALUE and rows[1]["accuracy"] >= 0.95 and rows[2]["accuracy"] < traits.MIN_ACCURACY and 3 not in rows
+    sex = lambda name: tuple(w.db.execute("SELECT sex, sex_by FROM detection WHERE id = ?", (det[name],)).fetchone())
+    assert sex("male") == ("male", "auto") and sex("female") == ("female", "auto") and sex("unclear") == ("", "auto")
+    assert sex("alike") == (None, None) and sex("p0") == (None, None)
+    # Too unsure to propose: what it leans to is kept with a low score, and shown as such.
+    lean = _web(s, w).get(f"/api/assets/{ids['unclear']}").json()["detections"][0]
+    assert lean["sex"] == "" and lean["sex_auto"] in ("male", "female") and 0.5 <= lean["sex_confidence"] < traits.confidence(traits.MIN_MARGIN)
+    asked.clear()
+    assert w.tell_trait("sex") is None and not asked                           # nothing left: neither asked nor loaded again
+    # By hand: kept by the cycle, shown, and handed back to the model on request.
+    web = _web(s, w)
+    assert web.post(f"/api/detections/{det['male']}/trait/sex", json={"value": "robot"}).status_code == 400
+    assert web.post("/api/detections/999999/trait/sex", json={"value": "male"}).status_code == 404
+    r = web.post(f"/api/detections/{det['alike']}/trait/sex", json={"value": "female"}).json()
+    assert (r["sex"], r["sex_by"]) == ("female", "user")
+    assert web.post(f"/api/detections/{det['male']}/trait/sex", json={"value": "female"}).json()["sex"] == "female"
+    assert w.tell_trait("sex") is None and sex("male") == ("female", "user")
+    assert web.post(f"/api/detections/{det['male']}/trait/sex", json={"value": None}).json()["sex"] == "male"   # the model's answer is back
+    assert w.tell_trait("sex") is None and sex("male") == ("male", "auto")
+    assert web.post(f"/api/detections/{det['alike']}/trait/sex", json={"value": None}).json()["sex"] is None      # it never had one
+    assert web.post(f"/api/detections/{det['unclear']}/trait/sex", json={"value": "male"}).json()["sex_by"] == "user"
+    r = web.post(f"/api/detections/{det['unclear']}/trait/sex", json={"value": None}).json()
+    assert (r["sex"], r["sex_by"]) == ("", "auto")                    # back to "unsure", not to the leaning
+    # Species corrected afterwards: the sex told for the other one is no longer shown.
+    w.db.execute("UPDATE detection SET taxon_key = 2 WHERE id = ?", (det["female"],))
+    w.db.commit()
+    shown = {d["id"]: d for d in web.get(f"/api/assets/{ids['female']}").json()["detections"]}
+    assert shown[det["female"]]["sex"] is None
+    assert web.post(f"/api/detections/{det['male']}/trait/age", json={"value": "adult"}).status_code == 404
+    # Life stage, the same way: here the two iNaturalist values with photos that differ are adult (blue) and juvenile
+    # (red); larva and nymph have too few photos and stay out of the model.
+    stage_colour = {2: "female", 8: "male"}
+
+    def fetch_stage(self, url, retries=6):
+        if "term_value_id=" not in url:   # anything else the application asks meanwhile (frame moved: fossils…)
+            return {"results": [], "count": 0}
+        value = int(url.split("term_value_id=")[1].split("&")[0])
+        taxon = int(url.split("taxon_id=")[1].split("&")[0])
+        return {"results": [{"photos": [{"url": f"https://x/{taxon}/{value}/{i}/square.jpg"}]} for i in range(40 if value in stage_colour else 3)]}
+    monkeypatch.setattr(Taxonomy, "_fetch", fetch_stage)
+    monkeypatch.setattr(Taxonomy, "fetch_bytes", lambda self, url, params=None, retries=6:
+                        jpeg(colours["alike"] if url.split("/")[3] == "2" else colours[stage_colour[int(url.split("/")[4])]]))
+    assert w.tell_trait("stage") == {"learnt": 2, "usable": 1, "told": 2}
+    assert json.loads(w.db.execute("SELECT labels FROM trait_model WHERE taxon_key = 1 AND trait = 'stage'").fetchone()[0]) == ["adult", "juvenile"]
+    stage = lambda name: tuple(w.db.execute("SELECT stage, stage_by FROM detection WHERE id = ?", (det[name],)).fetchone())
+    assert stage("male") == ("juvenile", "auto") and stage("unclear") == ("", "auto") and stage("alike") == (None, None)
+    shown = web.get(f"/api/assets/{ids['male']}").json()["detections"][0]
+    assert shown["stage"] == "juvenile" and 0.95 < shown["stage_confidence"] < 1 and shown["sex"] == "male"
+    r = web.post(f"/api/detections/{det['male']}/trait/stage", json={"value": "nymph"}).json()
+    assert (r["stage"], r["stage_by"], r["stage_auto"]) == ("nymph", "user", "juvenile") and r["stage_confidence"] > 0.95   # what the model said stays known
+    assert web.post(f"/api/detections/{det['male']}/trait/stage", json={"value": "male"}).status_code == 400
+    assert web.post(f"/api/detections/{det['male']}/trait/stage", json={"value": None}).json()["stage"] == "juvenile"
+    # Frame moved by hand: what the model said of the old frame is dropped and told again; a value set by hand stays.
+    w.db.execute("UPDATE detection SET confirmed_by = 'user' WHERE id IN (?, ?)", (det["male"], det["unclear"]))
+    w.db.commit()
+    web.post(f"/api/detections/{det['unclear']}/trait/sex", json={"value": "female"})
+    for name in ("male", "unclear"):
+        r = web.put(f"/api/detections/{det[name]}/box", json={"x": 0.2, "y": 0.2, "w": 0.5, "h": 0.5})
+        assert r.status_code == 200, r.text
+    moved = lambda name: tuple(w.db.execute("SELECT sex, sex_by, sex_auto, stage, stage_by FROM detection WHERE id = ?", (det[name],)).fetchone())
+    assert moved("male") == (None, None, None, None, None) and moved("unclear")[:2] == ("female", "user") and moved("unclear")[2:] == (None, None, None)
+    assert w.tell_trait("sex")["told"] == 1 and sex("male") == ("male", "auto") and sex("unclear") == ("female", "user")
+    # A photo that cannot be downloaded (connection cut) does not lose the species: the others are enough.
+    w.db.execute("DELETE FROM trait_model WHERE trait = 'stage'")
+    w.db.commit()
+    real_bytes, cut = Taxonomy.fetch_bytes, []
+
+    def flaky(self, url, params=None, retries=6):
+        if url.split("/")[5] in ("3", "7"):
+            cut.append(url)
+            raise httpx.ReadTimeout("cut")
+        return real_bytes(self, url, params, retries)
+    import httpx
+    monkeypatch.setattr(Taxonomy, "fetch_bytes", flaky)
+    assert w.tell_trait("stage")["learnt"] == 2 and len(cut) == 2 * 2 * 2
+    assert w.db.execute("SELECT n FROM trait_model WHERE taxon_key = 1 AND trait = 'stage'").fetchone()[0] == 2 * traits.PER_VALUE
+    # iNaturalist not answering at all: given up after a few photos in a row, nothing stored, tried again next cycle.
+    w.db.execute("DELETE FROM trait_model WHERE trait = 'stage'")
+    w.db.commit()
+    cut.clear()
+    monkeypatch.setattr(Taxonomy, "fetch_bytes", lambda self, url, params=None, retries=6: (cut.append(url), (_ for _ in ()).throw(httpx.ConnectError("down")))[1])
+    assert w.tell_trait("stage")["learnt"] == 0 and len(cut) == traits.MAX_FAILED_IN_A_ROW and not w.db.execute("SELECT 1 FROM trait_model WHERE trait = 'stage'").fetchone()
+    monkeypatch.setattr(Taxonomy, "fetch_bytes", real_bytes)
+    # Settings off (the default): the cycle does not go there.
+    from taxonero.config import Settings
+    assert Settings(data_dir=tmp_path).sex_detection is False and Settings(data_dir=tmp_path).stage_detection is False

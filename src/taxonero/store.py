@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS detection (
     smoothed     INTEGER,                       -- 1: proposal replaced by the dominant species of the series
     presmooth    TEXT,                          -- JSON: proposal from before smoothing, restored if the rule no longer justifies it
     frame_support REAL,                         -- single subject: probability of the kept taxon on the crop alone
+    -- Sex of the individual (traits.py), for the species in which it shows, or set by hand.
+    sex          TEXT,                          -- male | female | '' looked at, the photo does not tell | NULL not looked at
+    sex_score    REAL,                          -- score of the model for this value (traits.py; below 0.5: no answer)
+    sex_by       TEXT,                          -- auto | user
+    sex_auto     TEXT,                          -- what the model leans to, kept under a value set by hand; an answer only from a score of 0.5
+    sex_key      INTEGER,                       -- taxon the model told it for (another one after a correction: told again)
+    -- Life stage of the individual, the same way.
+    stage        TEXT,                          -- adult | juvenile | larva | nymph | '' the photo does not tell | NULL not looked at
+    stage_score  REAL,
+    stage_by     TEXT,
+    stage_auto   TEXT,
+    stage_key    INTEGER,
     created_at   REAL NOT NULL,
     reviewed_at  REAL
 );
@@ -84,6 +96,19 @@ CREATE TABLE IF NOT EXISTS taxon (
 );
 
 -- Record of every object written to Immich (for rebuild / uninstall).
+-- Model telling a trait of the individuals of a species (traits.py): learnt once, a few KB. accuracy NULL: not enough
+-- annotated photos to learn it; a low one: the trait does not show in this species.
+CREATE TABLE IF NOT EXISTS trait_model (
+    taxon_key    INTEGER NOT NULL,
+    trait        TEXT NOT NULL,                 -- sex | stage
+    n            INTEGER NOT NULL,              -- example photos
+    accuracy     REAL,
+    model        BLOB,
+    fetched      REAL NOT NULL,
+    labels       TEXT,                          -- JSON: the values the model tells apart, in the order of its rows
+    PRIMARY KEY (taxon_key, trait)
+);
+
 CREATE TABLE IF NOT EXISTS written (
     kind         TEXT NOT NULL,                 -- 'tag' | 'tag_asset' | 'description'; '…@<id>' for an added source
     immich_id    TEXT NOT NULL,                 -- tag id, or asset id for a description

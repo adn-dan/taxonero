@@ -5,6 +5,7 @@ data
 models
 dev/photos
 dev/photos_domestic
+dev/photos_annotated
 **/__pycache__
 .pytest_cache
 *.egg-info

@@ -76,10 +76,21 @@ function hbars(rows, unit = '') {
 }
 
 let statsMap, statsRO;
+/* Groups menu (the one of the Photos and Species pages): every chart counts the chosen kinds and groups only, except
+   the review summary, which is about all the detections. Kept while the application stays open. */
+const STF = { kinds: '', group: '', gmenu: false, data: null };
 async function loadStats() {
-  const [{ observations: obs, taxa }, s, rv] = await Promise.all([api('/api/observations'), api('/api/status'), api('/api/review-stats')]);
+  const [{ observations, taxa }, s, rv] = await Promise.all([api('/api/observations'), api('/api/status'), api('/api/review-stats')]);
+  STF.data = { observations, taxa, s, rv };
+  renderStats();
+}
+function renderStats() {
+  const { observations, taxa, s, rv } = STF.data;
   const root = $('#stats');
-  if (!obs.length) { root.innerHTML = `<div class="empty">${t('stats.empty')}</div>`; return; }
+  if (!observations.length) { root.innerHTML = `<div class="empty">${t('stats.empty')}</div>`; return; }
+  const tree = taxaTree([...new Set(observations.map(o => o.taxon_key))].map(k => taxa[k]));
+  const obs = observations.filter(o => taxonChosen(STF, taxa[o.taxon_key]));
+  const menu = taxaMenuHTML(STF, tree);
   const species = new Set(obs.map(o => o.taxon_key));
   const photos = new Set(obs.map(o => o.asset_id));
   const countries = new Map(), cities = new Set(), days = new Set();
@@ -103,7 +114,7 @@ async function loadStats() {
   const agree = reviewed ? Math.round(rv.kept / reviewed * 100) : null;
   const totalDet = rv.auto + rv.user + rv.pending + rv.rejected;
   const seg = (v, c, name, filter) => v ? `<span style="flex:${v};background:${c}" data-tip="${esc(`${name} : ${v}`)}" data-href="photos?filter=${filter}"></span>` : '';
-  root.innerHTML = `
+  root.innerHTML = `${menu ? `<div class="frow gtools statsf">${menu}</div>` : ''}
     <div class="kpis wide">
       <div class="card kpi hero" data-href="species" role="link" tabindex="0"><b>${fmtN(species.size)}</b><span>${t('stats.kpi_species', { n: species.size })}</span></div>
       <div class="card kpi" data-href="photos?filter=identified" role="link" tabindex="0"><b>${fmtN(photos.size)}</b><span>${t('stats.kpi_photos', { n: photos.size })}</span></div>
@@ -142,6 +153,7 @@ async function loadStats() {
   let rt; statsRO = new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(drawCharts, 120); });
   charts.forEach(([sel]) => $(sel) && statsRO.observe($(sel)));
   tipOn(root);
+  bindTaxaMenu(root, STF, tree, renderStats);
   // Click (or Enter) on an element of a chart: species or photos page, filtered accordingly.
   root.onclick = e => { const el = e.target.closest('[data-href]'); if (el) { $('#tip').style.display = 'none'; location.hash = el.dataset.href; } };
   root.onkeydown = e => { if (e.key === 'Enter') e.target.closest?.('[data-href]')?.click(); };

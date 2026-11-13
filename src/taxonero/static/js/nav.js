@@ -162,6 +162,6 @@ function applyQuery(view, q) {
   }
   if (view !== 'species') return;
   const iucn = q.get('iucn');
-  Object.assign(SP, { q: q.get('q') || '', group: q.get('group'), iucn: IUCN_FILTERS.some(f => f.id === iucn) ? iucn : null,
+  Object.assign(SP, { q: q.get('q') || '', kinds: q.get('kinds') || '', group: q.get('group') || '', iucn: IUCN_FILTERS.some(f => f.id === iucn) ? iucn : null,
     country: q.get('country'), camera: q.get('camera'), month: +q.get('month') || null, year: +q.get('year') || null });
 }

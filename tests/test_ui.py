@@ -1015,3 +1015,49 @@ def test_logo_and_tab_icon_load(page):
     for href in page.evaluate("[...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map(l => l.href)"):
         assert page.request.get(href).ok, href
     assert not page.errors, page.errors
+
+
+def test_viewer_sex_and_stage_shown_and_set_by_hand(page, dev_app):
+    """Viewer, confirmed animal: the sex and the life stage told by the models of its species are shown as
+    suggestions, one click sets them by hand, and a second click on the same value hands it back to the model."""
+    import sqlite3
+    db = sqlite3.connect(dev_app[0].db_path)
+    row = db.execute("SELECT d.id, d.asset_id FROM detection d JOIN asset a USING (asset_id) JOIN taxon t ON t.gbif_key = d.taxon_key "
+                     "WHERE d.status = 'confirmed' AND a.missing_at IS NULL AND json_extract(t.data, '$.lineage.kingdom') = 'Animalia' "
+                     "AND (SELECT count(*) FROM detection x WHERE x.asset_id = d.asset_id AND x.status != 'deleted') = 1 LIMIT 1").fetchone()
+    if not row:
+        pytest.skip("a confirmed animal alone on its photo is needed")
+    db.execute("UPDATE detection SET sex = 'male', sex_auto = 'male', sex_score = 1.0, sex_by = 'auto', sex_key = taxon_key, "
+               "stage = 'juvenile', stage_auto = 'juvenile', stage_score = 0.5, stage_by = 'auto', stage_key = taxon_key WHERE id = ?", (row[0],))
+    db.commit()
+    page.goto(page.url.split("#")[0] + f"#photos?filter=all&photo={row[1]}")
+    page.wait_for_selector("#viewer.on .sexline")
+    state = lambda: page.evaluate("[...document.querySelectorAll('#vinfo [data-trait=sex]')].filter(b => b.classList.contains('on')).map(b => b.dataset.value).join()")
+    assert state() == "male" and page.locator(".sexline .sub").count() == 2          # suggestions of the models
+    assert "99" in page.locator(".sexline .sub").first.inner_text() and "♂" in page.inner_text("#labels .vlbl.sel")   # how sure, and on the frame
+    page.click("#vinfo [data-trait=sex][data-value=female]")
+    page.wait_for_function("document.querySelector('#vinfo [data-trait=sex][data-value=female]')?.classList.contains('on')")
+    assert state() == "female" and page.locator(".sexline .sub:not(.said)").count() == 1   # set by hand
+    said = page.inner_text(".sexline .sub.said")                                     # what the model said stays shown, with how sure
+    assert "♂" in said and "99" in said
+    assert "♀" in page.inner_text("#labels .vlbl.sel")
+    assert db.execute("SELECT sex, sex_by FROM detection WHERE id = ?", (row[0],)).fetchone() == ("female", "user")
+    page.click("#vinfo [data-trait=sex][data-value=female]")
+    page.wait_for_function("document.querySelector('#vinfo [data-trait=sex][data-value=male]')?.classList.contains('on')")
+    assert page.locator(".sexline .sub:not(.said)").count() == 2 and page.locator(".sexline .said").count() == 0   # back to the model
+    # Life stage: same line below, its own confidence, and the word on the frame.
+    stage = lambda: page.evaluate("[...document.querySelectorAll('#vinfo [data-trait=stage].on')].map(b => b.dataset.value + ':' + b.textContent.trim()).join()")
+    value, word = stage().split(":")
+    assert value == "juvenile" and word in page.inner_text("#labels .vlbl.sel") and "96" in page.inner_text(".sexline:has([data-trait=stage]) .sub")
+    page.click("#vinfo [data-trait=stage][data-value=adult]")
+    page.wait_for_function("document.querySelector('#vinfo [data-trait=stage][data-value=adult]')?.classList.contains('on')")
+    assert db.execute("SELECT stage, stage_by FROM detection WHERE id = ?", (row[0],)).fetchone() == ("adult", "user")
+    assert stage().split(":")[1] in page.inner_text("#labels .vlbl.sel")
+    # Model too unsure to propose: no value set, its leaning shown with how sure it is, nothing on the frame.
+    db.execute("UPDATE detection SET sex = '', sex_auto = 'female', sex_score = 0.2, sex_by = 'auto' WHERE id = ?", (row[0],))
+    db.commit()
+    page.reload()
+    page.wait_for_selector("#viewer.on .sexline .said")
+    said = page.locator(".sexline .said").first.inner_text()
+    assert state() == "" and "♀" in said and "79" in said and "♀" not in page.inner_text("#labels .vlbl.sel")
+    assert not page.errors, page.errors

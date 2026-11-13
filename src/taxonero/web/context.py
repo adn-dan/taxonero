@@ -14,7 +14,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from .. import store
+from .. import store, traits
 from ..autoconfirm import auto_blockers, auto_threshold, blocked_groups, group_of
 from ..config import Settings
 from ..curation import candidate_filter
@@ -140,6 +140,15 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
         d["candidates"] = json.loads(d["candidates"] or "[]")
         d["candidates_out"] = json.loads(d.get("candidates_out") or "[]")
         d["taxon"] = taxon(d["taxon_key"])
+        # Sex or stage told by the model of another species (taxon corrected since): not shown, told again at the next cycle.
+        for trait in traits.TRAITS:
+            if d.get(f"{trait}_by") != "user" and d.get(f"{trait}_key") != d["taxon_key"]:
+                d[trait] = d[f"{trait}_score"] = None
+            # How sure the model is of its own answer, also under a value set by hand (shown next to it).
+            if d.get(f"{trait}_auto") and d.get(f"{trait}_key") == d["taxon_key"] and d.get(f"{trait}_score") is not None:
+                d[f"{trait}_confidence"] = traits.confidence(d[f"{trait}_score"])
+            else:
+                d[f"{trait}_auto"] = None
         # Proposal corrected by the series (smoothing, series.py): what the model proposed at first.
         if d.get("smoothed") and d["status"] == "pending" and d.get("model_key") and d["model_key"] != d["taxon_key"]:
             d["model_taxon"] = taxon(d["model_key"])

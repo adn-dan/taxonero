@@ -223,14 +223,28 @@ class Taxonomy:
         return f"{GBIF}/species/match", params, 30 * 86400
 
     @staticmethod
+    def square(lat: float, lon: float, radius_deg: float) -> dict:
+        """GBIF search parameters of the ±radius_deg square around a point. GBIF refuses a latitude beyond the poles
+        or a longitude beyond ±180° (400): the square is cut at the poles, and one that crosses the antimeridian
+        (Fiji, Chatham Islands, Aleutians) is asked as its two halves (repeated parameter: either one)."""
+        south, north = max(lat - radius_deg, -90.0), min(lat + radius_deg, 90.0)
+        west, east = lon - radius_deg, lon + radius_deg
+        if west < -180:
+            lons = [f"{west + 360:.2f},180.00", f"-180.00,{east:.2f}"]
+        elif east > 180:
+            lons = [f"{west:.2f},180.00", f"-180.00,{east - 360:.2f}"]
+        else:
+            lons = f"{west:.2f},{east:.2f}"
+        return {"decimalLatitude": f"{south:.2f},{north:.2f}", "decimalLongitude": lons}
+
+    @staticmethod
     def _near_req(gbif_key: int, lat: float, lon: float, radius_deg: float) -> tuple:
         # Centre aligned on a 1° grid so that photos of the same area share the cache.
         lat, lon = float(round(lat)), float(round(lon))
         # Field observations only: excludes zoos, herbaria and museum collections.
         q = {"taxonKey": gbif_key, "limit": 0, "occurrenceStatus": "PRESENT",
              "basisOfRecord": ["HUMAN_OBSERVATION", "MACHINE_OBSERVATION", "OBSERVATION"],
-             "decimalLatitude": f"{lat - radius_deg:.2f},{lat + radius_deg:.2f}",
-             "decimalLongitude": f"{lon - radius_deg:.2f},{lon + radius_deg:.2f}"}
+             **Taxonomy.square(lat, lon, radius_deg)}
         return f"{GBIF}/occurrence/search", q, 180 * 86400
 
     @staticmethod
@@ -239,8 +253,7 @@ class Taxonomy:
         lat, lon = float(round(lat)), float(round(lon))
         q = {"limit": 0, "occurrenceStatus": "PRESENT",
              "basisOfRecord": ["HUMAN_OBSERVATION", "MACHINE_OBSERVATION", "OBSERVATION"],
-             "decimalLatitude": f"{lat - radius_deg:.2f},{lat + radius_deg:.2f}",
-             "decimalLongitude": f"{lon - radius_deg:.2f},{lon + radius_deg:.2f}",
+             **Taxonomy.square(lat, lon, radius_deg),
              "facet": [f.lower().replace("_key", "Key") for f in AREA_FACETS.values()],
              "facetLimit": AREA_LIMIT, "facetMincount": 1}
         return str(httpx.URL(f"{GBIF}/occurrence/search", params=q))

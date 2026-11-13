@@ -389,6 +389,12 @@ class Classifier:
             c.sort(key=lambda x: -x.score)
         return out
 
+    def embed(self, images: list[Image.Image]) -> np.ndarray:
+        """BioCLIP image embeddings (normalised), one row per image: what the per-species models read (traits.py)."""
+        rows = [self.model.create_image_features(images[i:i + self.batch_size]).float().cpu().numpy()
+                for i in range(0, len(images), self.batch_size)]
+        return np.concatenate(rows) if rows else np.zeros((0, 0), dtype=np.float32)
+
 
 # Weight of a candidate whose kingdom does not match the detector hint (soft hint:
 # OWLv2 sometimes confuses alga and lichen, gall and spider).
