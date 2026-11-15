@@ -216,8 +216,9 @@ function drawInfo() {
     el.onmouseleave = () => setMiniRange(shownKey());
   });
   drawMini(shownKey(), a);
-  // Season and presence around the photo (without a place: around your photos of this taxon), month of the photo marked.
-  showFacts($('#vi-facts'), d.taxon_key, a.lat != null && a.lon != null ? { lat: a.lat, lon: a.lon } : null,
+  // Season and presence around the photo, month of the photo marked. Without GPS, none of them: the region of your other
+  // photos of the taxon would read as the place of this one.
+  showFacts($('#vi-facts'), d.taxon_key, a.lat != null && a.lon != null ? { lat: a.lat, lon: a.lon } : false,
     { photo: true, month: a.taken_at && +a.taken_at.slice(5, 7) >= 1 ? +a.taken_at.slice(5, 7) - 1 : undefined });
   loadCandNames(d);
   if (d.status === 'confirmed' && d.taxon_key) loadSeries(d);

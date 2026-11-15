@@ -62,16 +62,20 @@ def register(app, c) -> None:
         return a
 
     @app.get("/api/facts/{key}", dependencies=[Depends(auth)])
-    def taxon_facts(key: int, lat: float | None = None, lon: float | None = None):
+    def taxon_facts(key: int, lat: float | None = None, lon: float | None = None, place: str = ""):
         """Facts about a taxon (facts.py): season and presence around a place, status in its country, figures and
         recording. The place: that of the photo (lat, lon). Without it (species page): the region with most of your
         confirmed photos of this taxon, and the list of all its regions (one per country), which the page then asks
-        for one by one with lat and lon; no located photo: only what does not depend on a place."""
+        for one by one with lat and lon; no located photo: only what does not depend on a place.
+        place=none (viewer, photo without GPS): no place at all; the region of your other photos would read as where
+        this one was taken."""
         t = taxon(key)
         if not t:
             raise HTTPException(404)
         source, found = "photo", None
-        if lat is None or lon is None:
+        if place == "none":
+            lat = lon = None
+        elif lat is None or lon is None:
             source, found = "photos", facts.regions(tx, db, key)
             lat, lon = (found[0]["lat"], found[0]["lon"]) if found else (None, None)
         elif not (-90 <= lat <= 90 and -180 <= lon <= 180):

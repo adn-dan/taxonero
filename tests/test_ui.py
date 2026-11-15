@@ -697,6 +697,30 @@ def test_compare_shows_location_and_sets_it(page, monkeypatch):
     assert page.is_visible("#compare") and page.is_visible("#cmp-mine img")
 
 
+def test_photo_without_gps_has_no_local_facts(page, monkeypatch):
+    """Viewer, photo without GPS: no season, presence or status of a region (that of the other photos of the species
+    read as where this one was taken), a note instead."""
+    from taxonero import facts
+    asked = []
+    monkeypatch.setattr(facts, "facts", lambda tx, key, taxon, lat=None, lon=None: asked.append((lat, lon)) or (
+        {"months": [1] * 12, "near": 19, "region": 18743, "presence": "green", "status": "introduced", "country": "FR"}
+        if lat is not None else {"traits": [{"id": "length", "value": 1.3, "unit": "meter"}]}))   # no GBIF in a test
+    # Other photos of the species taken in France: what the viewer used to show for this one.
+    monkeypatch.setattr(facts, "regions", lambda tx, db, key, limit=60: [{"country": "FR", "lat": 44.0, "lon": 3.0, "n": 2}])
+    page.goto(page.url.split("#")[0] + "#photos?filter=user")          # validated: a species, so its facts
+    page.wait_for_selector("#pfilters [data-f=user].on")
+    page.wait_for_function("P.done === P.seq")
+    i = page.evaluate("P.assets.findIndex(a => a.lat == null && a.kind !== 'VIDEO')")
+    if i < 0:
+        pytest.skip("no confirmed photo without GPS in the dev database")
+    page.evaluate(f"openViewer(P.assets, {i})")
+    page.wait_for_selector("#vi-facts .ftraits")
+    assert page.locator("#vi-facts .fnote").count() == 1
+    assert page.locator("#vi-facts .fline, #vi-facts .fseason").count() == 0
+    assert asked and all(x == (None, None) for x in asked)
+    assert not page.errors, page.errors
+
+
 def test_manual_location(page):
     """Photo without GPS: place entered on the map in the viewer, then the same place in bulk on a selection."""
     page.goto(page.url.split("#")[0] + "#photos")

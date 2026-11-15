@@ -1933,6 +1933,9 @@ def test_taxon_facts_route(tmp_path, monkeypatch):
     assert page["regions"] == [{"country": "FR", "lat": 44.0, "lon": 3.0, "n": 2}, {"country": "TD", "lat": 10.0, "lon": 10.0, "n": 1}]
     assert seen == [(7, "Parus major", 48.5, 2.25), (7, "Parus major", 44.0, 3.0)]
     assert web.get("/api/facts/7?lat=95&lon=2").status_code == 400
+    # Viewer, photo without GPS: no place at all, not the region of the other photos ("lives here" read as this photo).
+    no_gps = web.get("/api/facts/7?place=none").json()
+    assert no_gps["place"] is None and "regions" not in no_gps and seen[-1] == (7, "Parus major", None, None)
     w.db.execute("UPDATE asset SET lat = NULL, lon = NULL")
     w.db.commit()
     nowhere = web.get("/api/facts/7").json()

@@ -3,13 +3,13 @@
    recording. Shown on the species page (around your photos of the species) and in the viewer (around the photo).
    Loaded on its own, after the page: the first time, the server asks GBIF and Wikidata, then keeps the answers. */
 const FACTS = new Map();   // taxon and place -> { promise, value once received }
-function factsEntry(key, place) {
+function factsEntry(key, place) {   // place: {lat, lon}; null: around your photos (species page); false: none
   const at = place && place.lat != null && place.lon != null ? place : null;
-  const k = `${key}${at ? `:${at.lat.toFixed(1)}:${at.lon.toFixed(1)}` : ''}`;
+  const k = `${key}${at ? `:${at.lat.toFixed(1)}:${at.lon.toFixed(1)}` : place === false ? ':none' : ''}`;
   if (!FACTS.has(k)) {
     if (FACTS.size >= 300) FACTS.delete(FACTS.keys().next().value);
     const e = { value: null };
-    e.promise = api(`/api/facts/${key}${at ? `?lat=${at.lat}&lon=${at.lon}` : ''}`).then(v => (e.value = v), () => { FACTS.delete(k); return null; });
+    e.promise = api(`/api/facts/${key}${at ? `?lat=${at.lat}&lon=${at.lon}` : place === false ? '?place=none' : ''}`).then(v => (e.value = v), () => { FACTS.delete(k); return null; });
     FACTS.set(k, e);
   }
   return FACTS.get(k);
