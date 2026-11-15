@@ -541,6 +541,10 @@ DOMESTIC_NAMES = {"Felis catus", "Canis familiaris", "Canis lupus familiaris", "
 # feral pigeon, domestic duck): never auto-confirmed, always reviewed.
 AMBIGUOUS_WITH_DOMESTIC = {"Canis lupus", "Felis silvestris", "Sus scrofa", "Columba livia", "Anas platyrhynchos",
                            "Gallus gallus", "Equus ferus", "Bos primigenius", "Ovis gmelini", "Capra aegagrus"}
+# Those whose domestic form is the same species under the same name (domestic duck: Anas platyrhynchos domesticus,
+# town pigeon: Columba livia): with domestic animals kept, the name is right either way. Not the others, whose name
+# would be wrong on the domestic animal (a dog tagged grey wolf, a pig wild boar).
+SAME_NAME_AS_DOMESTIC = {"Anas platyrhynchos", "Columba livia"}
 
 
 def is_domestic(a: "Analysis", hints: list[Box]) -> bool:

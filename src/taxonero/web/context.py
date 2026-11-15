@@ -161,7 +161,8 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
                                 [] if d["source"] == "manual" else
                                 auto_blockers(d["taxon_rank"], d["plausibility"], d["score"], name, runner_up,
                                               d["box_label"], threshold, s.auto_confirm_max_runner_up, group,
-                                              blocked_now() if threshold is not None else set(), d.get("frame_support"))
+                                              blocked_now() if threshold is not None else set(), d.get("frame_support"),
+                                              s.domestic_animals == "keep")
                                 or [{"code": "reset_by_hand" if d["reviewed_at"] else "before_rule"}])
         return d
 

@@ -236,6 +236,10 @@ def test_no_auto_confirm_for_species_confused_with_domestic():
     b = Box(.1, .1, .3, .3, .9, "animal", None, "md")
     a = _an(b, 1, .97); a.decision.name = "Canis lupus"
     assert not should_auto_confirm(a, .85, .05)
+    assert not should_auto_confirm(a, .85, .05, domestic_kept=True)    # a dog would be tagged grey wolf
+    duck = _an(b, 1, .97); duck.decision.name = "Anas platyrhynchos"
+    assert not should_auto_confirm(duck, .85, .05)                      # domestic animals left out: reviewed
+    assert should_auto_confirm(duck, .85, .05, domestic_kept=True)      # kept: domestic duck is a mallard too
 
 
 def test_settings_overrides_are_validated(monkeypatch):

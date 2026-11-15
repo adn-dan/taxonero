@@ -603,7 +603,9 @@ and run `pytest` again. If everything passes, add the version to `TESTED_VERSION
 - Domestic animals: a purely domestic species (*Felis catus*, *Equus caballus*…) is dropped outright; for
   ambiguous families (dog/wolf…), OWLv2 must see "a dog" rather than "a wolf" on the subject. This is
   imperfect (on the dev set, about half of the dogs get no hint): those stay to review, and a species that
-  can be confused (*Canis lupus*, *Felis silvestris*, *Sus scrofa*…) is never confirmed automatically.
+  can be confused (*Canis lupus*, *Felis silvestris*, *Sus scrofa*…) is never confirmed automatically. With
+  domestic animals detected (Settings), the mallard and the rock dove can be: the domestic duck and the town
+  pigeon are the same species under the same name.
 - OpenStreetMap base map loaded from the Internet (no local tiles); the rest of the interface is served
   locally.
 - Full-resolution original: only for formats Pillow can read (JPEG, PNG, WebP, TIFF); RAW and HEIC are

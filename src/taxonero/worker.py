@@ -1029,7 +1029,8 @@ class Worker:
                 if t:
                     store.save_taxon(self.db, t.gbif_key, to_json(t))
                     self.db.commit()
-            auto = should_auto_confirm(a, threshold, self.s.auto_confirm_max_runner_up, blocked)
+            auto = should_auto_confirm(a, threshold, self.s.auto_confirm_max_runner_up, blocked,
+                                       self.s.domestic_animals == "keep")
             audit = auto and audit_pick(asset_id, a.box, self.s.auto_confirm_audit)
             auto = auto and not audit
             cands = [cand_json(c) for c in d.candidates[:8] if c.name not in EXCLUDED]

@@ -624,7 +624,8 @@ Avant de mettre à jour Immich en prod : lancer l'Immich de dev à la nouvelle v
   d'office ; pour les familles ambiguës (chien/loup…), OWLv2 doit voir « a dog » plutôt que « a wolf »
   sur le sujet. C'est imparfait (sur le jeu de dev, environ la moitié des chiens sans indice) : ceux-là
   restent à relire, et une espèce confondable (*Canis lupus*, *Felis silvestris*, *Sus scrofa*…) n'est
-  jamais auto-validée.
+  jamais auto-validée. Avec les animaux domestiques détectés (Paramètres), le canard colvert et le pigeon
+  biset peuvent l'être : le canard domestique et le pigeon des villes sont la même espèce, sous le même nom.
 - Fond de carte OpenStreetMap chargé depuis Internet (pas de tuiles locales) ; tout le reste de l'interface
   est servi en local.
 - Original en pleine résolution : seulement pour les formats lisibles par Pillow (JPEG, PNG, WebP, TIFF) ;

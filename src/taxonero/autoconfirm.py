@@ -7,7 +7,7 @@ import math
 import sqlite3
 
 from .config import Settings
-from .pipeline import AMBIGUOUS_WITH_DOMESTIC, Analysis, Box
+from .pipeline import AMBIGUOUS_WITH_DOMESTIC, SAME_NAME_AS_DOMESTIC, Analysis, Box
 
 
 def wilson_lower(ok: int, n: int, z: float = 1.64) -> float:
@@ -111,7 +111,7 @@ FRAME_MIN_SUPPORT = 0.05
 def auto_blockers(rank: str | None, plausibility: str | None, confidence: float | None, name: str | None,
                   runner_up: float, box_label: str | None, threshold: float | None, max_runner_up: float,
                   group: str | None = None, blocked: set[str] = frozenset(),
-                  frame_support: float | None = None) -> list[dict]:
+                  frame_support: float | None = None, domestic_kept: bool = False) -> list[dict]:
     """Reasons why a detection is not auto-confirmed (empty: it is), as codes
     with their values: the dashboard translates them."""
     if threshold is None:
@@ -125,7 +125,9 @@ def auto_blockers(rank: str | None, plausibility: str | None, confidence: float 
         out.append({"code": "low_confidence", "conf": confidence or 0.0, "thr": threshold})
     if runner_up > max_runner_up:
         out.append({"code": "runner_up", "p": runner_up})
-    if name in AMBIGUOUS_WITH_DOMESTIC:   # a dog taken for a wolf must not be tagged without review
+    # A dog taken for a wolf must not be tagged without review; a domestic duck tagged mallard is right when
+    # domestic animals are kept.
+    if name in AMBIGUOUS_WITH_DOMESTIC and not (domestic_kept and name in SAME_NAME_AS_DOMESTIC):
         out.append({"code": "domestic"})
     if box_label == "image":              # never the "whole image" fallback
         out.append({"code": "whole_image"})
@@ -137,12 +139,12 @@ def auto_blockers(rank: str | None, plausibility: str | None, confidence: float 
 
 
 def should_auto_confirm(a: Analysis, threshold: float | None, max_runner_up: float = 0.05,
-                        blocked: set[str] = frozenset()) -> bool:
+                        blocked: set[str] = frozenset(), domestic_kept: bool = False) -> bool:
     d = a.decision
     runner_up = d.candidates[1].posterior if len(d.candidates) > 1 else 0.0
     group = group_of(d.candidates[0].lineage) if d.candidates else None
     return not auto_blockers(d.rank, d.plausibility, d.confidence, d.name, runner_up, a.box.label, threshold,
-                             max_runner_up, group, blocked, a.frame_support)
+                             max_runner_up, group, blocked, a.frame_support, domestic_kept)
 
 
 def audit_pick(asset_id: str, box: Box, rate: float) -> bool:
