@@ -131,6 +131,7 @@
  "err.unknown_action": "action inconnue",
  "err.unknown_filter": "filtre inconnu",
  "err.bad_location": "lieu invalide : latitude et longitude vont ensemble, dans leurs limites",
+ "err.gpu_full": "Mémoire du GPU pleine : d'autres programmes utilisent la carte. Réessaie plus tard.",
  "err.local_source": "source : {source} (pas Immich)",
  "err.no_original": "original indisponible (permission asset.download)",
  "err.no_picker": "boîte de dialogue disponible seulement dans l'application de bureau",

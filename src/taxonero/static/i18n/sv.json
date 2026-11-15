@@ -131,6 +131,7 @@
  "err.unknown_action": "okänd åtgärd",
  "err.unknown_filter": "okänt filter",
  "err.bad_location": "ogiltig plats: latitud och longitud hör ihop, inom sina gränser",
+ "err.gpu_full": "GPU-minnet är fullt: andra program använder kortet. Försök igen senare.",
  "err.local_source": "källa: {source} (inte Immich)",
  "err.no_original": "original inte tillgängligt (behörigheten asset.download)",
  "err.no_picker": "dialogruta endast tillgänglig i skrivbordsprogrammet",

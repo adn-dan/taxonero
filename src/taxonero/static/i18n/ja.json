@@ -121,6 +121,7 @@
  "err.unknown_action": "不明な操作",
  "err.unknown_filter": "不明なフィルター",
  "err.bad_location": "場所が無効です：緯度と経度は対で、範囲内で指定してください",
+ "err.gpu_full": "GPUメモリがいっぱいです。他のプログラムがカードを使用しています。後でもう一度お試しください。",
  "err.local_source": "ソース：{source}（Immich ではありません）",
  "err.no_original": "オリジナルを取得できません（asset.download 権限）",
  "err.no_picker": "ダイアログはデスクトップアプリでのみ使用できます",

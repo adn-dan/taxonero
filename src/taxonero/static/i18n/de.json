@@ -131,6 +131,7 @@
  "err.unknown_action": "unbekannte Aktion",
  "err.unknown_filter": "unbekannter Filter",
  "err.bad_location": "ungültiger Ort: Breiten- und Längengrad gehören zusammen und müssen in ihren Grenzen liegen",
+ "err.gpu_full": "GPU-Speicher voll: Andere Programme nutzen die Karte. Später erneut versuchen.",
  "err.local_source": "Quelle: {source} (nicht Immich)",
  "err.no_original": "Original nicht verfügbar (Berechtigung asset.download)",
  "err.no_picker": "Dialog nur in der Desktop-Anwendung verfügbar",

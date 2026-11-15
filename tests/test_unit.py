@@ -3679,3 +3679,70 @@ def test_cycle_learns_and_tells_the_sex(tmp_path, monkeypatch):
     # Settings off (the default): the cycle does not go there.
     from taxonero.config import Settings
     assert Settings(data_dir=tmp_path).sex_detection is False and Settings(data_dir=tmp_path).stage_detection is False
+
+
+def test_gpu_full_is_one_readable_line(tmp_path, monkeypatch, caplog):
+    """Models that do not fit in the GPU memory left by other programs: GpuFull, memory given back, and in the
+    cycle one warning line instead of a traceback; the next cycle loads them again."""
+    import torch
+    from taxonero import hardware
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    w = Worker(Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path, device="cpu"))
+    released = []
+    monkeypatch.setattr(hardware, "release", lambda device: released.append(device))
+
+    def no_room(device):
+        raise torch.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB.")
+    monkeypatch.setattr(w, "_load_models", no_room)
+    with pytest.raises(hardware.GpuFull, match="GPU memory full"):
+        w.analyzer
+    assert released == ["cpu"] and w._analyzer is None
+    report = {}
+    with caplog.at_level("WARNING"):
+        w._soft(report, "sex", lambda: w.analyzer)
+    assert "sex" in report["errors"] and "postponed: GPU memory full" in caplog.text and "Traceback" not in caplog.text
+    from types import SimpleNamespace
+    models = SimpleNamespace()
+    monkeypatch.setattr(w, "_load_models", lambda device: models)
+    assert w.analyzer is models                                          # next cycle: loaded
+
+
+def test_compatibility_warnings_logged_once(tmp_path, monkeypatch, caplog):
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    w = Worker(Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path))
+    warnings = ["version 3.4.1 untested (tested: 3.3.5)"]
+
+    def check():
+        w.client.warnings, w.client.errors, w.client.version = list(warnings), [], "3.4.1"
+        return True
+    monkeypatch.setattr(w.client, "check", check)
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            w.check()
+        assert caplog.text.count("untested") == 1
+        warnings[0] = "version 3.5.0 untested (tested: 3.3.5)"            # a new warning: logged
+        w.check()
+    assert "3.5.0 untested" in caplog.text
+
+
+def test_source_down_during_a_cycle_is_one_line(tmp_path, monkeypatch, caplog):
+    """Immich restarting (update) during a cycle: a warning, not a traceback; real bugs keep theirs."""
+    import httpx
+    from taxonero.config import Settings
+    from taxonero.worker import Worker
+    w = Worker(Settings(immich_url="http://x", immich_api_key="k", data_dir=tmp_path))
+    monkeypatch.setattr(w, "install_backbone", lambda: None)            # no GBIF download in a test
+    monkeypatch.setattr(w, "_watch_idle_models", lambda: None)
+    errors = [httpx.RemoteProtocolError("Server disconnected without sending a response."), KeyError("bug")]
+    monkeypatch.setattr(w, "run_once", lambda manual=False: (_ for _ in ()).throw(errors.pop(0)))
+
+    class Stop(Exception):
+        pass
+    monkeypatch.setattr(w._wake, "wait", lambda timeout=None: None if errors else (_ for _ in ()).throw(Stop()))
+    with caplog.at_level("WARNING"), pytest.raises(Stop):
+        w.loop()
+    lines = [r for r in caplog.records if r.name == "taxonero.worker"]
+    assert "retried at the next cycle: RemoteProtocolError" in lines[0].getMessage() and lines[0].exc_info is None
+    assert lines[1].getMessage() == "cycle failed" and lines[1].exc_info               # a bug: traceback kept

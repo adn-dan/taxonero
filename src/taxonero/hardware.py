@@ -143,6 +143,30 @@ def release(device: str) -> None:
         torch.mps.empty_cache()
 
 
+class GpuFull(RuntimeError):
+    """The models do not fit in the free GPU memory, often taken by other programs on the same card (Immich
+    machine learning, a video transcoder): they are loaded again at the next cycle."""
+
+
+def out_of_memory(e: BaseException) -> bool:
+    """GPU allocation failure (PyTorch, or ONNX Runtime which only says it in its message)."""
+    oom = getattr(_torch(), "OutOfMemoryError", None)
+    return (oom is not None and isinstance(e, oom)) or "out of memory" in str(e).lower()
+
+
+def gpu_full(device: str) -> GpuFull:
+    """Readable error with the memory left on the card, rather than a traceback at every cycle."""
+    free = ""
+    try:
+        torch = _torch()
+        if device == "cuda" and torch.cuda.is_available():
+            left, total = torch.cuda.mem_get_info()
+            free = f" ({left / 2**30:.1f} of {total / 2**30:.1f} GB free)"
+    except Exception:
+        pass
+    return GpuFull(f"GPU memory full{free}: other programs use the card; models loaded again at the next cycle")
+
+
 # OWLv2 in auto mode: on every photo with a GPU; on the CPU, only when MegaDetector finds
 # no animal (3 times faster for 1 photo fewer out of 73 in the benchmark: README, Compute hardware).
 AUTO_OPEN_MODE = {"gpu": "always", "cpu": "fallback"}

@@ -151,6 +151,7 @@
  "err.unknown_action": "nieznana akcja",
  "err.unknown_filter": "nieznany filtr",
  "err.bad_location": "nieprawidłowe miejsce: szerokość i długość geograficzna idą razem, w swoich granicach",
+ "err.gpu_full": "Pamięć GPU pełna: inne programy korzystają z karty. Spróbuj później.",
  "err.local_source": "źródło: {source} (nie Immich)",
  "err.no_original": "oryginał niedostępny (uprawnienie asset.download)",
  "err.no_picker": "okno dialogowe dostępne tylko w aplikacji desktopowej",

@@ -131,6 +131,7 @@
  "err.unknown_action": "unknown action",
  "err.unknown_filter": "unknown filter",
  "err.bad_location": "invalid place: latitude and longitude go together, within their limits",
+ "err.gpu_full": "GPU memory full: other programs are using the card. Try again later.",
  "err.local_source": "source: {source} (not Immich)",
  "err.no_original": "original unavailable (asset.download permission)",
  "err.no_picker": "dialog available only in the desktop application",

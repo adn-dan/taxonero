@@ -141,6 +141,7 @@
  "err.unknown_action": "azione sconosciuta",
  "err.unknown_filter": "filtro sconosciuto",
  "err.bad_location": "luogo non valido: latitudine e longitudine vanno insieme, entro i loro limiti",
+ "err.gpu_full": "Memoria della GPU piena: altri programmi usano la scheda. Riprova più tardi.",
  "err.local_source": "sorgente: {source} (non Immich)",
  "err.no_original": "originale non disponibile (permesso asset.download)",
  "err.no_picker": "finestra di dialogo disponibile solo nell'applicazione desktop",

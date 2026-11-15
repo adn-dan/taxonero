@@ -141,6 +141,7 @@
  "err.unknown_action": "ação desconhecida",
  "err.unknown_filter": "filtro desconhecido",
  "err.bad_location": "local inválido: latitude e longitude andam juntas, dentro dos seus limites",
+ "err.gpu_full": "Memória da GPU cheia: outros programas estão a usar a placa. Tenta mais tarde.",
  "err.local_source": "origem: {source} (não Immich)",
  "err.no_original": "original indisponível (permissão asset.download)",
  "err.no_picker": "caixa de diálogo disponível apenas na aplicação de ambiente de trabalho",

@@ -141,6 +141,7 @@
  "err.unknown_action": "acció desconeguda",
  "err.unknown_filter": "filtre desconegut",
  "err.bad_location": "lloc no vàlid: latitud i longitud van juntes, dins dels seus límits",
+ "err.gpu_full": "Memòria de la GPU plena: altres programes fan servir la targeta. Torna-ho a provar més tard.",
  "err.local_source": "font: {source} (no Immich)",
  "err.no_original": "original no disponible (permís asset.download)",
  "err.no_picker": "quadre de diàleg disponible només a l'aplicació d'escriptori",

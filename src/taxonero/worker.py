@@ -236,6 +236,7 @@ class Worker:
         self.s = s
         self.db = store.connect(s.db_path)
         self.undo: dict = {"state": "idle"}   # removal from Immich (start_uninstall)
+        self._compat_logged: list[str] | None = None   # compatibility warnings already in the log (check)
         # Names written following the interface language: chosen once, at the first start of this version. Only a
         # new install without NAMES_LANG follows it; elsewhere, tags already written must not be renamed.
         if store.get_state(self.db, "names_follow_ui") is None:
@@ -407,26 +408,39 @@ class Worker:
                 log.info("compute: %s (%s), OWLv2 %s", hardware.WHY[why], device, ov_mode)
                 hardware.full_precision()
                 self._device = device
-                det = None
-                if self.s.detector_path.exists():   # ONNX (older Docker images, or provided): kept as is
-                    det = Detector(self.s.detector_path, providers=hardware.onnx_session_providers(device),
-                                   min_score=self.s.detector_min_score)
-                    det.providers = det.session.get_providers()
-                else:   # PyTorch, official weights downloaded at first use (megadetector.py)
-                    from .megadetector import TorchDetector, weights
-                    det = TorchDetector(weights(self.s.data_dir / "models", self.s.user_agent), device,
-                                        min_score=self.s.detector_min_score)
-                log.info("detector: %s", ", ".join(det.providers))
-                ov = None
-                if self.s.open_detector:
-                    ov = OpenVocabDetector(self.s.open_detector_model, device=device,
-                                           min_score=self.s.open_detector_min_score)
-                analyzer = Analyzer(det, Classifier(device=device), self.tx, open_detector=ov)
-                analyzer.drop = candidate_filter(self.s, self.tx)
-                self._analyzer = analyzer
+                full = False
+                try:
+                    self._analyzer = self._load_models(device)
+                except Exception as e:
+                    if not hardware.out_of_memory(e):
+                        raise
+                    full = True
+                if full:   # out of the except block: the half-loaded models are no longer referenced, their memory is freed
+                    hardware.release(device)
+                    raise hardware.gpu_full(device)
             self._analyzer.open_mode = ov_mode   # no reload
             self._models_used = time.monotonic()
             return self._analyzer
+
+    def _load_models(self, device: str) -> Analyzer:
+        """MegaDetector, OWLv2 and BioCLIP on device."""
+        det = None
+        if self.s.detector_path.exists():   # ONNX (older Docker images, or provided): kept as is
+            det = Detector(self.s.detector_path, providers=hardware.onnx_session_providers(device),
+                           min_score=self.s.detector_min_score)
+            det.providers = det.session.get_providers()
+        else:   # PyTorch, official weights downloaded at first use (megadetector.py)
+            from .megadetector import TorchDetector, weights
+            det = TorchDetector(weights(self.s.data_dir / "models", self.s.user_agent), device,
+                                min_score=self.s.detector_min_score)
+        log.info("detector: %s", ", ".join(det.providers))
+        ov = None
+        if self.s.open_detector:
+            ov = OpenVocabDetector(self.s.open_detector_model, device=device,
+                                   min_score=self.s.open_detector_min_score)
+        analyzer = Analyzer(det, Classifier(device=device), self.tx, open_detector=ov)
+        analyzer.drop = candidate_filter(self.s, self.tx)
+        return analyzer
 
     def unload_idle(self) -> bool:
         """Models unused for models_idle_minutes: removed from GPU memory, reloaded on the next request.
@@ -734,8 +748,11 @@ class Worker:
             store.set_state(self.db, "writable", "0")
             return False
         ok = self.client.check()
-        for w in self.client.warnings:
-            log.warning("compatibility: %s", w)
+        # Same warnings as at the previous check: not repeated every cycle (the dashboard keeps showing them).
+        if self.client.warnings != self._compat_logged:
+            for w in self.client.warnings:
+                log.warning("compatibility: %s", w)
+            self._compat_logged = list(self.client.warnings)
         for e in self.client.errors:
             log.error("incompatibility: %s", e)
         store.set_state(self.db, "immich_version", self.client.version or "")
@@ -1812,7 +1829,10 @@ class Worker:
             report[key] = step()
         except Exception as e:
             self.db.rollback()
-            log.exception("cycle stage %s failed", key)
+            if isinstance(e, hardware.GpuFull) or is_transient(e):   # expected, retried: one line, no traceback
+                log.warning("cycle stage %s postponed: %s", key, e)
+            else:
+                log.exception("cycle stage %s failed", key)
             report.setdefault("errors", {})[key] = str(e)
 
     def _wait_models(self) -> None:
@@ -1902,7 +1922,12 @@ class Worker:
                 more = bool(report.get("more")) or report.get("configured") is False or retry
                 if report.get("configured") is not False and not report.get("busy"):
                     log.info("cycle: %s", report)
-            except Exception:
-                log.exception("cycle failed")
+            except hardware.GpuFull as e:
+                log.warning("analysis postponed: %s", e)
+            except Exception as e:
+                if is_transient(e):   # source or network down for a moment: one line, the next cycle resumes
+                    log.warning("cycle interrupted, retried at the next cycle: %s: %s", type(e).__name__, e)
+                else:
+                    log.exception("cycle failed")
             # Wait interrupted by _idle: cycle stopped for a setting, restarted right away.
             self._wake.wait(5 if more else self.s.interval_minutes * 60)

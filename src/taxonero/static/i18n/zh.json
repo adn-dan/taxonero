@@ -121,6 +121,7 @@
  "err.unknown_action": "未知操作",
  "err.unknown_filter": "未知筛选条件",
  "err.bad_location": "地点无效：纬度和经度须同时给出且在范围内",
+ "err.gpu_full": "GPU 显存已满：其他程序正在使用显卡。请稍后再试。",
  "err.local_source": "来源：{source}（不是 Immich）",
  "err.no_original": "原图不可用（asset.download 权限）",
  "err.no_picker": "对话框仅在桌面应用中可用",

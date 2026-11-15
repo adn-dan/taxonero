@@ -131,6 +131,7 @@
  "err.unknown_action": "onbekende actie",
  "err.unknown_filter": "onbekend filter",
  "err.bad_location": "ongeldige plaats: breedte- en lengtegraad horen bij elkaar, binnen hun grenzen",
+ "err.gpu_full": "GPU-geheugen vol: andere programma's gebruiken de kaart. Probeer het later opnieuw.",
  "err.local_source": "bron: {source} (niet Immich)",
  "err.no_original": "origineel niet beschikbaar (recht asset.download)",
  "err.no_picker": "dialoogvenster alleen beschikbaar in de desktopapplicatie",

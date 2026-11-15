@@ -500,3 +500,14 @@ def test_videos_not_analysed_are_not_counted_as_missing(client, dev_app):
     assert c.get("/api/status").json()["missing"] == 1
     s.analyze_videos = False
     assert c.get("/api/status").json()["missing"] == 0
+
+
+def test_identify_with_gpu_full_is_503(client, monkeypatch):
+    """GPU memory taken by other programs: a translated message in the viewer, not an error 500."""
+    from taxonero import hardware
+    from taxonero.worker import Worker
+    c, db = client
+    monkeypatch.setattr(Worker, "analyzer", property(lambda self: (_ for _ in ()).throw(hardware.gpu_full("cpu"))))
+    aid = db.execute("SELECT asset_id FROM asset WHERE kind IS NOT 'VIDEO' LIMIT 1").fetchone()[0]
+    r = c.post(f"/api/assets/{aid}/boxes", json={"x": .1, "y": .1, "w": .3, "h": .3})
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "gpu_full"

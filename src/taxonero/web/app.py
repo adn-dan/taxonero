@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.security import HTTPBasicCredentials
 from pydantic import BaseModel
 
-from .. import __version__, logbuffer, store
+from .. import __version__, hardware, logbuffer, store
 from ..autoconfirm import auto_threshold, calibrate, group_reliability
 from ..config import Settings
 from ..sources import source_path
@@ -54,6 +54,12 @@ def create_app(s: Settings, worker: Worker | None = None, token: str | None = No
     desktop = s.edition == "desktop"
     token = token or (secrets.token_urlsafe(32) if desktop else None)
     app.state.token = token
+
+    @app.exception_handler(hardware.GpuFull)
+    async def gpu_full(request: Request, e: hardware.GpuFull):
+        """Models that do not fit in the free GPU memory (identification in the viewer, Identify page): a readable
+        message rather than an error 500."""
+        return JSONResponse({"detail": {"code": "gpu_full", "message": str(e)}}, status_code=503)
 
     @app.middleware("http")
     async def desktop_session(request: Request, call_next):
