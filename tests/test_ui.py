@@ -837,6 +837,17 @@ def test_taxon_picker_available_without_candidates(page):
     page.click("#taxpick .actions .btn")
 
 
+def test_taxon_picker_below_the_candidates(page):
+    """None of the candidates fits: the search is offered right under them, as well as by the button."""
+    _photo_viewer(page)
+    page.wait_for_selector("#vinfo .cand")
+    page.locator("#b-taxon2").scroll_into_view_if_needed()
+    page.click("#b-taxon2")
+    assert page.is_visible("#taxpick #tp-q")
+    page.click("#taxpick .actions .btn")
+    assert not page.errors, page.errors
+
+
 # -- navigation ------------------------------------------------------------------
 
 def _back_label(page):

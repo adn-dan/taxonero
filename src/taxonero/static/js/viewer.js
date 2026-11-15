@@ -167,7 +167,7 @@ function drawInfo() {
   $('#v-del').hidden = !d;
   if (!d) {
     $('#vi-body').innerHTML = `<section>${metaLine(a)}<div class="empty" style="padding:32px 0">${tr('det.none')}<br>${tr('det.none_hint')}</div>${locLine(a)}
-      <div class="actions"><button class="btn" id="b-taxon">${ic('paw')} ${tr('bulk.taxon')}</button></div></section>`;
+      <div class="actions"><button class="btn" id="b-taxon">${ic('paw')} ${tr('det.other_species')}</button></div></section>`;
     $('#b-loc') && ($('#b-loc').onclick = editLocation);
     $('#b-taxon').onclick = chooseTaxon;
     return;
@@ -192,7 +192,7 @@ function drawInfo() {
   const acts = { pending: ['ok', 'no'], confirmed: ['no', 'reset'], rejected: ['ok', 'reset'] }[d.status] || ['ok', 'no'];
   const label = { ok: `${ic('check')} ${tr('action.confirm')}`, no: tr('action.reject'), reset: tr('action.reset') };
   h += `<section><div class="actions">${acts.map(k => `<button class="btn${k === 'ok' ? ' primary' : ''}" id="b-${k}">${label[k]}</button>`).join('')}
-    <button class="btn" id="b-taxon">${ic('paw')} ${tr('bulk.taxon')}</button></div>
+    <button class="btn" id="b-taxon">${ic('paw')} ${tr('det.other_species')}</button></div>
     ${d.why_pending?.length && !d.audit ? `<div class="why">${tr('why.title', { reasons: d.why_pending.map(whyText).join(' · ') })}</div>` : ''}
     <div id="series"></div>
     <div class="sub" style="font-size:12px;margin-top:8px">${tr('det.edit_hint')}</div></section>`;
@@ -203,7 +203,8 @@ function drawInfo() {
     h += `<section><div class="sectit">${tr('cand.title')} <span style="text-transform:none;letter-spacing:0">· ${tr('cand.hint')}</span></div>
       ${d.candidates.slice(0, shownC).map((c, k) => `<div class="cand${c.gbif_key === d.taxon_key ? ' top' : ''}" data-k="${k}" role="button" tabindex="0" title="${esc(tr('cmp.hint'))}">
       <span class="k">${k + 1}</span><span><span class="cn" data-ck="${c.gbif_key || ''}">${candName(c)}</span><small>${c.lineage?.family ? `<a href="#family/${encodeURIComponent(c.lineage.family)}">${esc(c.lineage.family)}</a>` : ''} · <span class="dot ${c.plausibility}"></span>${tr(`plaus.${c.plausibility || 'unknown'}`)}</small>
-      <div class="bar"><i style="width:${Math.round(c.p / maxp * 100)}%"></i></div></span><span class="p${c.p < 0.005 ? ' low' : ''}">${fmtProb(c.p)}</span></div>`).join('')}</section>`;
+      <div class="bar"><i style="width:${Math.round(c.p / maxp * 100)}%"></i></div></span><span class="p${c.p < 0.005 ? ' low' : ''}">${fmtProb(c.p)}</span></div>`).join('')}
+      <div class="candmore">${tr('cand.none')}<button class="linkbtn" id="b-taxon2">${tr('cand.search_link')}</button></div></section>`;
   }
   $('#vi-body').innerHTML = h;
   $('#vi-mapcap').innerHTML = tr('map.caption', { pin: '<span style="color:#dc2626">●</span>', gps: a.lat == null ? ` (${tr('plaus.unknown')})` : '' });
@@ -229,6 +230,7 @@ function drawInfo() {
   $('#b-no') && ($('#b-no').onclick = () => act('reject'));
   $('#b-reset') && ($('#b-reset').onclick = () => act('reset'));
   $('#b-taxon').onclick = chooseTaxon;
+  $('#b-taxon2') && ($('#b-taxon2').onclick = chooseTaxon);   // below the candidates: where one looks when none fits
   $('#b-loc') && ($('#b-loc').onclick = editLocation);
 }
 /* Common names of the candidates (local cache; the server fetches the missing ones in the background). */

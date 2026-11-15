@@ -227,6 +227,31 @@ def test_reference_photos_follow_inaturalist_synonym():
     assert refphotos.inat_taxon(Tx([syn]), ["Ardea modesta"])["id"] == 1
     assert refphotos.inat_taxon(Tx([syn, exact]), ["Ardea modesta"])["id"] == 2
     assert refphotos.inat_taxon(Tx([{"id": 3, "name": "Autre", "matched_term": "Autre"}]), ["Ardea modesta"]) is None
+    # What iNaturalist really answers for Ardea modesta: the subspecies, not given as a synonym.
+    sub = {"id": 203084, "name": "Ardea alba modesta", "matched_term": "Ardea alba modesta"}
+    assert refphotos.inat_taxon(Tx([sub]), ["Ardea modesta"])["id"] == 203084
+    assert refphotos.inat_taxon(Tx([{"id": 4, "name": "Ardea alba egretta", "matched_term": "x"}]), ["Ardea modesta"]) is None
+
+
+def test_reference_photos_of_a_species_split_by_inaturalist():
+    """Milvus aegyptius: a species for GBIF, two subspecies of Milvus migrans for iNaturalist, which also keeps the name
+    as a synonym of the whole Milvus migrans. The photos come from the two subspecies (the most observed first), not
+    from the black kite."""
+    from taxonero import refphotos
+    search = [{"id": 5268, "name": "Milvus migrans", "matched_term": "Milvus aegyptius", "observations_count": 90000},
+              {"id": 372390, "name": "Milvus migrans parasitus", "matched_term": "Milvus aegyptius parasitus", "observations_count": 5763},
+              {"id": 120914, "name": "Milvus migrans aegyptius", "matched_term": "Milvus aegyptius aegyptius", "observations_count": 92}]
+
+    def photo(i):
+        return {"photo": {"id": i, "medium_url": f"https://x/{i}/medium.jpg", "attribution": "(c) A", "license_code": "cc-by"}}
+    pages = {372390: [photo(1), photo(2), photo(3)], 120914: [photo(10)], 5268: [photo(99)]}
+
+    class Tx:
+        def get(self, url, params=None):
+            return {"results": search} if url.endswith("/taxa") else {"results": [{"taxon_photos": pages[int(url.rsplit("/", 1)[1])]}]}
+    assert [t["id"] for t in refphotos.inat_taxa(Tx(), ["Milvus aegyptius"])] == [372390, 120914]
+    r = refphotos.photos(Tx(), ["Milvus aegyptius"])
+    assert r["taxon"]["id"] == 372390 and [p["url"].rsplit("/", 1)[1] for p in r["photos"]] == ["1", "10", "2", "3"]
 
 
 def test_series_groups_close_shots(client):
