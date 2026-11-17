@@ -604,6 +604,18 @@ def test_ui_catalogs_match_french():
             assert sig(v) == sig(ref), (f.stem, k, v)
 
 
+def test_species_name_of_malformed_model_labels():
+    from taxonero.taxonomy import species_name, unglue
+    assert species_name("Turdus", "iliacus") == "Turdus iliacus"
+    # Current name stored under an older genus, author after the epithet: GBIF matches neither glued.
+    assert species_name("Syrichtus", "Muschampia proto") == "Muschampia proto"
+    assert species_name("Elachista", "cana Braun, 1920") == "Elachista cana"
+    # Candidates saved before the fix can still be confirmed; a subspecies is left alone.
+    assert unglue("Syrichtus Muschampia proto") == "Muschampia proto"
+    assert unglue("Muschampia proto proto") == "Muschampia proto proto"
+    assert unglue("Turdus iliacus") == "Turdus iliacus"
+
+
 def test_tidy_name_fixes_all_caps():
     from taxonero.taxonomy import tidy_name
     assert tidy_name("DOGS") == "Dogs"                     # GBIF, famille Canidae

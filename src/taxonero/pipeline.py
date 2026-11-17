@@ -16,7 +16,7 @@ import numpy as np
 import httpx
 from PIL import Image, ImageOps
 
-from .taxonomy import RANKS, Taxonomy
+from .taxonomy import RANKS, Taxonomy, species_name
 
 log = logging.getLogger(__name__)
 
@@ -382,8 +382,10 @@ class Classifier:
         for p in preds:
             idx = int(p["file_name"])  # pybioclip indexes PIL images by position
             lineage = {r: p[r] for r in RANKS[:-1] if p.get(r)}
-            name = f"{p['genus']} {p['species_epithet']}"
+            name = species_name(p["genus"], p["species_epithet"])
             lineage["species"] = name
+            if " " in name:   # genus of the name actually kept (species_name)
+                lineage["genus"] = name.split()[0]
             out[idx].append(Candidate(name=name, score=float(p["score"]), lineage=lineage))
         for c in out:
             c.sort(key=lambda x: -x.score)

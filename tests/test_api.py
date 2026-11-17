@@ -102,6 +102,17 @@ def test_reframe_keeps_user_choice(client):
     assert (d["status"], d["confirmed_by"], d["taxon_key"]) == ("confirmed", "user", det["taxon_key"])
 
 
+def test_confirm_glued_model_name(client):
+    """Candidate saved before 0.5.5 from a malformed model label (old genus + current binomial): still confirmable."""
+    c, db = client
+    det, data = db.execute("SELECT d.id, t.data FROM detection d JOIN taxon t ON t.gbif_key = d.taxon_key "
+                           "WHERE t.data LIKE '%\"rank\": \"species\"%' LIMIT 1").fetchone()
+    t = json.loads(data)
+    r = c.post(f"/api/detections/{det}/confirm", json={"name": f"Oldgenus {t['scientific_name']}"})
+    assert r.status_code == 200, r.text
+    assert db.execute("SELECT taxon_key FROM detection WHERE id = ?", (det,)).fetchone()[0] == t["gbif_key"]
+
+
 def test_cross_site_writes_are_refused(client):
     c, db = client
     det = db.execute("SELECT id FROM detection WHERE status = 'pending' LIMIT 1").fetchone()

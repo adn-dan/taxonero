@@ -18,7 +18,7 @@ from .. import store, traits
 from ..autoconfirm import auto_blockers, auto_threshold, blocked_groups, group_of
 from ..config import Settings
 from ..curation import candidate_filter
-from ..taxonomy import TAXON_VERSION, Taxonomy, to_json
+from ..taxonomy import TAXON_VERSION, Taxonomy, to_json, unglue
 from ..worker import Worker
 
 log = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ def make_context(s: Settings, w: Worker, desktop: bool) -> SimpleNamespace:
         if key and taxon(key):
             return key
         try:
-            t = tx.match(name, kingdom=kingdom) if name else None
+            t = tx.match(unglue(name), kingdom=kingdom) if name else None
             if t is None and key:
                 sp = tx.get(f"https://api.gbif.org/v1/species/{key}")
                 t = tx.match(sp.get("canonicalName") or sp["scientificName"])

@@ -623,6 +623,23 @@ class Taxonomy:
         return badge, tier * (near + 0.05 * region + 0.5) ** 0.1
 
 
+def species_name(genus: str, epithet: str) -> str:
+    """Binomial of a BioCLIP label. The label list sometimes stores the full current name in the epithet, under an
+    older genus (genus "Syrichtus", epithet "Muschampia proto"), or the epithet followed by its author ("cana Braun,
+    1920"): glued as is, GBIF finds neither."""
+    words = epithet.split()
+    if len(words) >= 2 and words[0][:1].isupper():
+        return f"{words[0]} {words[1]}"
+    return f"{genus} {words[0]}" if words else genus
+
+
+def unglue(name: str) -> str:
+    """Name glued from such a label by a version before 0.5.5 ("Syrichtus Muschampia proto"): the binomial after the
+    old genus. Other names unchanged (a lowercase third word is a subspecies)."""
+    words = name.split()
+    return f"{words[1]} {words[2]}" if len(words) >= 3 and words[1][:1].isupper() else name
+
+
 def tidy_name(value: str) -> str:
     """Clean common name: initial capital; a name in all capitals (GBIF gives "DOGS" for Canidae)
     goes back to sentence case. Short acronyms (≤ 3 letters) are left as is."""
