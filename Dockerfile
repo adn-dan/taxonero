@@ -73,6 +73,6 @@ ENV HOME=/data
 USER nature
 VOLUME /data
 EXPOSE 8765
-HEALTHCHECK --interval=60s --timeout=5s CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8765/healthz'); sys.exit(0)" || exit 1
+HEALTHCHECK --interval=60s --timeout=10s CMD python -m taxonero.healthcheck
 ENTRYPOINT ["taxonero"]
 CMD ["serve"]
